@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { decode } from 'blurhash';
 
-  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, onclick?: (e: MouseEvent) => void } = $props();
+  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, onclick?: (e: MouseEvent) => void } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
@@ -14,6 +14,7 @@
   const targetHeight = 250;
   
   let objectPosition = $state('center');
+  let transformScale = $state(1);
 
   
   function handleLoad(e: Event) {
@@ -26,6 +27,15 @@
         const px = Math.max(0, Math.min(100, (cx / img.naturalWidth) * 100));
         const py = Math.max(0, Math.min(100, (cy / img.naturalHeight) * 100));
         objectPosition = `${px}% ${py}%`;
+
+        // Calculate dynamic zoom to make the face fill ~40% of the container (reduced by 50%)
+        const faceWidth = faceBox.x2 - faceBox.x1;
+        const faceHeight = faceBox.y2 - faceBox.y1;
+        const maxFaceDim = Math.max(faceWidth, faceHeight, 1);
+        const minImgDim = Math.min(img.naturalWidth, img.naturalHeight);
+        
+        // Clamp scale between 1 and 15 to avoid extreme zooming artifacts on tiny faces
+        transformScale = Math.max(1, Math.min(15, (minImgDim / maxFaceDim) * 0.4));
       }
     }
     imgLoaded = true;
@@ -65,11 +75,11 @@
   });
 </script>
 
-<div class="grid-item" style="flex-grow: {aspectRatio}; flex-basis: {targetHeight * aspectRatio}px;" {onclick}>
+<div class="grid-item" style="{square ? 'aspect-ratio: 1; flex-grow: 1; flex-basis: auto;' : `flex-grow: ${aspectRatio}; flex-basis: ${targetHeight * aspectRatio}px;`}" {onclick}>
   <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'};">
     <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
     {#if visible}
-      <img {src} {alt} loading="lazy" onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? 'transform: scale(3.5);' : ''}" />
+      <img {src} {alt} loading="lazy" onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? `transform: scale(${transformScale});` : ''}" />
     {/if}
   </div>
   {#if isVideo}

@@ -7,6 +7,22 @@ const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'video/mp4', 'video/quicktime']);
 
 export class ScannerService {
+  static async scanAllDirectories(basePath = '') {
+    const fullPath = path.join(MEDIA_ROOT, basePath);
+    try {
+      const files = await fs.promises.readdir(fullPath, { withFileTypes: true });
+      await this.scanDirectory(basePath);
+      
+      for (const file of files) {
+        if (file.isDirectory() && !file.name.startsWith('.')) {
+          await this.scanAllDirectories(path.join(basePath, file.name));
+        }
+      }
+    } catch (err: any) {
+      console.error(`Error scanning all directories at ${fullPath}:`, err.message);
+    }
+  }
+
   static async scanDirectory(folderPath: string) {
     const fullPath = path.join(MEDIA_ROOT, folderPath);
     console.log(`Scanning: ${fullPath}`);

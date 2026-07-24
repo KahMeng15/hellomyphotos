@@ -44,6 +44,18 @@
       generatedToken = data.shareToken;
     }
   }
+
+  async function triggerRescan() {
+    await fetch(`${API_BASE}/api/admin/rescan`, { method: 'POST' });
+    alert('Background file rescan initiated!');
+  }
+
+  async function triggerRescanFaces() {
+    if (confirm('Are you sure you want to completely wipe and re-calculate all facial recognition data? This will take a while.')) {
+      await fetch(`${API_BASE}/api/admin/rescan-faces`, { method: 'POST' });
+      alert('Background face re-detection initiated!');
+    }
+  }
 </script>
 
 <div class="admin-container">
@@ -65,13 +77,32 @@
   </div>
 
   <div class="card">
+    <h3>System Operations</h3>
+    <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div>
+        <p style="font-size: 0.875rem; color: #cbd5e1; margin-bottom: 8px;">Manually trigger a full background scan of the media directory to find new or deleted files.</p>
+        <button class="btn" style="background: var(--glass-bg); border: 1px solid var(--glass-border); width: 100%;" on:click={triggerRescan}>
+          Force Rescan Files
+        </button>
+      </div>
+
+      <div>
+        <p style="font-size: 0.875rem; color: #cbd5e1; margin-bottom: 8px;">Wipe out all existing face clusters and re-run ML detection on every single image.</p>
+        <button class="btn" style="background: var(--danger-color, #ef4444); width: 100%;" on:click={triggerRescanFaces}>
+          Force Rescan Faces (Reset)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
     <h3>Generate Public Share</h3>
     <label>
       Folder Path
       <input type="text" bind:value={sharePath} placeholder="e.g. holidays/2023" />
     </label>
     <label style="flex-direction: row; align-items: center; gap: 8px;">
-      <input type="checkbox" bind:value={watermarkEnabled} />
+      <input type="checkbox" bind:checked={watermarkEnabled} />
       Enable Dynamic Watermarking
     </label>
     <button class="btn" style="background: var(--accent-hover);" on:click={generateShare}>

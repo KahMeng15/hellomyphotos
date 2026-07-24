@@ -20,6 +20,7 @@
         alt="Person {face.person_id}"
         objectFit="cover"
         faceBox={face.bounding_box}
+        square={true}
       />
     </a>
   {/each}

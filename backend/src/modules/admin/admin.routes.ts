@@ -1,5 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { redis } from '../../config/redis';
+import { ScannerService } from '../scanner/scanner.service';
+import { mlQueue } from '../../queue/mlQueue';
+import { query } from '../../config/db';
 
 export async function adminRoutes(fastify: FastifyInstance) {
   fastify.get('/api/admin/settings', async (request, reply) => {
@@ -19,5 +22,24 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (scanInterval) await redis.set('settings:scan_interval', String(scanInterval));
     
     return reply.send({ success: true });
+  });
+
+  fastify.post('/api/admin/rescan', async (request, reply) => {
+    // Run it asynchronously in the background so we don't block the HTTP request
+    ScannerService.scanAllDirectories('').catch(console.error);
+    return reply.send({ success: true, message: 'Rescan initiated in the background' });
+  });
+
+  fastify.post('/api/admin/rescan-faces', async (request, reply) => {
+    // 1. Wipe out existing face embeddings
+    await query(`TRUNCATE TABLE face_embeddings`);
+
+    // 2. Queue every media file for face detection again
+    const result = await query(`SELECT id FROM media_files WHERE mime_type LIKE 'image/%'`);
+    for (const row of result.rows) {
+      await mlQueue.add('detect-faces', { mediaId: row.id });
+    }
+    
+    return reply.send({ success: true, message: 'Face reset initiated in the background' });
   });
 }
