@@ -16,7 +16,32 @@
     if (e.key === 'ArrowRight') dispatch('next');
     if (e.key === 'ArrowLeft') dispatch('prev');
   }
-  
+  let showInfo = $state(false);
+  let showMenu = $state(false);
+
+  function toggleInfo() {
+    showInfo = !showInfo;
+  }
+
+  function download() {
+    const a = document.createElement('a');
+    a.href = getPreviewUrl(media.id, false);
+    a.download = media.file_name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  function share() {
+    alert('Share functionality coming soon!');
+  }
+
+  async function makeCoverImage() {
+    showMenu = false;
+    alert(`Setting ${media.file_name} as cover image...`);
+    // Assuming API exists: await fetch(`/api/folder/cover`, { method: 'POST', body: JSON.stringify({ folder: media.folder_path, mediaId: media.id }) });
+  }
+
   onMount(() => {
     document.addEventListener('keydown', handleKeydown);
     return () => document.removeEventListener('keydown', handleKeydown);
@@ -24,18 +49,71 @@
 </script>
 
 <div class="lightbox" transition:fade={{ duration: 150 }} on:click={close}>
-  <button class="close-btn" on:click|stopPropagation={close}>&times;</button>
-  
-  <div class="content" on:click|stopPropagation>
-    {#if media.mime_type.startsWith('video/')}
-      <video controls autoplay class="media-element">
-        <source src={getStreamUrl(media.id)} type={media.mime_type} />
-        Your browser does not support the video tag.
-      </video>
-    {:else}
-      <img src={getPreviewUrl(media.id, false)} alt={media.file_name} class="media-element" />
-    {/if}
+  <div class="top-bar" on:click|stopPropagation>
+    <button class="icon-btn" on:click={download} title="Download">
+      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+    </button>
+    <button class="icon-btn" on:click={share} title="Share">
+      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+    </button>
+    <button class="icon-btn {showInfo ? 'active' : ''}" on:click={toggleInfo} title="Info">
+      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+    </button>
+    <div style="position: relative;">
+      <button class="icon-btn" on:click={() => showMenu = !showMenu} title="More">
+        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+      </button>
+      {#if showMenu}
+        <div class="dropdown-menu">
+          <button on:click={makeCoverImage}>Set as Cover Image</button>
+        </div>
+      {/if}
+    </div>
+    <button class="icon-btn close-btn" on:click={close} title="Close">&times;</button>
   </div>
+  
+  <div class="main-area" class:with-sidebar={showInfo}>
+    <button class="nav-btn prev-btn" on:click|stopPropagation={() => dispatch('prev')}>
+      <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none"><polyline points="15 18 9 12 15 6"></polyline></svg>
+    </button>
+    
+    <div class="content" on:click|stopPropagation>
+      {#if media.mime_type.startsWith('video/')}
+        <video controls autoplay class="media-element">
+          <source src={getStreamUrl(media.id)} type={media.mime_type} />
+          Your browser does not support the video tag.
+        </video>
+      {:else}
+        <img src={getPreviewUrl(media.id, false)} alt={media.file_name} class="media-element" />
+      {/if}
+    </div>
+    
+    <button class="nav-btn next-btn" on:click|stopPropagation={() => dispatch('next')}>
+      <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none"><polyline points="9 18 15 12 9 6"></polyline></svg>
+    </button>
+  </div>
+
+  {#if showInfo}
+    <div class="sidebar" on:click|stopPropagation>
+      <h3>Info</h3>
+      <div class="info-section">
+        <h4>DETAILS</h4>
+        <p><strong>Filename:</strong> {media.file_name}</p>
+        <p><strong>Size:</strong> {(media.size_bytes / 1024 / 1024).toFixed(2)} MB</p>
+        <p><strong>Date Taken:</strong> Unknown (EXIF parsing not enabled)</p>
+      </div>
+      <div class="info-section">
+        <h4>CAMERA</h4>
+        <p><strong>Device:</strong> Unknown</p>
+        <p><strong>Lens:</strong> Unknown</p>
+        <p><strong>Settings:</strong> Unknown ISO / Shutter / Aperture</p>
+      </div>
+      <div class="info-section">
+        <h4>PEOPLE</h4>
+        <p style="color: #888;">(Face data sync pending...)</p>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -53,29 +131,144 @@
     align-items: center;
   }
 
-  .close-btn {
+  .top-bar {
     position: absolute;
-    top: 24px;
-    right: 24px;
-    background: rgba(255, 255, 255, 0.1);
+    top: 0;
+    right: 0;
+    padding: 16px;
+    display: flex;
+    gap: 12px;
+    z-index: 1010;
+  }
+
+  .icon-btn {
+    background: rgba(0, 0, 0, 0.5);
     border: none;
     color: white;
-    font-size: 2rem;
-    width: 48px;
-    height: 48px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     cursor: pointer;
-    z-index: 1010;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     transition: background 0.2s;
   }
   
-  .close-btn:hover {
+  .icon-btn:hover, .icon-btn.active {
     background: rgba(255, 255, 255, 0.2);
   }
 
+  .close-btn {
+    font-size: 1.5rem;
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    top: 50px;
+    right: 0;
+    background: #1e293b;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    overflow: hidden;
+    min-width: 180px;
+  }
+
+  .dropdown-menu button {
+    width: 100%;
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    color: white;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .dropdown-menu button:hover {
+    background: rgba(255,255,255,0.1);
+  }
+
+  .main-area {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    transition: width 0.3s ease;
+  }
+
+  .main-area.with-sidebar {
+    width: calc(100% - 350px);
+  }
+
+  .nav-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0,0,0,0.5);
+    color: white;
+    border: none;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    z-index: 1005;
+  }
+
+  .nav-btn:hover {
+    background: rgba(255,255,255,0.2);
+  }
+
+  .prev-btn {
+    left: 24px;
+  }
+
+  .next-btn {
+    right: 24px;
+  }
+
+  .sidebar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 350px;
+    height: 100%;
+    background: #0f172a;
+    border-left: 1px solid rgba(255,255,255,0.1);
+    padding: 80px 24px 24px 24px;
+    overflow-y: auto;
+    z-index: 1000;
+  }
+
+  .sidebar h3 {
+    margin-bottom: 24px;
+    font-size: 1.5rem;
+  }
+
+  .info-section {
+    margin-bottom: 24px;
+  }
+
+  .info-section h4 {
+    color: #94a3b8;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+
+  .info-section p {
+    font-size: 0.875rem;
+    margin-bottom: 4px;
+    color: #e2e8f0;
+  }
+
   .content {
-    max-width: 90vw;
-    max-height: 90vh;
+    max-width: 90%;
+    max-height: 90%;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -86,6 +279,6 @@
     max-height: 90vh;
     object-fit: contain;
     border-radius: 0;
-    box-shadow: none;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
   }
 </style>

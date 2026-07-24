@@ -77,10 +77,12 @@
 
 <div class="grid-item" style="{square ? 'aspect-ratio: 1; flex-grow: 1; flex-basis: auto;' : `flex-grow: ${aspectRatio}; flex-basis: ${targetHeight * aspectRatio}px;`}" {onclick}>
   <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'};">
-    <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
-    {#if visible}
-      <img {src} {alt} loading="lazy" onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? `transform: scale(${transformScale});` : ''}" />
-    {/if}
+    <div class="zoom-wrapper">
+      <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
+      {#if visible}
+        <img {src} {alt} loading="lazy" onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? `transform: scale(${transformScale});` : ''}" />
+      {/if}
+    </div>
   </div>
   {#if isVideo}
     <div class="video-indicator">
@@ -93,18 +95,15 @@
 
 <style>
   .grid-item {
-    border-radius: 0;
-    overflow: hidden;
     cursor: pointer;
+    overflow: hidden;
     position: relative;
-    box-shadow: none;
-    transition: filter 0.2s ease;
-    display: block;
-    height: 100%;
+    border-radius: 0;
+    /* transition: transform ... was here */
   }
-
-  .grid-item:hover {
-    filter: brightness(1.1);
+  
+  .grid-item:hover .zoom-wrapper {
+    transform: scale(1.05);
   }
 
   .video-indicator {
@@ -130,6 +129,12 @@
     background: #111;
     border-radius: 0;
     line-height: 0;
+  }
+
+  .zoom-wrapper {
+    width: 100%;
+    height: 100%;
+    transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   }
 
   canvas {
