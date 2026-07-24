@@ -2,7 +2,8 @@
   import { createEventDispatcher, onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
-  import { getPreviewUrl, getStreamUrl } from '$lib/api/media';
+  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces } from '$lib/api/media';
+  import BlurhashImage from './BlurhashImage.svelte';
 
   let { media }: { media: MediaFile } = $props();
   const dispatch = createEventDispatcher();
@@ -18,10 +19,26 @@
   }
   let showInfo = $state(false);
   let showMenu = $state(false);
+  
+  let faces: {person_id: string, bounding_box: any}[] = $state([]);
+  let loadingFaces = $state(false);
 
   function toggleInfo() {
     showInfo = !showInfo;
   }
+
+  $effect(() => {
+    if (showInfo && media.id) {
+      loadingFaces = true;
+      fetchMediaFaces(media.id).then(res => {
+        faces = res;
+        loadingFaces = false;
+      }).catch(err => {
+        console.error(err);
+        loadingFaces = false;
+      });
+    }
+  });
 
   function download() {
     const a = document.createElement('a');
@@ -38,8 +55,7 @@
 
   async function makeCoverImage() {
     showMenu = false;
-    alert(`Setting ${media.file_name} as cover image...`);
-    // Assuming API exists: await fetch(`/api/folder/cover`, { method: 'POST', body: JSON.stringify({ folder: media.folder_path, mediaId: media.id }) });
+    dispatch('setcover', media.id);
   }
 
   onMount(() => {
@@ -100,17 +116,43 @@
         <h4>DETAILS</h4>
         <p><strong>Filename:</strong> {media.file_name}</p>
         <p><strong>Size:</strong> {(media.size_bytes / 1024 / 1024).toFixed(2)} MB</p>
-        <p><strong>Date Taken:</strong> Unknown (EXIF parsing not enabled)</p>
+        <p><strong>Date Taken:</strong> {media.exif_json?.dateTimeOriginal ? new Date(media.exif_json.dateTimeOriginal).toLocaleString() : 'Unknown'}</p>
       </div>
       <div class="info-section">
         <h4>CAMERA</h4>
-        <p><strong>Device:</strong> Unknown</p>
-        <p><strong>Lens:</strong> Unknown</p>
-        <p><strong>Settings:</strong> Unknown ISO / Shutter / Aperture</p>
+        <p><strong>Device:</strong> {media.exif_json?.make || ''} {media.exif_json?.model || 'Unknown'}</p>
+        <p><strong>Lens:</strong> {media.exif_json?.lensModel || 'Unknown'}</p>
+        <p><strong>Settings:</strong> 
+          {#if media.exif_json?.iso || media.exif_json?.exposureTime || media.exif_json?.fNumber}
+            ISO {media.exif_json.iso || '-'} / 
+            {media.exif_json.exposureTime ? `1/${Math.round(1/media.exif_json.exposureTime)}s` : '-'} / 
+            {media.exif_json.fNumber ? `f/${media.exif_json.fNumber}` : '-'}
+          {:else}
+            Unknown ISO / Shutter / Aperture
+          {/if}
+        </p>
       </div>
       <div class="info-section">
         <h4>PEOPLE</h4>
-        <p style="color: #888;">(Face data sync pending...)</p>
+        {#if loadingFaces}
+          <p style="color: #888;">Loading faces...</p>
+        {:else if faces.length > 0}
+          <div class="face-list">
+            {#each faces as face}
+              <a href={`/faces/${face.person_id}`} class="face-avatar" on:click|stopPropagation>
+                <BlurhashImage 
+                  hash={media.blurhash || ''} 
+                  src={getThumbnailUrl(media.id)} 
+                  objectFit="cover" 
+                  faceBox={face.bounding_box} 
+                  square={true} 
+                />
+              </a>
+            {/each}
+          </div>
+        {:else}
+          <p style="color: #888;">No faces detected.</p>
+        {/if}
       </div>
     </div>
   {/if}
@@ -264,6 +306,26 @@
     font-size: 0.875rem;
     margin-bottom: 4px;
     color: #e2e8f0;
+  }
+
+  .face-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .face-avatar {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    overflow: hidden;
+    display: block;
+    border: 2px solid transparent;
+    transition: border-color 0.2s;
+  }
+
+  .face-avatar:hover {
+    border-color: var(--text-color);
   }
 
   .content {

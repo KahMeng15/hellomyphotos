@@ -1,14 +1,14 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, setFolderCover } from '$lib/api/media';
   import { invalidateAll } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
   
   let { data }: { data: PageData } = $props();
   
-  let selectedMediaIndex: number | null = null;
+  let selectedMediaIndex: number | null = $state(null);
   
   function openLightbox(index: number) {
     selectedMediaIndex = index;
@@ -30,6 +30,17 @@
     }
   }
 
+  async function handleSetCover(event: CustomEvent<string>) {
+    const mediaId = event.detail;
+    try {
+      await setFolderCover(data.folderPath || '', mediaId);
+      await invalidateAll(); // Reload page data to reflect the new cover image
+    } catch (e) {
+      console.error(e);
+      alert('Failed to set cover image.');
+    }
+  }
+
   let pollInterval: ReturnType<typeof setInterval>;
 
   onMount(() => {
@@ -47,9 +58,9 @@
   });
 </script>
 
-<div class="header-wrapper {data.files.length > 0 ? 'has-cover' : ''}">
-  {#if data.files.length > 0}
-    <div class="header-bg" style="background-image: url('{getThumbnailUrl(data.files[0].id)}');"></div>
+<div class="header-wrapper {(data.folderCoverId || data.files.length > 0) ? 'has-cover' : ''}">
+  {#if data.folderCoverId || data.files.length > 0}
+    <div class="header-bg" style="background-image: url('{getPreviewUrl(data.folderCoverId || data.files[0].id, false)}');"></div>
     <div class="header-gradient"></div>
   {/if}
   
@@ -77,6 +88,7 @@
               src={`${getThumbnailUrl(dir.cover_id)}${dir.blurhash ? '?cb=' + encodeURIComponent(dir.blurhash) : ''}`} 
               alt={dir.name}
               objectFit="cover"
+              square={true}
             />
           {:else}
             <div class="dir-placeholder"></div>
@@ -108,6 +120,7 @@
     on:close={closeLightbox}
     on:next={nextMedia}
     on:prev={prevMedia}
+    on:setcover={handleSetCover}
   />
 {/if}
 

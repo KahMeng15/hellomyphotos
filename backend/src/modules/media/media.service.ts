@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import ffmpeg from 'fluent-ffmpeg';
+import exifr from 'exifr';
 import { encode } from 'blurhash';
 import { query } from '../../config/db';
 import { mlQueue } from '../../queue/mlQueue';
@@ -46,8 +47,28 @@ export class MediaService {
         4, 3
       );
 
-      // Save Blurhash to DB
-      await query(`UPDATE media_files SET blurhash = $1 WHERE id = $2`, [bHash, mediaId]);
+      // Parse EXIF Data
+      let exifJson = null;
+      try {
+        const exifData = await exifr.parse(fullPath);
+        if (exifData) {
+          exifJson = {
+            make: exifData.Make,
+            model: exifData.Model,
+            dateTimeOriginal: exifData.DateTimeOriginal,
+            fNumber: exifData.FNumber,
+            iso: exifData.ISO,
+            exposureTime: exifData.ExposureTime,
+            focalLength: exifData.FocalLength,
+            lensModel: exifData.LensModel
+          };
+        }
+      } catch (exifErr) {
+        console.warn(`[EXIF] Failed to parse EXIF for ${fullPath}`, exifErr);
+      }
+
+      // Save Blurhash and EXIF to DB
+      await query(`UPDATE media_files SET blurhash = $1, exif_json = $2 WHERE id = $3`, [bHash, exifJson ? JSON.stringify(exifJson) : null, mediaId]);
 
       // Push job to Facial Recognition Queue
       await mlQueue.add('detect-faces', { mediaId });

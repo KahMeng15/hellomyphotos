@@ -30,6 +30,18 @@ export async function mlRoutes(fastify: FastifyInstance) {
       WHERE f.person_id = $1
       ORDER BY m.created_at DESC
     `, [id]);
+    return reply.send(result.rows);
+  });
+
+  // Get all faces in a specific media file
+  fastify.get<{ Params: { id: string } }>('/api/media/:id/faces', async (request, reply) => {
+    const { id } = request.params;
+    
+    const result = await query(`
+      SELECT person_id, bounding_box
+      FROM face_embeddings
+      WHERE media_id = $1
+    `, [id]);
     
     return reply.send(result.rows);
   });

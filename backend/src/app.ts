@@ -4,6 +4,7 @@ import { mediaRoutes } from './modules/media/media.routes';
 import { mlRoutes } from './modules/ml/ml.routes';
 import { sharesRoutes } from './modules/shares/shares.routes';
 import { adminRoutes } from './modules/admin/admin.routes';
+import { timelineRoutes } from './modules/timeline/timeline.routes';
 import cors from '@fastify/cors';
 import './queue/scannerQueue';
 import './queue/mediaQueue';
@@ -24,6 +25,7 @@ app.register(mediaRoutes);
 app.register(mlRoutes);
 app.register(sharesRoutes);
 app.register(adminRoutes);
+app.register(timelineRoutes);
 
 // Health check
 app.get('/health', async () => {

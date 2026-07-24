@@ -56,6 +56,11 @@
       alert('Background face re-detection initiated!');
     }
   }
+
+  async function triggerRescanExif() {
+    await fetch(`${API_BASE}/api/admin/rescan-exif`, { method: 'POST' });
+    alert('Background EXIF extraction initiated!');
+  }
 </script>
 
 <div class="admin-container">
@@ -83,6 +88,13 @@
         <p style="font-size: 0.875rem; color: #cbd5e1; margin-bottom: 8px;">Manually trigger a full background scan of the media directory to find new or deleted files.</p>
         <button class="btn" style="background: var(--glass-bg); border: 1px solid var(--glass-border); width: 100%;" on:click={triggerRescan}>
           Force Rescan Files
+        </button>
+      </div>
+
+      <div>
+        <p style="font-size: 0.875rem; color: #cbd5e1; margin-bottom: 8px;">Re-process EXIF metadata for all existing images (Useful for backfilling data after updates).</p>
+        <button class="btn" style="background: var(--glass-bg); border: 1px solid var(--glass-border); width: 100%;" on:click={triggerRescanExif}>
+          Force Rescan EXIF Data
         </button>
       </div>
 

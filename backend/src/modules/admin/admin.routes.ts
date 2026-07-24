@@ -2,7 +2,9 @@ import { FastifyInstance } from 'fastify';
 import { redis } from '../../config/redis';
 import { ScannerService } from '../scanner/scanner.service';
 import { mlQueue } from '../../queue/mlQueue';
+import { mediaQueue } from '../../queue/mediaQueue';
 import { query } from '../../config/db';
+import path from 'path';
 
 export async function adminRoutes(fastify: FastifyInstance) {
   fastify.get('/api/admin/settings', async (request, reply) => {
@@ -41,5 +43,18 @@ export async function adminRoutes(fastify: FastifyInstance) {
     }
     
     return reply.send({ success: true, message: 'Face reset initiated in the background' });
+  });
+
+  fastify.post('/api/admin/rescan-exif', async (request, reply) => {
+    // Queue every media file for EXIF reprocessing
+    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
+    for (const row of result.rows) {
+      await mediaQueue.add('process-media', { 
+        mediaId: row.id,
+        fullPath: path.join('/app/media', row.folder_path, row.file_name),
+        mimeType: row.mime_type
+      });
+    }
+    return reply.send({ success: true, message: 'EXIF extraction initiated in the background' });
   });
 }
