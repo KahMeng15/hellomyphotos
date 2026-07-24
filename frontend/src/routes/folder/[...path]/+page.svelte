@@ -47,16 +47,23 @@
   });
 </script>
 
-<div class="header">
-  <div class="header-left">
-    {#if data.folderPath}
-      <div class="subheading">{data.folderPath}</div>
-    {/if}
-    <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+<div class="header-wrapper {data.files.length > 0 ? 'has-cover' : ''}">
+  {#if data.files.length > 0}
+    <div class="header-bg" style="background-image: url('{getThumbnailUrl(data.files[0].id)}');"></div>
+    <div class="header-gradient"></div>
+  {/if}
+  
+  <div class="header-content">
+    <div class="header-left">
+      {#if data.folderPath}
+        <div class="subheading">{data.folderPath}</div>
+      {/if}
+      <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+    </div>
+    <span class="count">
+      {#if data.directories.length > 0}{data.directories.length} folders, {/if}{data.files.length} media items
+    </span>
   </div>
-  <span class="count">
-    {#if data.directories.length > 0}{data.directories.length} folders, {/if}{data.files.length} media items
-  </span>
 </div>
 
 {#if data.directories.length > 0}
@@ -105,13 +112,50 @@
 {/if}
 
 <style>
-  .header {
+  .header-wrapper {
+    position: relative;
+    margin: -24px -24px 24px -24px;
+    padding: 24px;
+    display: flex;
+    align-items: flex-end;
+    min-height: 120px;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  
+  .header-wrapper.has-cover {
+    min-height: 350px;
+    padding: 120px 24px 24px 24px;
+    border-bottom: none;
+  }
+  
+  .header-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center 30%;
+    z-index: 0;
+  }
+  
+  .header-gradient {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,1) 100%);
+    z-index: 1;
+  }
+  
+  .header-content {
+    position: relative;
+    z-index: 2;
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--glass-border);
+    width: 100%;
   }
   
   .header-left {
@@ -120,23 +164,26 @@
     align-items: flex-start;
   }
   
-  .header h2 {
+  .header-content h2 {
     font-weight: 700;
-    font-size: 2rem;
+    font-size: 2.5rem;
     color: var(--text-color);
     margin-bottom: 0;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.5);
   }
   
   .subheading {
-    color: #888888;
-    font-size: 0.875rem;
-    margin-bottom: 8px;
+    color: #a1a1aa;
+    font-size: 1rem;
+    margin-bottom: 4px;
     font-family: 'Instrument Sans', sans-serif;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
   }
   
   .count {
-    color: #666666;
+    color: #a1a1aa;
     font-size: 0.875rem;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
   }
 
   .dir-grid {
