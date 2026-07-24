@@ -54,11 +54,13 @@
 <style>
   .image-container {
     position: relative;
-    width: 100%;
     height: 100%;
+    width: 100%;
+    display: block;
     overflow: hidden;
-    background: #1e293b;
-    border-radius: 8px;
+    background: #111;
+    border-radius: 0;
+    line-height: 0;
   }
 
   canvas {
@@ -67,7 +69,7 @@
     left: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: fill;
     filter: blur(10px);
     transform: scale(1.1);
     transition: opacity 0.5s ease;
@@ -78,14 +80,15 @@
   }
 
   img {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
     height: 100%;
+    width: 100%;
     object-fit: cover;
     opacity: 0;
     transition: opacity 0.3s ease-in;
+    border-radius: 0;
+    display: block;
+    position: relative;
+    z-index: 1;
   }
 
   img.loaded {

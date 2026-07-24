@@ -48,8 +48,13 @@
 </script>
 
 <div class="header">
-  <h2>/{data.folderPath || 'root'}</h2>
-  <span class="count">{data.directories.length} folders, {data.files.length} media items</span>
+  <div class="header-left">
+    <div class="subheading">{data.folderPath || '/'}</div>
+    <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+  </div>
+  <span class="count">
+    {#if data.directories.length > 0}{data.directories.length} folders, {/if}{data.files.length} media items
+  </span>
 </div>
 
 {#if data.directories.length > 0}
@@ -97,20 +102,34 @@
   .header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-end;
     margin-bottom: 24px;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--glass-border);
   }
   
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
   .header h2 {
-    font-weight: 600;
-    font-size: 1.5rem;
-    color: #e2e8f0;
+    font-weight: 700;
+    font-size: 2rem;
+    color: var(--text-color);
+    margin-bottom: 0;
+  }
+  
+  .subheading {
+    color: #888888;
+    font-size: 0.875rem;
+    margin-bottom: 8px;
+    font-family: 'Instrument Sans', sans-serif;
   }
   
   .count {
-    color: #94a3b8;
+    color: #666666;
     font-size: 0.875rem;
   }
 
@@ -153,25 +172,33 @@
   }
 
   .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
     padding-bottom: 64px;
+  }
+  
+  /* Trick to prevent the last row from stretching to the edges if there's only 1 or 2 photos */
+  .grid::after {
+    content: "";
+    flex-grow: 999;
   }
 
   .grid-item {
-    aspect-ratio: 1;
-    border-radius: 8px;
+    height: 300px;
+    flex-grow: 1;
+    flex-basis: 300px; /* Base width to ensure at least ~2 photos per row on typical screens */
+    border-radius: 0;
     overflow: hidden;
     cursor: pointer;
     position: relative;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: none;
+    transition: filter 0.2s ease;
+    display: block;
   }
 
   .grid-item:hover {
-    transform: scale(1.02);
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+    filter: brightness(1.1);
   }
   
   .video-indicator {

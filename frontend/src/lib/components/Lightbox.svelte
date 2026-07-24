@@ -3,7 +3,6 @@
   import { fade } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
   import { getPreviewUrl, getStreamUrl } from '$lib/api/media';
-  import { lowBandwidthMode } from '$lib/stores/settings';
 
   let { media }: { media: MediaFile } = $props();
   const dispatch = createEventDispatcher();
@@ -34,7 +33,7 @@
         Your browser does not support the video tag.
       </video>
     {:else}
-      <img src={getPreviewUrl(media.id, $lowBandwidthMode)} alt={media.file_name} class="media-element" />
+      <img src={getPreviewUrl(media.id, false)} alt={media.file_name} class="media-element" />
     {/if}
   </div>
 </div>
@@ -86,7 +85,7 @@
     max-width: 100%;
     max-height: 90vh;
     object-fit: contain;
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    border-radius: 0;
+    box-shadow: none;
   }
 </style>

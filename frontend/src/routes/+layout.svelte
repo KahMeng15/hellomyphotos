@@ -1,33 +1,84 @@
 <script lang="ts">
   import '../app.css';
-  import { lowBandwidthMode } from '$lib/stores/settings';
 </script>
 
 <svelte:head>
   <title>HelloMyPhotos</title>
 </svelte:head>
 
-<header class="nav-header glass-panel">
-  <div style="display: flex; gap: 24px; align-items: center;">
-    <a href="/" style="text-decoration: none;">
-      <h1>HelloMyPhotos</h1>
-    </a>
-    <a href="/faces" style="color: var(--text-color); text-decoration: none; font-weight: 500;">
-      Faces
-    </a>
-    <a href="/admin" style="color: var(--text-color); text-decoration: none; font-weight: 500;">
-      Admin
-    </a>
-  </div>
-  
-  <div style="display: flex; align-items: center; gap: 12px;">
-    <label style="font-size: 0.875rem; display: flex; align-items: center; gap: 8px; cursor: pointer;">
-      <input type="checkbox" bind:checked={$lowBandwidthMode} />
-      Low Bandwidth Mode
-    </label>
-  </div>
-</header>
+<div class="app-layout">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <a href="/" style="text-decoration: none;">
+        <h1>HelloMyPhotos</h1>
+      </a>
+    </div>
+    
+    <nav class="sidebar-nav">
+      <a href="/">Photos</a>
+      <a href="/faces">Faces</a>
+      <a href="/timeline">Timeline</a>
+      <a href="/settings">Settings</a>
+      <a href="/admin">Admin</a>
+    </nav>
+  </aside>
 
-<main style="padding: 0 24px;">
-  <slot />
-</main>
+  <main class="main-content">
+    <slot />
+  </main>
+</div>
+
+<style>
+  .app-layout {
+    display: flex;
+    min-height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+  }
+  
+  .main-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    height: 100vh;
+  }
+  
+  .sidebar {
+    width: 250px;
+    height: 100vh;
+    border-right: 1px solid var(--glass-border);
+    background: var(--bg-color);
+    display: flex;
+    flex-direction: column;
+    padding: 24px;
+    flex-shrink: 0;
+  }
+  
+  .sidebar-header {
+    margin-bottom: 48px;
+  }
+  
+  .sidebar-header h1 {
+    font-size: 1.25rem;
+    color: var(--text-color);
+  }
+  
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .sidebar-nav a {
+    color: var(--text-color);
+    text-decoration: none;
+    font-size: 1rem;
+    font-weight: 400;
+    font-family: 'Instrument Sans', sans-serif;
+    transition: opacity 0.2s;
+  }
+  
+  .sidebar-nav a:hover {
+    opacity: 0.7;
+  }
+</style>
