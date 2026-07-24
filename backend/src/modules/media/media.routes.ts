@@ -77,8 +77,9 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     return reply.status(404).send({ error: 'Preview not found' });
   });
 
-  fastify.get<{ Params: { id: string } }>('/api/media/:id/stream', async (request, reply) => {
+  fastify.get<{ Params: { id: string }, Querystring: { download?: string } }>('/api/media/:id/stream', async (request, reply) => {
     const { id } = request.params;
+    const { download } = request.query;
     const result = await query(`SELECT folder_path, file_name, mime_type, size_bytes FROM media_files WHERE id = $1`, [id]);
     
     if (result.rows.length === 0) return reply.status(404).send({ error: 'File not found' });
@@ -87,6 +88,12 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
     
     if (!fs.existsSync(fullPath)) return reply.status(404).send({ error: 'Source file missing' });
+
+    if (download === '1' || download === 'true') {
+      reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(file.file_name)}"`);
+    } else {
+      reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
+    }
 
     const range = request.headers.range;
     if (range) {

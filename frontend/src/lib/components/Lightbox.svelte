@@ -61,12 +61,8 @@
   });
 
   function download() {
-    const a = document.createElement('a');
-    a.href = getPreviewUrl(media.id, false);
-    a.download = media.file_name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const url = getStreamUrl(media.id) + '?download=1';
+    window.location.href = url;
   }
 
   function share() {
