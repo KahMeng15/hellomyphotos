@@ -72,20 +72,13 @@
 
 <div class="grid">
   {#each data.files as file, i}
-    <div class="grid-item" on:click={() => openLightbox(i)}>
-      <BlurhashImage 
-        hash={file.blurhash || ''} 
-        src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
-        alt={file.file_name} 
-      />
-      {#if file.mime_type.startsWith('video/')}
-        <div class="video-indicator">
-          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-          </svg>
-        </div>
-      {/if}
-    </div>
+    <BlurhashImage 
+      hash={file.blurhash || ''} 
+      src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
+      alt={file.file_name} 
+      isVideo={file.mime_type.startsWith('video/')}
+      onclick={() => openLightbox(i)}
+    />
   {/each}
 </div>
 
@@ -181,37 +174,6 @@
   /* Trick to prevent the last row from stretching to the edges if there's only 1 or 2 photos */
   .grid::after {
     content: "";
-    flex-grow: 999;
-  }
-
-  .grid-item {
-    height: 300px;
-    flex-grow: 1;
-    flex-basis: 300px; /* Base width to ensure at least ~2 photos per row on typical screens */
-    border-radius: 0;
-    overflow: hidden;
-    cursor: pointer;
-    position: relative;
-    box-shadow: none;
-    transition: filter 0.2s ease;
-    display: block;
-  }
-
-  .grid-item:hover {
-    filter: brightness(1.1);
-  }
-  
-  .video-indicator {
-    position: absolute;
-    bottom: 8px;
-    right: 8px;
-    background: rgba(0,0,0,0.6);
-    border-radius: 50%;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    color: white;
+    flex-grow: 999999999;
   }
 </style>

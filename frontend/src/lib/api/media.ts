@@ -5,6 +5,7 @@ export interface MediaFile {
   mime_type: string;
   size_bytes: number;
   blurhash: string | null;
+  aspectRatio?: number;
 }
 
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
