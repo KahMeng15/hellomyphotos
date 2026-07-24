@@ -1,12 +1,64 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, setFolderCover } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription } from '$lib/api/media';
   import { invalidateAll } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
+  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check } from '@lucide/svelte';
   
   let { data }: { data: PageData } = $props();
+  
+  let folderDescInput = $state('');
+  let isSavingSettings = $state(false);
+
+  // Initialize input state when data changes
+  $effect(() => {
+    folderDescInput = data.folderDescription || '';
+  });
+
+  async function handleSaveSettings() {
+    try {
+      isSavingSettings = true;
+      await setFolderDescription(data.folderPath || '', folderDescInput);
+      await invalidateAll();
+      showSettingsModal = false;
+    } catch (e) {
+      console.error(e);
+      alert('Failed to save settings');
+    } finally {
+      isSavingSettings = false;
+    }
+  }
+  
+  type SortMode = 'newest' | 'oldest' | 'a-z' | 'z-a';
+  type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square';
+
+  let sortMode: SortMode = $state('newest');
+  let viewMode: ViewMode = $state('small-fit');
+
+  let showSortMenu = $state(false);
+  let showViewMenu = $state(false);
+  
+  let showDownloadModal = $state(false);
+  let showShareModal = $state(false);
+  let showSettingsModal = $state(false);
+
+  let sortedFiles = $derived([...data.files].sort((a, b) => {
+    if (sortMode === 'newest') {
+      const dateA = a.exif_json?.dateTimeOriginal ? new Date(a.exif_json.dateTimeOriginal).getTime() : 0;
+      const dateB = b.exif_json?.dateTimeOriginal ? new Date(b.exif_json.dateTimeOriginal).getTime() : 0;
+      return dateB - dateA;
+    }
+    if (sortMode === 'oldest') {
+      const dateA = a.exif_json?.dateTimeOriginal ? new Date(a.exif_json.dateTimeOriginal).getTime() : Number.MAX_SAFE_INTEGER;
+      const dateB = b.exif_json?.dateTimeOriginal ? new Date(b.exif_json.dateTimeOriginal).getTime() : Number.MAX_SAFE_INTEGER;
+      return dateA - dateB;
+    }
+    if (sortMode === 'a-z') return a.file_name.localeCompare(b.file_name);
+    if (sortMode === 'z-a') return b.file_name.localeCompare(a.file_name);
+    return 0;
+  }));
   
   let selectedMediaIndex: number | null = $state(null);
   
@@ -19,11 +71,11 @@
   }
   
   function nextMedia() {
-    if (selectedMediaIndex !== null && selectedMediaIndex < data.files.length - 1) {
+    if (selectedMediaIndex !== null && selectedMediaIndex < sortedFiles.length - 1) {
       selectedMediaIndex++;
     }
   }
-  
+
   function prevMedia() {
     if (selectedMediaIndex !== null && selectedMediaIndex > 0) {
       selectedMediaIndex--;
@@ -100,10 +152,56 @@
         <div class="subheading">{data.folderPath}</div>
       {/if}
       <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+      {#if data.folderDescription}
+        <p class="folder-description" style="margin-top: 12px; color: #a1a1aa; font-size: 1rem; max-width: 600px; line-height: 1.5;">{data.folderDescription}</p>
+      {/if}
     </div>
-    <span class="count">
-      {#if data.directories.length > 0}{data.directories.length} folders, {/if}{data.files.length} media items
-    </span>
+    
+    <div class="header-right">
+      <div class="toolbar">
+        <div class="dropdown-container">
+          <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort">
+            <ArrowDownUp size={18} />
+          </button>
+          {#if showSortMenu}
+            <div class="dropdown-menu">
+              <button class:active={sortMode === 'newest'} onclick={() => { sortMode = 'newest'; showSortMenu = false; }}>Newest to Oldest</button>
+              <button class:active={sortMode === 'oldest'} onclick={() => { sortMode = 'oldest'; showSortMenu = false; }}>Oldest to Newest</button>
+              <button class:active={sortMode === 'a-z'} onclick={() => { sortMode = 'a-z'; showSortMenu = false; }}>A to Z</button>
+              <button class:active={sortMode === 'z-a'} onclick={() => { sortMode = 'z-a'; showSortMenu = false; }}>Z to A</button>
+            </div>
+          {/if}
+        </div>
+        
+        <div class="dropdown-container">
+          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
+            <LayoutGrid size={18} />
+          </button>
+          {#if showViewMenu}
+            <div class="dropdown-menu">
+              <button class:active={viewMode === 'small-fit'} onclick={() => { viewMode = 'small-fit'; showViewMenu = false; }}>Small Fit Size</button>
+              <button class:active={viewMode === 'large-fit'} onclick={() => { viewMode = 'large-fit'; showViewMenu = false; }}>Large Fit Size</button>
+              <button class:active={viewMode === 'small-square'} onclick={() => { viewMode = 'small-square'; showViewMenu = false; }}>Small Square Grid</button>
+              <button class:active={viewMode === 'large-square'} onclick={() => { viewMode = 'large-square'; showViewMenu = false; }}>Large Square Grid</button>
+            </div>
+          {/if}
+        </div>
+        
+        <button class="icon-btn" onclick={() => showDownloadModal = true} title="Download">
+          <Download size={18} />
+        </button>
+        <button class="icon-btn" onclick={() => showShareModal = true} title="Share">
+          <Share2 size={18} />
+        </button>
+        <button class="icon-btn" onclick={() => showSettingsModal = true} title="Settings">
+          <Settings size={18} />
+        </button>
+      </div>
+      
+      <span class="count">
+        {#if data.directories.length > 0}{data.directories.length} folders, {/if}{data.files.length} media items
+      </span>
+    </div>
   </div>
 </div>
 
@@ -132,26 +230,88 @@
   </div>
 {/if}
 
-<div class="grid">
-  {#each data.files as file, i}
+<div class="grid {viewMode}">
+  {#each sortedFiles as file, i}
     <BlurhashImage 
       hash={file.blurhash || ''} 
       src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
       alt={file.file_name} 
       isVideo={file.mime_type.startsWith('video/')}
       onclick={() => openLightbox(i)}
+      objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
+      square={viewMode.includes('square')}
     />
   {/each}
 </div>
 
 {#if selectedMediaIndex !== null}
   <Lightbox 
-    media={data.files[selectedMediaIndex]} 
+    media={sortedFiles[selectedMediaIndex]} 
     on:close={closeLightbox}
     on:next={nextMedia}
     on:prev={prevMedia}
     on:setcover={handleSetCover}
   />
+{/if}
+
+{#if showDownloadModal}
+  <div class="modal-backdrop" onclick={() => showDownloadModal = false}>
+    <div class="modal glass-panel" onclick={e => e.stopPropagation()}>
+      <div class="modal-header">
+        <h3>Download Folder</h3>
+        <button class="icon-btn" onclick={() => showDownloadModal = false}><X size={20} /></button>
+      </div>
+      <div class="modal-body">
+        <a href={getFolderZipUrl(data.folderPath || '')} target="_blank" class="btn" style="display: block; text-align: center; text-decoration: none; width: 100%; margin-bottom: 12px; background: var(--text-color); color: var(--bg-color);" onclick={() => showDownloadModal = false}>Download All in One Zip</a>
+        <button class="btn" style="width: 100%; background: var(--glass-bg); border: 1px solid var(--glass-border); color: white;">Download as Multi-part Zips (Coming Soon)</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showShareModal}
+  <div class="modal-backdrop" onclick={() => showShareModal = false}>
+    <div class="modal glass-panel" onclick={e => e.stopPropagation()}>
+      <div class="modal-header">
+        <h3>Share Settings</h3>
+        <button class="icon-btn" onclick={() => showShareModal = false}><X size={20} /></button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom: 24px; color: #888;">Advanced sharing options coming soon.</p>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showSettingsModal}
+  <div class="modal-backdrop" onclick={() => showSettingsModal = false}>
+    <div class="modal glass-panel" onclick={e => e.stopPropagation()}>
+      <div class="modal-header">
+        <h3>Folder Settings</h3>
+        <button class="icon-btn" onclick={() => showSettingsModal = false}><X size={20} /></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #888;">View Name (Read Only)</label>
+          <input type="text" readonly value={data.folderPath || 'Home'} style="width: 100%; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: #888; border-radius: 4px;" />
+        </div>
+        <div class="form-group">
+          <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Description</label>
+          <textarea bind:value={folderDescInput} placeholder="Add a description..." style="width: 100%; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; min-height: 100px; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+        <div style="margin-top: 24px; display: flex; justify-content: flex-end;">
+          <button class="btn" onclick={handleSaveSettings} disabled={isSavingSettings}>
+            {#if isSavingSettings}
+              Saving...
+            {:else}
+              <Check size={18} style="margin-right: 8px; display: inline-block; vertical-align: middle;" />
+              <span style="display: inline-block; vertical-align: middle;">Save Changes</span>
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 {/if}
 
 <style>
@@ -212,9 +372,13 @@
   }
   
   .header-content h2 {
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    color: var(--text-color);
+    background: transparent;
     font-weight: 700;
     font-size: 2.5rem;
-    color: var(--text-color);
     margin-bottom: 0;
     text-shadow: 0 2px 10px rgba(0,0,0,0.5);
   }
@@ -227,6 +391,78 @@
     text-shadow: 0 1px 4px rgba(0,0,0,0.8);
   }
   
+  .header-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+  }
+  
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  
+  .dropdown-container {
+    position: relative;
+  }
+  
+  .icon-btn {
+    background: transparent;
+    border: none;
+    color: #a1a1aa;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  
+  .icon-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: white;
+  }
+  
+  .dropdown-menu {
+    position: absolute;
+    top: 44px;
+    right: 0;
+    background: #000;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    min-width: 180px;
+    overflow: hidden;
+    z-index: 100;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  
+  .dropdown-menu button {
+    width: 100%;
+    text-align: left;
+    padding: 12px 16px;
+    background: none;
+    border: none;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 0.875rem;
+    transition: background 0.2s, color 0.2s;
+  }
+  
+  .dropdown-menu button:hover {
+    background: rgba(255,255,255,0.1);
+    color: white;
+  }
+  
+  .dropdown-menu button.active {
+    background: rgba(255,255,255,0.15);
+    color: white;
+    font-weight: 500;
+  }
+
   .count {
     color: #a1a1aa;
     font-size: 0.875rem;
@@ -237,7 +473,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 16px;
-    margin-bottom: 48px;
+    padding-bottom: 24px;
   }
 
   .dir-card {

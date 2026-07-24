@@ -19,9 +19,12 @@ app.register(cors, {
   origin: '*' // Allow all origins for local dev
 });
 
+import { zipRoutes } from './modules/media/zip.routes';
+
 // Register Routes
 app.register(scannerRoutes);
 app.register(mediaRoutes);
+app.register(zipRoutes);
 app.register(mlRoutes);
 app.register(sharesRoutes);
 app.register(adminRoutes);

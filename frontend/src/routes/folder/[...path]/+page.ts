@@ -9,6 +9,7 @@ export const load: PageLoad = async ({ params, fetch }) => {
     return {
       folderPath,
       folderCoverId: data.folderCoverId,
+      folderDescription: data.folderDescription,
       files: data.files,
       directories: data.directories,
       scanning: data.scanning

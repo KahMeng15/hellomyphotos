@@ -21,6 +21,18 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true });
   });
 
+  fastify.post<{ Body: { folder: string, description: string } }>('/api/folder/settings', async (request, reply) => {
+    const { folder, description } = request.body;
+    await query(`
+      INSERT INTO folder_settings (folder_path, description, updated_at) 
+      VALUES ($1, $2, NOW()) 
+      ON CONFLICT (folder_path) DO UPDATE 
+      SET description = EXCLUDED.description, updated_at = NOW()
+    `, [folder, description]);
+    
+    return reply.send({ success: true });
+  });
+
   fastify.get<{ Params: { '*': string } }>('/api/folder/*', async (request, reply) => {
     // URL decode the path param and sanitize
     const folderPath = decodeURIComponent(request.params['*'] || '');
@@ -85,18 +97,21 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       console.error(`Failed to read directory: ${fullPath}`, e);
     }
 
-    // 5. Get current folder's custom cover (if any)
+    // 5. Get current folder's custom cover (if any) and description
     let folderCoverId = null;
+    let folderDescription = '';
     if (folderPath) {
-      const currentFolderCoverRes = await query(`SELECT cover_media_id FROM folder_settings WHERE folder_path = $1`, [folderPath]);
-      if (currentFolderCoverRes.rows.length > 0) {
-        folderCoverId = currentFolderCoverRes.rows[0].cover_media_id;
+      const currentFolderSettingsRes = await query(`SELECT cover_media_id, description FROM folder_settings WHERE folder_path = $1`, [folderPath]);
+      if (currentFolderSettingsRes.rows.length > 0) {
+        folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id;
+        folderDescription = currentFolderSettingsRes.rows[0].description || '';
       }
     }
 
     return reply.send({
       folderPath,
       folderCoverId,
+      folderDescription,
       scanning: !exists, // Indicate if a scan was just triggered
       files: result.rows,
       directories

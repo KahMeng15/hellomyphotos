@@ -17,12 +17,29 @@ export interface DirectoryInfo {
   blurhash: string | null;
 }
 
-export async function fetchFolderContent(folderPath: string): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean, folderCoverId: string | null }> {
+export async function fetchFolderContent(folderPath: string): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean, folderCoverId: string | null, folderDescription: string }> {
   // Use Vite's dev server proxy or direct URL
   const res = await fetch(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`);
   if (!res.ok) throw new Error('Failed to fetch folder');
   const data = await res.json();
-  return { files: data.files, directories: data.directories || [], scanning: data.scanning || false, folderCoverId: data.folderCoverId || null };
+  return { 
+    files: data.files, 
+    directories: data.directories || [], 
+    scanning: data.scanning || false, 
+    folderCoverId: data.folderCoverId || null,
+    folderDescription: data.folderDescription || '' 
+  };
+}
+
+export async function setFolderDescription(folderPath: string, description: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/folder/settings`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ folder: folderPath, description })
+  });
+  if (!res.ok) throw new Error('Failed to set folder description');
 }
 
 export async function setFolderCover(folderPath: string, mediaId: string): Promise<void> {
@@ -59,4 +76,8 @@ export function getPreviewUrl(id: string, lowBandwidth: boolean = false): string
 
 export function getStreamUrl(id: string): string {
   return `${API_BASE}/api/media/${id}/stream`;
+}
+
+export function getFolderZipUrl(folderPath: string): string {
+  return `${API_BASE}/api/zip/${encodeURIComponent(folderPath || '')}`;
 }
