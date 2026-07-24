@@ -2,6 +2,8 @@
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
   import { getThumbnailUrl } from '$lib/api/media';
+  import { invalidateAll } from '$app/navigation';
+  import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
   
   let { data }: { data: PageData } = $props();
@@ -27,6 +29,22 @@
       selectedMediaIndex--;
     }
   }
+
+  let pollInterval: ReturnType<typeof setInterval>;
+
+  onMount(() => {
+    pollInterval = setInterval(() => {
+      // Poll if any file lacks a blurhash (still processing) or if the scanner is active
+      const stillProcessing = data.files.some(f => !f.blurhash) || data.scanning;
+      if (stillProcessing) {
+        invalidateAll();
+      }
+    }, 2000);
+  });
+
+  onDestroy(() => {
+    if (pollInterval) clearInterval(pollInterval);
+  });
 </script>
 
 <div class="header">
@@ -52,7 +70,7 @@
     <div class="grid-item" on:click={() => openLightbox(i)}>
       <BlurhashImage 
         hash={file.blurhash || ''} 
-        src={getThumbnailUrl(file.id)} 
+        src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
         alt={file.file_name} 
       />
       {#if file.mime_type.startsWith('video/')}

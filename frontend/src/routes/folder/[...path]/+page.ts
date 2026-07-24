@@ -9,7 +9,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
     return {
       folderPath,
       files: data.files,
-      directories: data.directories
+      directories: data.directories,
+      scanning: data.scanning
     };
   } catch (error) {
     console.error('Failed to load folder:', error);

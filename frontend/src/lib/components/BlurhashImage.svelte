@@ -4,11 +4,11 @@
 
   let { hash, src, alt = '' }: { hash: string, src: string, alt?: string } = $props();
   
-  let canvas: HTMLCanvasElement;
-  let imgLoaded = false;
+  let canvas: HTMLCanvasElement | undefined = $state();
+  let imgLoaded = $state(false);
   let observer: IntersectionObserver;
-  let visible = false;
-  let container: HTMLDivElement;
+  let visible = $state(false);
+  let container: HTMLDivElement | undefined = $state();
 
   onMount(() => {
     // Render blurhash
@@ -47,7 +47,7 @@
 <div bind:this={container} class="image-container">
   <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
   {#if visible}
-    <img {src} {alt} loading="lazy" on:load={() => imgLoaded = true} class:loaded={imgLoaded} />
+    <img {src} {alt} loading="lazy" onload={() => imgLoaded = true} class:loaded={imgLoaded} />
   {/if}
 </div>
 

@@ -46,7 +46,7 @@ export class ScannerService {
             `, [folderPath, file.name, mimeType, stat.size]);
 
             // If this was an INSERT (xmax is 0), push a job to generate previews
-            if (result.rows.length > 0 && result.rows[0].xmax === 0) {
+            if (result.rows.length > 0 && result.rows[0].xmax == 0) {
               await mediaQueue.add('process-media', { 
                 mediaId: result.rows[0].id, 
                 fullPath: path.join(fullPath, file.name),
