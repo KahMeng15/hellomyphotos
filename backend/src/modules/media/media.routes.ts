@@ -19,6 +19,19 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       reply.header('Cache-Control', 'public, max-age=31536000');
       return reply.send(fs.createReadStream(filePath));
     }
+    
+    // Fallback: serve original if processing isn't done (for images only)
+    const result = await query(`SELECT folder_path, file_name, mime_type FROM media_files WHERE id = $1`, [id]);
+    if (result.rows.length > 0) {
+      const file = result.rows[0];
+      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+      if (fs.existsSync(fullPath) && file.mime_type.startsWith('image/')) {
+        reply.header('Content-Type', file.mime_type);
+        reply.header('Cache-Control', 'public, max-age=30'); // Short cache so they upgrade to webp later
+        return reply.send(fs.createReadStream(fullPath));
+      }
+    }
+
     return reply.status(404).send({ error: 'Thumbnail not found or still processing' });
   });
 
@@ -48,6 +61,19 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       reply.header('Content-Type', 'image/webp');
       return reply.send(fs.createReadStream(fallback));
     }
+    
+    // Fallback to original image
+    const result = await query(`SELECT folder_path, file_name, mime_type FROM media_files WHERE id = $1`, [id]);
+    if (result.rows.length > 0) {
+      const file = result.rows[0];
+      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+      if (fs.existsSync(fullPath) && file.mime_type.startsWith('image/')) {
+        reply.header('Content-Type', file.mime_type);
+        reply.header('Cache-Control', 'public, max-age=30'); // Short cache
+        return reply.send(fs.createReadStream(fullPath));
+      }
+    }
+
     return reply.status(404).send({ error: 'Preview not found' });
   });
 

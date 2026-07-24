@@ -58,11 +58,11 @@ export class ScannerService {
               VALUES ($1, $2, $3, $4)
               ON CONFLICT (folder_path, file_name) DO UPDATE 
               SET size_bytes = EXCLUDED.size_bytes, updated_at = NOW()
-              RETURNING id, xmax
+              RETURNING id, xmax, blurhash
             `, [folderPath, file.name, mimeType, stat.size]);
 
-            // If this was an INSERT (xmax is 0), push a job to generate previews
-            if (result.rows.length > 0 && result.rows[0].xmax == 0) {
+            // If this was an INSERT (xmax is 0) OR it failed processing previously (blurhash is null)
+            if (result.rows.length > 0 && (result.rows[0].xmax == 0 || !result.rows[0].blurhash)) {
               await mediaQueue.add('process-media', { 
                 mediaId: result.rows[0].id, 
                 fullPath: path.join(fullPath, file.name),

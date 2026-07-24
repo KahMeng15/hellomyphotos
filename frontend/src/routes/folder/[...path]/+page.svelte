@@ -41,7 +41,19 @@
     }
   }
 
+  let scrollProgress = $state(0);
+  let headerWrapper: HTMLElement | undefined = $state();
   let pollInterval: ReturnType<typeof setInterval>;
+
+  function handleScroll(e: Event) {
+    if (!headerWrapper) return;
+    const target = e.target as HTMLElement;
+    // Sticking occurs when scrolled past the wrapper's height minus the 100px overlap and 25px top offset
+    const threshold = headerWrapper.offsetHeight - 125;
+    if (threshold > 0) {
+      scrollProgress = Math.min(1, Math.max(0, target.scrollTop / threshold));
+    }
+  }
 
   onMount(() => {
     pollInterval = setInterval(() => {
@@ -51,19 +63,37 @@
         invalidateAll();
       }
     }, 2000);
+
+    const mainContent = document.querySelector('.main-content');
+    if (mainContent) {
+      mainContent.addEventListener('scroll', handleScroll);
+    }
   });
 
   onDestroy(() => {
     if (pollInterval) clearInterval(pollInterval);
+    if (typeof document !== 'undefined') {
+      const mainContent = document.querySelector('.main-content');
+      if (mainContent) {
+        mainContent.removeEventListener('scroll', handleScroll);
+      }
+    }
   });
 </script>
 
-<div class="header-wrapper {(data.folderCoverId || data.files.length > 0) ? 'has-cover' : ''}">
+<div class="header-wrapper {(data.folderCoverId || data.files.length > 0) ? 'has-cover' : ''}" bind:this={headerWrapper}>
   {#if data.folderCoverId || data.files.length > 0}
     <div class="header-bg" style="background-image: url('{getPreviewUrl(data.folderCoverId || data.files[0].id, false)}');"></div>
     <div class="header-gradient"></div>
   {/if}
-  
+</div>
+
+<div class="sticky-header" style="
+  background: linear-gradient(to bottom, rgba(0,0,0,calc(0.9 * {scrollProgress})) 0%, rgba(0,0,0,calc(0.6 * {scrollProgress})) 100%);
+  backdrop-filter: blur(calc(16px * {scrollProgress}));
+  -webkit-backdrop-filter: blur(calc(16px * {scrollProgress}));
+  border-bottom-color: rgba(255,255,255,calc(0.05 * {scrollProgress}));
+">
   <div class="header-content">
     <div class="header-left">
       {#if data.folderPath}
@@ -127,18 +157,13 @@
 <style>
   .header-wrapper {
     position: relative;
-    margin: -24px -24px 24px -24px;
-    padding: 24px;
-    display: flex;
-    align-items: flex-end;
+    margin: -24px -24px 0 -24px;
     min-height: 120px;
-    border-bottom: 1px solid var(--glass-border);
+    z-index: 0;
   }
   
   .header-wrapper.has-cover {
-    min-height: 350px;
-    padding: 120px 24px 24px 24px;
-    border-bottom: none;
+    min-height: 40vh;
   }
   
   .header-bg {
@@ -148,7 +173,7 @@
     width: 100%;
     height: 100%;
     background-size: cover;
-    background-position: center 30%;
+    background-position: center 60%;
     z-index: 0;
   }
   
@@ -162,6 +187,15 @@
     z-index: 1;
   }
   
+  .sticky-header {
+    position: sticky;
+    top: -25px; /* Offset main-content padding */
+    z-index: 50;
+    margin: -100px -24px 24px -24px;
+    padding: 24px 24px;
+    border-bottom: 1px solid transparent;
+  }
+
   .header-content {
     position: relative;
     z-index: 2;

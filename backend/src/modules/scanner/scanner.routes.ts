@@ -31,7 +31,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     
     if (!exists) {
       // 2. Set Cooldown & Push Job
-      await redis.set(cooldownKey, '1', 'EX', 60); // 60 seconds
+      await redis.set(cooldownKey, '1', 'EX', 5); // 5 seconds
       await scannerQueue.add('scan-directory', { folderPath });
     }
 
