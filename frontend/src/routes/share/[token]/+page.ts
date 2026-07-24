@@ -9,7 +9,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
     const data = await res.json();
     return {
       share: data.share,
-      files: data.files
+      files: data.files,
+      folderCoverId: data.folderCoverId
     };
   } catch (error) {
     return { error: 'Invalid or expired share link', files: [] };

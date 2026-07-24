@@ -6,7 +6,7 @@
   import BlurhashImage from './BlurhashImage.svelte';
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight } from '@lucide/svelte';
 
-  let { media }: { media: MediaFile } = $props();
+  let { media, allowDownload = true }: { media: MediaFile, allowDownload?: boolean } = $props();
   const dispatch = createEventDispatcher();
   
   function close() {
@@ -94,9 +94,11 @@
   <div class="layout-wrapper">
     <div class="main-area">
       <div class="top-bar" on:click|stopPropagation>
-        <button class="icon-btn" on:click={download} title="Download">
-          <Download size={20} strokeWidth={2} />
-        </button>
+        {#if allowDownload}
+          <button class="icon-btn" on:click={download} title="Download">
+            <Download size={20} strokeWidth={2} />
+          </button>
+        {/if}
         <button class="icon-btn" on:click={share} title="Share">
           <Share2 size={20} strokeWidth={2} />
         </button>
