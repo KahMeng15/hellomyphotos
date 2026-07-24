@@ -1,8 +1,4 @@
-Here is a comprehensive **Technical Product Requirement Document (PRD)** tailored specifically for your custom directory-first, low-bandwidth, high-concurrency photo gallery system using **Node.js (TypeScript)** for the backend stack.
-
----
-
-# Technical Product Requirement Document (PRD)
+# hellomyphotos Technical Product Requirement Document (PRD)
 
 **Project Name:** Directory-First High-Performance Gallery Engine
 
