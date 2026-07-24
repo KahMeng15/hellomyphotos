@@ -5,13 +5,14 @@ export const load: PageLoad = async ({ params, fetch }) => {
   const folderPath = params.path || '';
   try {
     // SvelteKit custom fetch can be injected if needed, but we use our wrapper
-    const files = await fetchFolderContent(folderPath);
+    const data = await fetchFolderContent(folderPath);
     return {
       folderPath,
-      files
+      files: data.files,
+      directories: data.directories
     };
   } catch (error) {
     console.error('Failed to load folder:', error);
-    return { folderPath, files: [] };
+    return { folderPath, files: [], directories: [] };
   }
 };

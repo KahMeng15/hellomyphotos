@@ -2,7 +2,7 @@
   import { getThumbnailUrl } from '$lib/api/media';
   import type { PageData } from './$types';
   
-  export let data: PageData;
+  let { data }: { data: PageData } = $props();
 </script>
 
 <div class="header">

@@ -1,7 +1,11 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import fs from 'fs';
+import path from 'path';
 import { redis } from '../../config/redis';
 import { scannerQueue } from '../../queue/scannerQueue';
 import { query } from '../../config/db';
+
+const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
 export async function scannerRoutes(fastify: FastifyInstance) {
   
@@ -25,10 +29,26 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       [folderPath]
     );
 
+    // 4. Dynamically list subdirectories directly from disk (fast)
+    const fullPath = path.join(MEDIA_ROOT, folderPath);
+    let directories: string[] = [];
+    try {
+      if (fs.existsSync(fullPath)) {
+        const items = await fs.promises.readdir(fullPath, { withFileTypes: true });
+        directories = items
+          .filter(item => item.isDirectory())
+          .map(item => item.name)
+          .sort();
+      }
+    } catch (e) {
+      console.error(`Failed to read directory: ${fullPath}`, e);
+    }
+
     return reply.send({
       folderPath,
       scanning: !exists, // Indicate if a scan was just triggered
-      files: result.rows
+      files: result.rows,
+      directories
     });
   });
 }

@@ -5,7 +5,7 @@
   import { getPreviewUrl, getStreamUrl } from '$lib/api/media';
   import { lowBandwidthMode } from '$lib/stores/settings';
 
-  export let media: MediaFile;
+  let { media }: { media: MediaFile } = $props();
   const dispatch = createEventDispatcher();
   
   function close() {

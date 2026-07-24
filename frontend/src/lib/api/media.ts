@@ -9,12 +9,12 @@ export interface MediaFile {
 
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-export async function fetchFolderContent(folderPath: string): Promise<MediaFile[]> {
+export async function fetchFolderContent(folderPath: string): Promise<{ files: MediaFile[], directories: string[] }> {
   // Use Vite's dev server proxy or direct URL
   const res = await fetch(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`);
   if (!res.ok) throw new Error('Failed to fetch folder');
   const data = await res.json();
-  return data.files;
+  return { files: data.files, directories: data.directories || [] };
 }
 
 export function getThumbnailUrl(id: string): string {

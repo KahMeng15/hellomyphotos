@@ -17,3 +17,15 @@ volumes/ml_cache/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*.log
+
+# OS & Editor files
+**/.DS_Store
+.DS_Store
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

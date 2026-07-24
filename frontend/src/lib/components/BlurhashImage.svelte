@@ -2,9 +2,7 @@
   import { onMount } from 'svelte';
   import { decode } from 'blurhash';
 
-  export let hash: string;
-  export let src: string;
-  export let alt: string = '';
+  let { hash, src, alt = '' }: { hash: string, src: string, alt?: string } = $props();
   
   let canvas: HTMLCanvasElement;
   let imgLoaded = false;
