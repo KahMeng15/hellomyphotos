@@ -24,12 +24,7 @@ The goal of this project is to build a self-hosted, directory-first photo galler
                                   ┌───────────────────────────┐
                                   │      Client Browsers      │
                                   └─────────────┬─────────────┘
-                                                │ (HTTPS / SSE / WebSockets)
-                                                ▼
-                                  ┌───────────────────────────┐
-                                  │   Reverse Proxy (Caddy)   │
-                                  └─────────────┬─────────────┘
-                                                │
+                                                │ (HTTP / SSE / WebSockets)
                  ┌──────────────────────────────┴──────────────────────────────┐
                  ▼                                                             ▼
 ┌─────────────────────────────────┐                           ┌─────────────────────────────────┐
@@ -58,6 +53,9 @@ The goal of this project is to build a self-hosted, directory-first photo galler
 2. Query Redis for key: `scan_cooldown:<folder_path>`.
 3. **If Key Exists:** Serve directory tree directly from PostgreSQL cache.
 4. **If Key Missing:** Set `scan_cooldown:<folder_path>` in Redis with a 60-second TTL. Push a background job via BullMQ to run `fs.promises.readdir` on that specific path and insert/update missing file entries in PostgreSQL.
+* **Periodic Background Scanning:** A scheduled cron job (configurable via admin settings) will periodically scan the root directory to find new files dropped via FTP/SMB, complementing on-demand scans.
+* **Symbolic Links:** The scanner will detect and safely handle `fs.Dirent.isSymbolicLink()` to prevent infinite loops.
+* **Garbage Collection:** Scans will identify missing files and prune orphaned database rows, embeddings, and cached thumbnails.
 
 
 
@@ -65,8 +63,10 @@ The goal of this project is to build a self-hosted, directory-first photo galler
 
 * **Pre-Processing Pipeline:** Background workers process newly indexed files using `sharp` (C++ bindings) and `ffmpeg` (spawned child processes):
 * **Blurhash / Micro-placeholder:** String (~2 KB) saved directly into PostgreSQL for instant layout rendering.
-* **Display Preview:** WebP format, max 1080p, quality 80 (~80–120 KB). Metadata headers (EXIF/GPS) explicitly stripped.
-* **Low-Res Mobile Preview:** WebP format, max 480p, quality 65 (~30 KB).
+* **Thumbnail Cache Directory:** A dedicated read-write Docker volume for storing generated thumbnails and cached assets, preventing RAM exhaustion.
+* **Display Preview:** WebP format, max 1080p, quality 80 (~80–120 KB). Metadata headers (EXIF/GPS) explicitly stripped. Saved to the cache directory.
+* **Low-Res Mobile Preview:** WebP format, max 480p, quality 65 (~30 KB). Saved to the cache directory.
+* **Video Support:** Video files will generate a WebP thumbnail via `ffmpeg`. Direct streaming (HTTP range requests) will be supported for playback.
 
 
 * **Low-Bandwidth Mode:** Client settings toggle to force serving 480p low-res previews instead of 1080p previews across grid items and lightboxes.
@@ -128,7 +128,8 @@ To prevent worker tasks from starving host system resources:
                                             │
                                             ▼
                   ┌──────────────────────────────────────────────────┐
-                  │       Write `settings:max_cpu_cores` to Redis    │
+                  │       Write `settings:max_cpu_cores` &           │
+                  │       `settings:scan_interval` to Redis          │
                   └─────────────────────────┬────────────────────────┘
                                             │
                  ┌──────────────────────────┴──────────────────────────┐
@@ -146,8 +147,9 @@ To prevent worker tasks from starving host system resources:
 ## 5. Database Schema (PostgreSQL + `pgvector`)
 
 ```sql
--- Enable Vector Extension
+-- Enable Extensions
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS ltree;
 
 -- Files & Folder Index
 CREATE TABLE media_files (
