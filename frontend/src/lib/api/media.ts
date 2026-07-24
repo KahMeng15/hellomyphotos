@@ -10,7 +10,13 @@ export interface MediaFile {
 
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-export async function fetchFolderContent(folderPath: string): Promise<{ files: MediaFile[], directories: string[], scanning: boolean }> {
+export interface DirectoryInfo {
+  name: string;
+  cover_id: string | null;
+  blurhash: string | null;
+}
+
+export async function fetchFolderContent(folderPath: string): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean }> {
   // Use Vite's dev server proxy or direct URL
   const res = await fetch(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`);
   if (!res.ok) throw new Error('Failed to fetch folder');

@@ -29,16 +29,28 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       [folderPath]
     );
 
-    // 4. Dynamically list subdirectories directly from disk (fast)
+    // 4. Dynamically list subdirectories and find their cover images
     const fullPath = path.join(MEDIA_ROOT, folderPath);
-    let directories: string[] = [];
+    let directories: { name: string, cover_id: string | null, blurhash: string | null }[] = [];
     try {
       if (fs.existsSync(fullPath)) {
         const items = await fs.promises.readdir(fullPath, { withFileTypes: true });
-        directories = items
-          .filter(item => item.isDirectory())
-          .map(item => item.name)
-          .sort();
+        
+        const dirNames = items.filter(item => item.isDirectory()).map(item => item.name);
+        
+        directories = await Promise.all(dirNames.map(async (name) => {
+          const subPath = folderPath ? `${folderPath}/${name}` : name;
+          // Find the first media file inside this directory or its subdirectories
+          const coverResult = await query(`SELECT id, blurhash FROM media_files WHERE folder_path LIKE $1 LIMIT 1`, [`${subPath}%`]);
+          
+          return {
+            name,
+            cover_id: coverResult.rows[0]?.id || null,
+            blurhash: coverResult.rows[0]?.blurhash || null
+          };
+        }));
+        
+        directories.sort((a, b) => a.name.localeCompare(b.name));
       }
     } catch (e) {
       console.error(`Failed to read directory: ${fullPath}`, e);

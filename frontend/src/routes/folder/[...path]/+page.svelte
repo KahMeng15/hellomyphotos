@@ -49,7 +49,9 @@
 
 <div class="header">
   <div class="header-left">
-    <div class="subheading">{data.folderPath || '/'}</div>
+    {#if data.folderPath}
+      <div class="subheading">{data.folderPath}</div>
+    {/if}
     <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
   </div>
   <span class="count">
@@ -60,11 +62,22 @@
 {#if data.directories.length > 0}
   <div class="dir-grid">
     {#each data.directories as dir}
-      <a href="/folder/{data.folderPath ? data.folderPath + '/' + dir : dir}" class="dir-item">
-        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="dir-icon">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-        </svg>
-        <span class="dir-name">{dir}</span>
+      <a href="/folder/{data.folderPath ? data.folderPath + '/' + dir.name : dir.name}" class="dir-card">
+        <div class="dir-cover">
+          {#if dir.cover_id}
+            <BlurhashImage 
+              hash={dir.blurhash || ''} 
+              src={`${getThumbnailUrl(dir.cover_id)}${dir.blurhash ? '?cb=' + encodeURIComponent(dir.blurhash) : ''}`} 
+              alt={dir.name}
+              objectFit="cover"
+            />
+          {:else}
+            <div class="dir-placeholder"></div>
+          {/if}
+        </div>
+        <div class="dir-info">
+          <span class="dir-name">{dir.name}</span>
+        </div>
       </a>
     {/each}
   </div>
@@ -128,37 +141,47 @@
 
   .dir-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 16px;
-    margin-bottom: 32px;
+    margin-bottom: 48px;
   }
 
-  .dir-item {
+  .dir-card {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 16px;
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-radius: 8px;
-    color: var(--text-color);
+    flex-direction: column;
     text-decoration: none;
-    transition: all 0.2s ease;
+    color: var(--text-color);
+    background: transparent;
+    overflow: hidden;
+    transition: filter 0.2s ease;
   }
 
-  .dir-item:hover {
-    background: rgba(255, 255, 255, 0.1);
-    transform: translateY(-2px);
+  .dir-card:hover {
+    filter: brightness(1.2);
   }
 
-  .dir-icon {
-    color: var(--accent-color);
-    flex-shrink: 0;
+  .dir-cover {
+    width: 100%;
+    aspect-ratio: 1;
+    position: relative;
+    overflow: hidden;
+    background: #111;
+  }
+
+  .dir-placeholder {
+    width: 100%;
+    height: 100%;
+    background: #111;
+  }
+
+  .dir-info {
+    padding: 12px 0;
   }
 
   .dir-name {
-    font-weight: 500;
-    font-size: 0.875rem;
+    font-family: 'Cabinet Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 1.125rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

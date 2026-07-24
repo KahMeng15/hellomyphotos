@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { decode } from 'blurhash';
 
-  let { hash, src, alt = '', isVideo = false, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, onclick?: (e: MouseEvent) => void } = $props();
+  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', onclick?: (e: MouseEvent) => void } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
@@ -57,10 +57,10 @@
 </script>
 
 <div class="grid-item" style="flex-grow: {aspectRatio}; flex-basis: {targetHeight * aspectRatio}px;" {onclick}>
-  <div bind:this={container} class="image-container">
+  <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'};">
     <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
     {#if visible}
-      <img {src} {alt} loading="lazy" onload={handleLoad} class:loaded={imgLoaded} />
+      <img {src} {alt} loading="lazy" onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'};" />
     {/if}
   </div>
   {#if isVideo}
@@ -130,9 +130,7 @@
   }
 
   img {
-    height: auto;
     width: 100%;
-    object-fit: contain;
     opacity: 0;
     transition: opacity 0.3s ease-in;
     border-radius: 0;

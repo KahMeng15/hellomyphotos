@@ -15,7 +15,7 @@
     </div>
     
     <nav class="sidebar-nav">
-      <a href="/">Photos</a>
+      <a href="/folder">Photos</a>
       <a href="/faces">Faces</a>
       <a href="/timeline">Timeline</a>
       <a href="/settings">Settings</a>
