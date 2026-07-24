@@ -1,0 +1,19 @@
+node_modules/
+.DS_Store
+.env
+dist/
+build/
+.svelte-kit/
+coverage/
+
+# Docker persistent volumes
+volumes/pg_data/
+volumes/redis_data/
+volumes/cache_rw/
+volumes/media_ro/
+volumes/ml_cache/
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

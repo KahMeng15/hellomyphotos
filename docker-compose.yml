@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:3000
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "3000:3000"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=hellomyphotos
+      - DB_PASS=hellomyphotos_secret
+      - DB_NAME=hellomyphotos
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - IMMICH_ML_URL=http://machine-learning:3003
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./volumes/media_ro:/app/media:ro
+      - ./volumes/cache_rw:/app/cache:rw
+
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    environment:
+      - POSTGRES_USER=hellomyphotos
+      - POSTGRES_PASSWORD=hellomyphotos_secret
+      - POSTGRES_DB=hellomyphotos
+    volumes:
+      - ./volumes/pg_data:/var/lib/postgresql/data
+      - ./volumes/pg_init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - ./volumes/redis_data:/data
+    ports:
+      - "6379:6379"
+
+  machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:release
+    environment:
+      - MACHINE_LEARNING_WORKERS=1
+      - MACHINE_LEARNING_WORKER_TIMEOUT=120
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./volumes/ml_cache:/cache
