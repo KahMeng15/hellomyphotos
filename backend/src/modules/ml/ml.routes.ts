@@ -6,12 +6,14 @@ export async function mlRoutes(fastify: FastifyInstance) {
   // Get all unique people clusters (with a representative face image)
   fastify.get('/api/faces', async (request, reply) => {
     const result = await query(`
-      SELECT DISTINCT ON (person_id) 
-        person_id, 
-        media_id, 
-        bounding_box 
-      FROM face_embeddings
-      ORDER BY person_id, created_at DESC
+      SELECT DISTINCT ON (f.person_id) 
+        f.person_id, 
+        f.media_id, 
+        f.bounding_box,
+        m.blurhash
+      FROM face_embeddings f
+      JOIN media_files m ON m.id = f.media_id
+      ORDER BY f.person_id, f.created_at DESC
     `);
     
     return reply.send(result.rows);
@@ -22,7 +24,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
     const { id } = request.params;
     
     const result = await query(`
-      SELECT m.* 
+      SELECT m.*, f.bounding_box
       FROM media_files m
       JOIN face_embeddings f ON m.id = f.media_id
       WHERE f.person_id = $1

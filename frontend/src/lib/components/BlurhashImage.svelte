@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { decode } from 'blurhash';
 
-  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', onclick?: (e: MouseEvent) => void } = $props();
+  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, onclick?: (e: MouseEvent) => void } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
@@ -11,13 +11,22 @@
   let container: HTMLDivElement | undefined = $state();
   
   let aspectRatio = $state(1.5);
-  const targetHeight = 250; 
+  const targetHeight = 250;
+  
+  let objectPosition = $state('center');
 
   
   function handleLoad(e: Event) {
     const img = e.target as HTMLImageElement;
     if (img.naturalWidth && img.naturalHeight) {
       aspectRatio = img.naturalWidth / img.naturalHeight;
+      if (faceBox) {
+        const cx = (faceBox.x1 + faceBox.x2) / 2;
+        const cy = (faceBox.y1 + faceBox.y2) / 2;
+        const px = Math.max(0, Math.min(100, (cx / img.naturalWidth) * 100));
+        const py = Math.max(0, Math.min(100, (cy / img.naturalHeight) * 100));
+        objectPosition = `${px}% ${py}%`;
+      }
     }
     imgLoaded = true;
   }
@@ -60,7 +69,7 @@
   <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'};">
     <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
     {#if visible}
-      <img {src} {alt} loading="lazy" onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'};" />
+      <img {src} {alt} loading="lazy" onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? 'transform: scale(3.5);' : ''}" />
     {/if}
   </div>
   {#if isVideo}

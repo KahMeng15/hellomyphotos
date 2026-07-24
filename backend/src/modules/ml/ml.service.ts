@@ -18,7 +18,15 @@ export class MLService {
       
       // Constructing multipart form data manually for native fetch simplicity
       const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
+      const entriesJson = JSON.stringify({
+        "facial-recognition": {
+          "recognition": { "modelName": "buffalo_l" },
+          "detection": { "modelName": "buffalo_l" }
+        }
+      });
+      
       const body = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="entries"\r\n\r\n${entriesJson}\r\n`),
         Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="image.webp"\r\nContent-Type: image/webp\r\n\r\n`),
         imageBuffer,
         Buffer.from(`\r\n--${boundary}--`)
@@ -38,10 +46,10 @@ export class MLService {
 
       const data = await response.json();
       // Immich returns an array of bounding boxes and embeddings
-      
-      for (const face of data.faces || []) {
+      console.log('[ML] Data:', JSON.stringify(data));
+      for (const face of data['facial-recognition'] || []) {
         const { boundingBox, embedding } = face;
-        const embeddingString = `[${embedding.join(',')}]`;
+        const embeddingString = typeof embedding === 'string' ? embedding : `[${embedding.join(',')}]`;
         
         // Find existing person cluster via Cosine Similarity distance (< 0.6 is a common threshold for buffalo_l)
         const matchResult = await query(`

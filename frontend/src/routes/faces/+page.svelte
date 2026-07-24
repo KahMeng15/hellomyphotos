@@ -1,4 +1,5 @@
 <script lang="ts">
+  import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import { getThumbnailUrl } from '$lib/api/media';
   import type { PageData } from './$types';
   
@@ -13,11 +14,12 @@
 <div class="grid">
   {#each data.faces as face}
     <a href="/faces/{face.person_id}" class="grid-item">
-      <img 
+      <BlurhashImage 
+        hash={face.blurhash || ''}
         src={getThumbnailUrl(face.media_id)} 
         alt="Person {face.person_id}"
-        loading="lazy"
-        style="object-position: {face.bounding_box.x * 100}% {face.bounding_box.y * 100}%;"
+        objectFit="cover"
+        faceBox={face.bounding_box}
       />
     </a>
   {/each}
@@ -68,11 +70,5 @@
     border-color: var(--accent-color);
   }
   
-  .grid-item img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    /* Zoom into the face using transform scale if needed, but object-position helps center it */
-    transform: scale(1.5);
-  }
+
 </style>

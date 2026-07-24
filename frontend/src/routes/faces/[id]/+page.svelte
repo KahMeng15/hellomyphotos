@@ -44,6 +44,8 @@
         hash={file.blurhash || ''} 
         src={getThumbnailUrl(file.id)} 
         alt={file.file_name} 
+        objectFit="cover"
+        faceBox={file.bounding_box}
       />
     </div>
   {/each}
