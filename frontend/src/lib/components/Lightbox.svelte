@@ -4,6 +4,7 @@
   import type { MediaFile } from '$lib/api/media';
   import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces } from '$lib/api/media';
   import BlurhashImage from './BlurhashImage.svelte';
+  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight } from '@lucide/svelte';
 
   let { media }: { media: MediaFile } = $props();
   const dispatch = createEventDispatcher();
@@ -67,17 +68,17 @@
 <div class="lightbox" transition:fade={{ duration: 150 }} on:click={close}>
   <div class="top-bar" on:click|stopPropagation>
     <button class="icon-btn" on:click={download} title="Download">
-      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+      <Download size={20} strokeWidth={2} />
     </button>
     <button class="icon-btn" on:click={share} title="Share">
-      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+      <Share2 size={20} strokeWidth={2} />
     </button>
     <button class="icon-btn {showInfo ? 'active' : ''}" on:click={toggleInfo} title="Info">
-      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+      <Info size={20} strokeWidth={2} />
     </button>
     <div style="position: relative;">
       <button class="icon-btn" on:click={() => showMenu = !showMenu} title="More">
-        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+        <MoreHorizontal size={20} strokeWidth={2} />
       </button>
       {#if showMenu}
         <div class="dropdown-menu">
@@ -85,12 +86,14 @@
         </div>
       {/if}
     </div>
-    <button class="icon-btn close-btn" on:click={close} title="Close">&times;</button>
+    <button class="icon-btn close-btn" on:click={close} title="Close">
+      <X size={24} strokeWidth={2} />
+    </button>
   </div>
   
   <div class="main-area" class:with-sidebar={showInfo}>
     <button class="nav-btn prev-btn" on:click|stopPropagation={() => dispatch('prev')}>
-      <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      <ChevronLeft size={32} strokeWidth={2} />
     </button>
     
     <div class="content" on:click|stopPropagation>
@@ -105,7 +108,7 @@
     </div>
     
     <button class="nav-btn next-btn" on:click|stopPropagation={() => dispatch('next')}>
-      <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      <ChevronRight size={32} strokeWidth={2} />
     </button>
   </div>
 

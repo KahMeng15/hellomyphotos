@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { decode } from 'blurhash';
+  import { Play } from '@lucide/svelte';
 
   let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, onclick?: (e: MouseEvent) => void } = $props();
   
@@ -86,9 +87,7 @@
   </div>
   {#if isVideo}
     <div class="video-indicator">
-      <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="5 3 19 12 5 21 5 3"></polygon>
-      </svg>
+      <Play size={16} fill="white" />
     </div>
   {/if}
 </div>
