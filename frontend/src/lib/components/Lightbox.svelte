@@ -323,7 +323,7 @@
     width: 350px;
     flex-shrink: 0;
     height: 100%;
-    background: #0f172a;
+    background: #000000;
     border-left: 1px solid rgba(255,255,255,0.1);
     padding: 80px 24px 24px 24px;
     overflow-y: auto;
@@ -387,9 +387,8 @@
 
   .media-element {
     max-width: 100%;
-    max-height: 90vh;
+    max-height: 100%;
     object-fit: contain;
     border-radius: 0;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
   }
 </style>
