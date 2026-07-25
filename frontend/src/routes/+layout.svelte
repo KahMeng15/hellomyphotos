@@ -6,12 +6,12 @@
   import { goto } from '$app/navigation';
   import { getAuthUser, logout } from '$lib/api/auth';
   
-  let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/'));
+  let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login');
   let currentUser = $state<any>(null);
   let isAuthChecking = $state(true);
 
   $effect(() => {
-    if ($page.url.pathname.startsWith('/share/')) {
+    if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') {
       isSidebarOpen = false;
     }
   });
@@ -121,7 +121,7 @@
     </aside>
   {/if}
 
-  <main class="main-content">
+  <main class="main-content {$page.url.pathname === '/login' ? 'no-padding' : ''}">
     {#if isAuthChecking && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login'}
       <div class="loading-overlay">
         <div class="spinner"></div>
@@ -131,13 +131,15 @@
         <slot />
       </div>
     {/if}
-    <footer class="app-footer">
-      <p>Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a></p>
-      <p>Learn more about this app at <a href="https://kahmeng15.github.io/hellomyphotos" target="_blank" rel="noopener noreferrer">kahmeng15.github.io/hellomyphotos</a></p>
-    </footer>
+    {#if $page.url.pathname !== '/login'}
+      <footer class="app-footer">
+        <p>Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a></p>
+        <p>Learn more about this app at <a href="https://kahmeng15.github.io/hellomyphotos" target="_blank" rel="noopener noreferrer">kahmeng15.github.io/hellomyphotos</a></p>
+      </footer>
+    {/if}
   </main>
 
-  {#if !isSidebarOpen}
+  {#if !isSidebarOpen && $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/share/')}
     <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => isSidebarOpen = true} title="Open sidebar">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg>
     </button>
@@ -160,6 +162,11 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
+    box-sizing: border-box;
+  }
+
+  .main-content.no-padding {
+    padding: 0;
   }
 
   .slot-wrapper {

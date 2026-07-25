@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { login } from '$lib/api/auth';
-  import { ShieldAlert, LogIn, Lock } from '@lucide/svelte';
+  import { ShieldAlert } from '@lucide/svelte';
 
   let email = $state('');
   let password = $state('');
@@ -15,7 +15,6 @@
 
     try {
       const res = await login(email, password);
-      // Store user info if needed, but cookie handles auth
       goto('/'); // Redirect to dashboard
     } catch (err: any) {
       error = err.message || 'Invalid credentials';
@@ -26,61 +25,60 @@
 </script>
 
 <svelte:head>
-  <title>Login - HelloMyPhotos</title>
+  <title>Login - hellomyphotos</title>
 </svelte:head>
 
 <div class="login-container">
-  <div class="ambient-glow"></div>
+  <div class="hero-pane">
+    <div class="ambient-glow"></div>
+  </div>
   
-  <div class="login-card">
-    <div class="logo">
-      <Lock size={48} strokeWidth={1.5} color="rgba(255,255,255,0.9)" />
+  <div class="form-pane">
+    <div class="login-card">
+      <h1>hellomyphotos</h1>
+      <p class="subtitle">Hello! Log in to explore your photo collection.</p>
+
+      {#if error}
+        <div class="error-banner">
+          <ShieldAlert size={20} />
+          <span>{error}</span>
+        </div>
+      {/if}
+
+      <form onsubmit={handleSubmit}>
+        <div class="input-group">
+          <label for="email">Email Address</label>
+          <input 
+            type="email" 
+            id="email" 
+            bind:value={email} 
+            placeholder="admin@example.com" 
+            required 
+            autocomplete="username"
+          />
+        </div>
+        
+        <div class="input-group">
+          <label for="password">Password</label>
+          <input 
+            type="password" 
+            id="password" 
+            bind:value={password} 
+            placeholder="••••••••" 
+            required 
+            autocomplete="current-password"
+          />
+        </div>
+
+        <button type="submit" class="submit-btn" disabled={loading || !email || !password}>
+          {#if loading}
+            <div class="spinner"></div>
+          {:else}
+            Login
+          {/if}
+        </button>
+      </form>
     </div>
-    
-    <h1>Welcome Back</h1>
-    <p class="subtitle">Enter your credentials to access your secure vault.</p>
-
-    {#if error}
-      <div class="error-banner">
-        <ShieldAlert size={20} />
-        <span>{error}</span>
-      </div>
-    {/if}
-
-    <form onsubmit={handleSubmit}>
-      <div class="input-group">
-        <label for="email">Email Address</label>
-        <input 
-          type="email" 
-          id="email" 
-          bind:value={email} 
-          placeholder="admin@example.com" 
-          required 
-          autocomplete="username"
-        />
-      </div>
-      
-      <div class="input-group">
-        <label for="password">Password</label>
-        <input 
-          type="password" 
-          id="password" 
-          bind:value={password} 
-          placeholder="••••••••" 
-          required 
-          autocomplete="current-password"
-        />
-      </div>
-
-      <button type="submit" class="submit-btn" disabled={loading || !email || !password}>
-        {#if loading}
-          <div class="spinner"></div>
-        {:else}
-          <LogIn size={20} />
-          Sign In
-        {/if}
-      </button>
-    </form>
   </div>
 </div>
 
@@ -92,66 +90,69 @@
   }
 
   .login-container {
-    min-height: 100vh;
+    height: 100%;
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  /* Left Side: Colorful Gradient */
+  .hero-pane {
+    flex: 1;
+    position: relative;
+    background: linear-gradient(-45deg, #ee7752, #e73c7e, #8b5cf6, #3b82f6);
+    background-size: 400% 400%;
+    animation: gradientShift 15s ease infinite;
+    overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
-    position: relative;
-    overflow: hidden;
+  }
+
+  @keyframes gradientShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
   }
 
   .ambient-glow {
     position: absolute;
-    width: 600px;
-    height: 600px;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.15) 50%, rgba(0, 0, 0, 0) 70%);
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    filter: blur(60px);
-    z-index: 0;
-    animation: pulse 8s ease-in-out infinite alternate;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle at center, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0) 60%);
+    filter: blur(80px);
+    animation: pulseGlow 8s ease-in-out infinite alternate;
+    mix-blend-mode: overlay;
   }
 
-  @keyframes pulse {
-    0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
-    100% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+  @keyframes pulseGlow {
+    0% { transform: scale(1) translate(-5%, -5%); opacity: 0.5; }
+    100% { transform: scale(1.2) translate(5%, 5%); opacity: 1; }
+  }
+
+  /* Right Side: Login Form */
+  .form-pane {
+    flex: 1;
+    background-color: #050505;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
   }
 
   .login-card {
-    position: relative;
-    z-index: 1;
-    background: rgba(25, 25, 25, 0.6);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 3rem 2.5rem;
-    border-radius: 24px;
     width: 100%;
-    max-width: 400px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    max-width: 420px;
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     box-sizing: border-box;
-  }
-
-  .logo {
-    width: 80px;
-    height: 80px;
-    background: linear-gradient(135deg, rgba(99,102,241,0.2) 0%, rgba(168,85,247,0.2) 100%);
-    border-radius: 20px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 1.5rem;
-    border: 1px solid rgba(255,255,255,0.05);
-    box-shadow: inset 0 0 20px rgba(255,255,255,0.05);
   }
 
   h1 {
     margin: 0 0 0.5rem 0;
-    font-size: 1.75rem;
+    font-size: 2rem;
     font-weight: 600;
     color: #fff;
     letter-spacing: -0.02em;
@@ -159,9 +160,10 @@
 
   .subtitle {
     color: #a1a1aa;
-    font-size: 0.95rem;
-    margin: 0 0 2rem 0;
-    text-align: center;
+    font-size: 1rem;
+    margin: 0 0 2.5rem 0;
+    text-align: left;
+    line-height: 1.5;
   }
 
   form {
@@ -182,10 +184,11 @@
     font-weight: 500;
     color: #d4d4d8;
     margin-left: 0.25rem;
+    text-align: left;
   }
 
   input {
-    background: rgba(0, 0, 0, 0.3);
+    background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
     padding: 0.875rem 1rem;
     border-radius: 12px;
@@ -198,7 +201,7 @@
 
   input:focus {
     border-color: rgba(168, 85, 247, 0.5);
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(255, 255, 255, 0.08);
     box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.1);
   }
 
@@ -216,12 +219,14 @@
     font-size: 1rem;
     font-weight: 600;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     justify-content: center;
     align-items: center;
     gap: 0.5rem;
     transition: all 0.3s ease;
     box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3);
+    align-self: flex-start;
+    min-width: 120px;
   }
 
   .submit-btn:hover:not(:disabled) {
@@ -261,5 +266,18 @@
 
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  /* Responsive Design */
+  @media (max-width: 768px) {
+    .login-container {
+      flex-direction: column;
+    }
+    .hero-pane {
+      flex: 0 0 200px;
+    }
+    .form-pane {
+      flex: 1;
+    }
   }
 </style>
