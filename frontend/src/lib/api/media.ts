@@ -9,7 +9,7 @@ export interface MediaFile {
   aspectRatio?: number;
 }
 
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+export const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export interface DirectoryInfo {
   name: string;

@@ -117,8 +117,8 @@
   $effect(() => {
     if (fallbackCoverId) {
       coverBackgroundPosition = 'center 50%'; // Default
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-      fetch(`${baseUrl}/api/media/${fallbackCoverId}/faces`)
+      const baseUrl = import.meta.env.VITE_API_URL || '';
+      fetch(`${baseUrl}/api/media/${fallbackCoverId}/faces`, { credentials: 'include' })
         .then(r => r.json())
         .then(faces => {
           if (faces && faces.length > 0) {
