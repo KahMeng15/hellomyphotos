@@ -95,7 +95,6 @@
 <div class="admin-container">
   <div class="header">
     <div>
-      <a href="/admin" class="back-link">← Back to Admin Settings</a>
       <h2>User Management</h2>
       <p>Manage user accounts, roles, and folder access scopes.</p>
     </div>
@@ -216,9 +215,7 @@
 
 <style>
   .admin-container {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 2rem;
+    width: 100%;
     color: #f4f4f5;
   }
 
@@ -229,13 +226,7 @@
     margin-bottom: 2rem;
   }
 
-  .back-link {
-    color: #a855f7;
-    text-decoration: none;
-    font-size: 0.9rem;
-    display: inline-block;
-    margin-bottom: 1rem;
-  }
+
 
   h2 {
     font-size: 2rem;

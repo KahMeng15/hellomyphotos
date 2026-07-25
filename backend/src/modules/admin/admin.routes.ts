@@ -93,20 +93,57 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.get('/api/admin/settings', async (request, reply) => {
-    const maxCores = await redis.get('settings:max_cpu_cores');
-    const scanInterval = await redis.get('settings:scan_interval');
+    const { rows } = await query('SELECT key, value FROM admin_settings');
+    const settings: any = {
+      maxCpuCores: 2,
+      scanInterval: 3600000,
+      mlConfidenceThreshold: 0.6,
+      throttleAuth: 0,
+      throttlePublic: 0,
+      rateLimitApi: 100,
+      watermarkText: 'hellomyphotos',
+      watermarkOpacity: 0.5,
+      watermarkPosition: 'center',
+      watermarkEnforceGlobal: false
+    };
     
-    return reply.send({
-      maxCpuCores: maxCores ? parseInt(maxCores, 10) : 2,
-      scanInterval: scanInterval ? parseInt(scanInterval, 10) : 3600000
-    });
+    for (const r of rows) {
+      if (r.key === 'max_cpu_cores') settings.maxCpuCores = r.value;
+      if (r.key === 'scan_interval') settings.scanInterval = r.value;
+      if (r.key === 'ml_confidence') settings.mlConfidenceThreshold = r.value;
+      if (r.key === 'throttle_auth') settings.throttleAuth = r.value;
+      if (r.key === 'throttle_public') settings.throttlePublic = r.value;
+      if (r.key === 'rate_limit_api') settings.rateLimitApi = r.value;
+      if (r.key === 'watermark_text') settings.watermarkText = r.value;
+      if (r.key === 'watermark_opacity') settings.watermarkOpacity = r.value;
+      if (r.key === 'watermark_position') settings.watermarkPosition = r.value;
+      if (r.key === 'watermark_enforce_global') settings.watermarkEnforceGlobal = r.value;
+    }
+    
+    return reply.send(settings);
   });
 
   fastify.put('/api/admin/settings', async (request, reply) => {
-    const { maxCpuCores, scanInterval } = request.body as any;
+    const { maxCpuCores, scanInterval, mlConfidenceThreshold, throttleAuth, throttlePublic, rateLimitApi, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal } = request.body as any;
     
-    if (maxCpuCores) await redis.set('settings:max_cpu_cores', String(maxCpuCores));
-    if (scanInterval) await redis.set('settings:scan_interval', String(scanInterval));
+    const updates = [];
+    if (maxCpuCores !== undefined) updates.push({ k: 'max_cpu_cores', v: maxCpuCores });
+    if (scanInterval !== undefined) updates.push({ k: 'scan_interval', v: scanInterval });
+    if (mlConfidenceThreshold !== undefined) updates.push({ k: 'ml_confidence', v: mlConfidenceThreshold });
+    if (throttleAuth !== undefined) updates.push({ k: 'throttle_auth', v: throttleAuth });
+    if (throttlePublic !== undefined) updates.push({ k: 'throttle_public', v: throttlePublic });
+    if (rateLimitApi !== undefined) updates.push({ k: 'rate_limit_api', v: rateLimitApi });
+    if (watermarkText !== undefined) updates.push({ k: 'watermark_text', v: watermarkText });
+    if (watermarkOpacity !== undefined) updates.push({ k: 'watermark_opacity', v: watermarkOpacity });
+    if (watermarkPosition !== undefined) updates.push({ k: 'watermark_position', v: watermarkPosition });
+    if (watermarkEnforceGlobal !== undefined) updates.push({ k: 'watermark_enforce_global', v: watermarkEnforceGlobal });
+    
+    for (const u of updates) {
+      await query(
+        'INSERT INTO admin_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()',
+        [u.k, JSON.stringify(u.v)]
+      );
+    }
     
     return reply.send({ success: true });
   });
@@ -142,4 +179,98 @@ export async function adminRoutes(fastify: FastifyInstance) {
     }
     return reply.send({ success: true, message: 'EXIF extraction initiated in the background' });
   });
+
+  fastify.get('/api/admin/logs', async (request, reply) => {
+    const { rows } = await query(`
+      SELECT l.id, l.level, l.message, l.ip_address, l.created_at, u.email as user_email
+      FROM system_logs l
+      LEFT JOIN users u ON l.user_id = u.id
+      ORDER BY l.created_at DESC
+      LIMIT 500
+    `);
+    return reply.send({ logs: rows });
+  });
+
+  fastify.get('/api/admin/analytics', async (request, reply) => {
+    try {
+      const stats = await query(`
+        SELECT 
+          (SELECT COUNT(*) FROM media_analytics WHERE event_type = 'view_shared_link') as total_shared_visits,
+          (SELECT COUNT(DISTINCT ip_address) FROM media_analytics) as unique_visitors,
+          (SELECT COUNT(*) FROM media_analytics WHERE event_type = 'download_shared_link') as total_shared_downloads
+      `);
+      
+      const linkRanking = await query(`
+        SELECT 
+          a.share_token, 
+          COALESCE(s.folder_path, s.media_id) as target,
+          COUNT(*) as visits
+        FROM media_analytics a
+        LEFT JOIN shared_folders s ON a.share_token = s.share_token
+        WHERE a.event_type = 'view_shared_link' AND a.share_token IS NOT NULL
+        GROUP BY a.share_token, target
+        ORDER BY visits DESC
+        LIMIT 10
+      `);
+
+      return reply.send({
+        kpis: {
+          totalSharedVisits: parseInt(stats.rows[0].total_shared_visits || '0'),
+          uniqueVisitors: parseInt(stats.rows[0].unique_visitors || '0'),
+          totalSharedDownloads: parseInt(stats.rows[0].total_shared_downloads || '0')
+        },
+        linkRanking: linkRanking.rows
+      });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // Active Shares Management
+  fastify.get('/api/admin/shares', async (request, reply) => {
+    try {
+      const { rows } = await query(`
+        SELECT s.*, 
+               (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.event_type = 'view_shared_link') as views,
+               (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.event_type = 'download_shared_link') as downloads
+        FROM shared_folders s
+        ORDER BY s.created_at DESC
+      `);
+      return reply.send({ shares: rows });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  fastify.delete('/api/admin/shares/:token', async (request, reply) => {
+    const { token } = request.params as any;
+    try {
+      await query('DELETE FROM shared_folders WHERE share_token = $1', [token]);
+      return reply.send({ success: true });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  fastify.post('/api/admin/faces/merge', async (request, reply) => {
+    const { targetPersonId, sourcePersonIds } = request.body as { targetPersonId: string, sourcePersonIds: string[] };
+    if (!targetPersonId || !sourcePersonIds || !sourcePersonIds.length) {
+      return reply.status(400).send({ error: 'Missing target or source person IDs' });
+    }
+    
+    try {
+      await query(
+        `UPDATE face_embeddings SET person_id = $1 WHERE person_id = ANY($2)`,
+        [targetPersonId, sourcePersonIds]
+      );
+      
+      return reply.send({ success: true, message: `Merged ${sourcePersonIds.length} face clusters into ${targetPersonId}` });
+    } catch (e: any) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
 }

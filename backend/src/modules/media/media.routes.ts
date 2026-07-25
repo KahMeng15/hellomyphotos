@@ -10,6 +10,18 @@ const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
 import { verifyMediaAccess } from '../../utils/auth';
 
+import { getThrottleLimit, BandwidthThrottler } from '../../utils/throttle';
+import { FastifyRequest, FastifyReply } from 'fastify';
+
+async function sendThrottled(request: FastifyRequest, reply: FastifyReply, stream: NodeJS.ReadableStream | Buffer) {
+  const isAuth = (request as any).user != null;
+  const limit = await getThrottleLimit(isAuth);
+  if (limit > 0 && typeof (stream as any).pipe === 'function') {
+    return reply.send((stream as any).pipe(new BandwidthThrottler(limit)));
+  }
+  return reply.send(stream);
+}
+
 export async function mediaRoutes(fastify: FastifyInstance) {
   
   fastify.get<{ Params: { id: string }, Querystring: { shareToken?: string } }>('/api/media/:id/thumbnail', async (request, reply) => {
@@ -22,7 +34,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     if (fs.existsSync(filePath)) {
       reply.header('Content-Type', 'image/webp');
       reply.header('Cache-Control', 'public, max-age=31536000');
-      return reply.send(fs.createReadStream(filePath));
+      return sendThrottled(request, reply, fs.createReadStream(filePath));
     }
     
     // Fallback: serve original if processing isn't done (for images only)
@@ -33,7 +45,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       if (fs.existsSync(fullPath) && file.mime_type.startsWith('image/')) {
         reply.header('Content-Type', file.mime_type);
         reply.header('Cache-Control', 'public, max-age=30'); // Short cache so they upgrade to webp later
-        return reply.send(fs.createReadStream(fullPath));
+        return sendThrottled(request, reply, fs.createReadStream(fullPath));
       }
     }
 
@@ -54,20 +66,21 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     if (fs.existsSync(filePath)) {
       reply.header('Content-Type', 'image/webp');
       
-      if (watermark === 'true') {
+      const wSettings = await WatermarkService.getSettings();
+      if (watermark === 'true' || wSettings.enforceGlobal) {
         reply.header('Cache-Control', 'private, no-store');
-        const buffer = await WatermarkService.addWatermarkToStream(filePath, 'HELLOMYPHOTOS');
-        return reply.send(buffer);
+        const buffer = await WatermarkService.addWatermarkToStream(filePath);
+        return sendThrottled(request, reply, buffer);
       } else {
         reply.header('Cache-Control', 'public, max-age=31536000');
-        return reply.send(fs.createReadStream(filePath));
+        return sendThrottled(request, reply, fs.createReadStream(filePath));
       }
     }
     // Fallback to 480p if 1080p isn't ready or doesn't exist (e.g. video thumbs)
     const fallback = path.join(CACHE_ROOT, '480p', `${id}.webp`);
     if (fs.existsSync(fallback)) {
       reply.header('Content-Type', 'image/webp');
-      return reply.send(fs.createReadStream(fallback));
+      return sendThrottled(request, reply, fs.createReadStream(fallback));
     }
     
     // Fallback to original image
@@ -78,7 +91,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       if (fs.existsSync(fullPath) && file.mime_type.startsWith('image/')) {
         reply.header('Content-Type', file.mime_type);
         reply.header('Cache-Control', 'public, max-age=30'); // Short cache
-        return reply.send(fs.createReadStream(fullPath));
+        return sendThrottled(request, reply, fs.createReadStream(fullPath));
       }
     }
 
@@ -100,11 +113,19 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     
     if (!fs.existsSync(fullPath)) return reply.status(404).send({ error: 'Source file missing' });
 
-    if (download === '1' || download === 'true') {
-      reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(file.file_name)}"`);
-    } else {
-      reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
-    }
+      const wSettings = await WatermarkService.getSettings();
+      if (download !== 'true' && download !== '1' && (watermark === 'true' || wSettings.enforceGlobal)) {
+        reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
+        reply.header('Cache-Control', 'private, no-store');
+        const buffer = await WatermarkService.addWatermarkToStream(fullPath);
+        return sendThrottled(request, reply, buffer);
+      }
+
+      if (download === '1' || download === 'true') {
+        reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(file.file_name)}"`);
+      } else {
+        reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
+      }
 
     const range = request.headers.range;
     if (range) {
@@ -118,11 +139,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       reply.header('Accept-Ranges', 'bytes');
       reply.header('Content-Length', chunksize);
       reply.header('Content-Type', file.mime_type);
-      return reply.send(fs.createReadStream(fullPath, { start, end }));
+      return sendThrottled(request, reply, fs.createReadStream(fullPath, { start, end }));
     } else {
       reply.header('Content-Length', file.size_bytes);
       reply.header('Content-Type', file.mime_type);
-      return reply.send(fs.createReadStream(fullPath));
+      return sendThrottled(request, reply, fs.createReadStream(fullPath));
     }
   });
 }

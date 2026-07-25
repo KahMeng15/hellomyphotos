@@ -4,6 +4,7 @@ import { mediaRoutes } from './modules/media/media.routes';
 import { mlRoutes } from './modules/ml/ml.routes';
 import { sharesRoutes } from './modules/shares/shares.routes';
 import { adminRoutes } from './modules/admin/admin.routes';
+import { queueRoutes } from './modules/admin/queue.routes';
 import { timelineRoutes } from './modules/timeline/timeline.routes';
 import { authRoutes } from './modules/auth/auth.routes';
 import cors from '@fastify/cors';
@@ -36,6 +37,7 @@ app.register(zipRoutes);
 app.register(mlRoutes);
 app.register(sharesRoutes);
 app.register(adminRoutes);
+app.register(queueRoutes);
 app.register(timelineRoutes);
 
 // Health check
