@@ -49,13 +49,13 @@
   });
 
   onMount(async () => {
-    if (!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login') {
-      try {
-        const user = await loadAuthUser();
-        if (!user) {
-          goto('/login');
-        }
-      } catch (err) {
+    try {
+      const user = await loadAuthUser();
+      if (!user && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login') {
+        goto('/login');
+      }
+    } catch (err) {
+      if (!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login') {
         goto('/login');
       }
     }
@@ -99,12 +99,16 @@
       </div>
       
       <nav class="sidebar-nav">
-        <a href="/folder">Photos</a>
-        <a href="/faces">Faces</a>
-        <a href="/timeline">Timeline</a>
-        <a href="/settings">Settings</a>
-        {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}
-          <a href="/admin">Admin</a>
+        {#if $currentUser}
+          <a href="/folder">Photos</a>
+          <a href="/faces">Faces</a>
+          <a href="/timeline">Timeline</a>
+          <a href="/settings">Settings</a>
+          {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}
+            <a href="/admin">Admin</a>
+          {/if}
+        {:else}
+          <a href="/login">Login</a>
         {/if}
       </nav>
 
@@ -152,7 +156,7 @@
     {/if}
   </main>
 
-  {#if !isSidebarOpen && $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/share/')}
+  {#if !isSidebarOpen && $page.url.pathname !== '/login'}
     <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => isSidebarOpen = true} title="Open sidebar">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg>
     </button>
