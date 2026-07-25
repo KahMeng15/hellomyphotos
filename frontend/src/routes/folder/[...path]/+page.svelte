@@ -1,9 +1,9 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, fetchMediaFaces } from '$lib/api/media';
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
-  import { invalidateAll } from '$app/navigation';
+  import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
@@ -198,12 +198,17 @@
       showAppAlert('Cannot Set Cover', 'This folder does not have a cover image to use.');
       return;
     }
+    localCoverOverride = dir.cover_id;
+    coverRefreshKey++;
+    if (!data.folderPath) savePref('rootFolderCover', dir.cover_id);
     try {
       await setFolderCover(data.folderPath || '', dir.cover_id);
       await invalidateAll();
+      showAppAlert('Cover Updated', 'Folder cover image has been updated.');
     } catch (e) {
+      localCoverOverride = null;
       console.error(e);
-      alert('Failed to set cover image.');
+      showAppAlert('Error', 'Failed to set cover image.');
     }
   }
 
@@ -271,20 +276,22 @@
   let headerWrapper: HTMLElement | undefined = $state();
   let pollInterval: ReturnType<typeof setInterval>;
 
+  let localCoverOverride: string | null = $state(loadPref<string | null>('rootFolderCover', null));
+
   let fallbackCoverId = $derived(
+    localCoverOverride ||
     data.folderCoverId || 
     (data.files.length > 0 ? data.files[0].id : null) || 
     (data.directories.find(d => d.cover_id)?.cover_id || null)
   );
 
   let coverBackgroundPosition = $state('center 50%');
+  let coverRefreshKey = $state(0);
 
   $effect(() => {
     if (fallbackCoverId) {
       coverBackgroundPosition = 'center 50%';
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-      fetch(`${baseUrl}/api/media/${fallbackCoverId}/faces`)
-        .then(r => r.json())
+      fetchMediaFaces(fallbackCoverId)
         .then(faces => {
           if (faces && faces.length > 0) {
             coverBackgroundPosition = 'center 25%';
@@ -359,7 +366,7 @@
 
 <div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
   {#if fallbackCoverId}
-    <img src={getPreviewUrl(fallbackCoverId, false)} class="header-bg" fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
+    <img src={getPreviewUrl(fallbackCoverId, false) + '?t=' + coverRefreshKey} class="header-bg" fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -463,7 +470,7 @@
 {#if data.directories.length > 0}
   <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (data.files.length > 0 ? 'list-view' : '')}">
     {#each sortedDirectories as dir, i}
-      <a href="/folder/{data.folderPath ? data.folderPath + '/' + dir.name : dir.name}" class="dir-card" style="animation-delay: {i * 40}ms">
+      <div class="dir-card" style="animation-delay: {i * 40}ms" role="link" tabindex="0" onclick={(e) => { if ((e.target as HTMLElement).closest('button')) return; goto(`/folder/${data.folderPath ? data.folderPath + '/' + dir.name : dir.name}`); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goto(`/folder/${data.folderPath ? data.folderPath + '/' + dir.name : dir.name}`); } }}>
         {#if isFolderOnly && folderViewMode === 'list'}
           <div class="dir-info">
             <div class="dir-label">
@@ -510,7 +517,7 @@
             <span class="dir-name">{dir.name}</span>
           </div>
         {/if}
-      </a>
+      </div>
     {/each}
   </div>
 {/if}
@@ -993,6 +1000,7 @@
     transition: filter 0.2s ease, background-color 0.2s ease;
     position: relative;
     animation: fadeIn 0.35s ease both;
+    cursor: pointer;
   }
 
   .dir-card:hover {
@@ -1003,7 +1011,6 @@
     width: 100%;
     aspect-ratio: 1;
     position: relative;
-    overflow: hidden;
     background: #111;
   }
 

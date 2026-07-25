@@ -17,9 +17,8 @@ export interface DirectoryInfo {
   blurhash: string | null;
 }
 
-export async function fetchFolderContent(folderPath: string): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean, folderCoverId: string | null, folderDescription: string }> {
-  // Use Vite's dev server proxy or direct URL
-  const res = await fetch(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`, { credentials: 'include' });
+export async function fetchFolderContent(folderPath: string, fetchFn: typeof fetch = fetch): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean, folderCoverId: string | null, folderDescription: string }> {
+  const res = await fetchFn(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch folder');
   const data = await res.json();
   return { 
@@ -57,7 +56,8 @@ export async function rescanFolderML(folderPath: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/folder/rescan-ml`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folder: folderPath })
+    body: JSON.stringify({ folder: folderPath }),
+    credentials: 'include'
   });
   if (!res.ok) throw new Error('Failed to rescan folder ML');
 }

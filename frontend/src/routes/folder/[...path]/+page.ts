@@ -4,8 +4,7 @@ import type { PageLoad } from './$types';
 export const load: PageLoad = async ({ params, fetch }) => {
   const folderPath = params.path || '';
   try {
-    // SvelteKit custom fetch can be injected if needed, but we use our wrapper
-    const data = await fetchFolderContent(folderPath);
+    const data = await fetchFolderContent(folderPath, fetch);
     return {
       folderPath,
       folderCoverId: data.folderCoverId,
