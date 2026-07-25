@@ -7,7 +7,7 @@
   import BlurhashImage from './BlurhashImage.svelte';
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check } from '@lucide/svelte';
 
-  let { media, allowDownload = true, isSharedView = false }: { media: MediaFile, allowDownload?: boolean, isSharedView?: boolean } = $props();
+  let { media, allowDownload = true, isSharedView = false, token }: { media: MediaFile, allowDownload?: boolean, isSharedView?: boolean, token?: string } = $props();
   const dispatch = createEventDispatcher();
   
   function close() {
@@ -62,7 +62,7 @@
   });
 
   function download() {
-    const url = getStreamUrl(media.id) + '?download=1';
+    const url = getStreamUrl(media.id, token) + '&download=1';
     window.location.href = url;
   }
 
@@ -156,11 +156,11 @@
       <div class="content" on:click|stopPropagation>
         {#if media.mime_type.startsWith('video/')}
           <video controls autoplay class="media-element">
-            <source src={getStreamUrl(media.id)} type={media.mime_type} />
+            <source src={getStreamUrl(media.id, token)} type={media.mime_type} />
             Your browser does not support the video tag.
           </video>
         {:else}
-          <img src={getPreviewUrl(media.id, false)} alt={media.file_name} class="media-element" />
+          <img src={getPreviewUrl(media.id, false, token)} alt={media.file_name} class="media-element" />
         {/if}
       </div>
       

@@ -3,12 +3,15 @@ import { ZipArchive } from 'archiver';
 import { query } from '../../config/db';
 import path from 'path';
 import fs from 'fs';
+import { verifyFolderAccess } from '../../utils/auth';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
 export async function zipRoutes(fastify: FastifyInstance) {
-  fastify.get<{ Params: { '*': string } }>('/api/zip/*', async (request, reply) => {
+  fastify.get<{ Params: { '*': string }, Querystring: { shareToken?: string } }>('/api/zip/*', async (request, reply) => {
     const folderPath = decodeURIComponent(request.params['*'] || '');
+    
+    if (!(await verifyFolderAccess(request, reply, folderPath))) return;
     
     const result = await query(
       `SELECT folder_path, file_name FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 

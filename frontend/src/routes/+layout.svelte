@@ -3,8 +3,12 @@
   import { slide, fly } from 'svelte/transition';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
+  import { getAuthUser, logout } from '$lib/api/auth';
   
   let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/'));
+  let currentUser = $state<any>(null);
+  let isAuthChecking = $state(true);
 
   $effect(() => {
     if ($page.url.pathname.startsWith('/share/')) {
@@ -21,7 +25,7 @@
         canGoForward = (window as any).navigation.canGoForward;
         canGoBack = (window as any).navigation.canGoBack;
       } else {
-        canGoBack = window.history.length > 1;
+        canGoBack = (window as any).history.length > 1;
         canGoForward = true; // Fallback for browsers without Navigation API
       }
     };
@@ -34,12 +38,34 @@
         (window as any).navigation.removeEventListener('currententrychange', checkHistory);
       };
     } else {
-      window.addEventListener('popstate', checkHistory);
+      (window as any).addEventListener('popstate', checkHistory);
       return () => {
-        window.removeEventListener('popstate', checkHistory);
+        (window as any).removeEventListener('popstate', checkHistory);
       };
     }
   });
+
+  onMount(async () => {
+    // Check auth
+    if (!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login') {
+      try {
+        const user = await getAuthUser();
+        if (!user) {
+          goto('/login');
+        } else {
+          currentUser = user;
+        }
+      } catch (err) {
+        goto('/login');
+      }
+    }
+    isAuthChecking = false;
+  });
+
+  async function handleLogout() {
+    await logout();
+    goto('/login');
+  }
 
   function goBack() {
     window.history.back();
@@ -76,10 +102,18 @@
         <a href="/faces">Faces</a>
         <a href="/timeline">Timeline</a>
         <a href="/settings">Settings</a>
-        <a href="/admin">Admin</a>
+        {#if currentUser?.role === 'admin'}
+          <a href="/admin">Admin</a>
+        {/if}
       </nav>
 
       <div class="sidebar-footer">
+        {#if currentUser}
+          <div class="user-info">
+            <span class="user-email">{currentUser.email}</span>
+            <button class="logout-btn" onclick={handleLogout}>Logout</button>
+          </div>
+        {/if}
         <button class="icon-btn hide-sidebar-btn" onclick={() => isSidebarOpen = false} title="Hide sidebar">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
         </button>
@@ -88,9 +122,15 @@
   {/if}
 
   <main class="main-content">
-    <div class="slot-wrapper">
-      <slot />
-    </div>
+    {#if isAuthChecking && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login'}
+      <div class="loading-overlay">
+        <div class="spinner"></div>
+      </div>
+    {:else}
+      <div class="slot-wrapper">
+        <slot />
+      </div>
+    {/if}
     <footer class="app-footer">
       <p>Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a></p>
       <p>Learn more about this app at <a href="https://kahmeng15.github.io/hellomyphotos" target="_blank" rel="noopener noreferrer">kahmeng15.github.io/hellomyphotos</a></p>
@@ -162,20 +202,44 @@
   .sidebar-nav a {
     color: var(--text-color);
     text-decoration: none;
-    font-size: 1rem;
-    font-weight: 400;
-    font-family: 'Instrument Sans', sans-serif;
-    transition: opacity 0.2s;
+    font-size: 0.95rem;
+    font-weight: 500;
   }
   
-  .sidebar-nav a:hover {
-    opacity: 0.7;
+  .user-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .user-email {
+    font-size: 0.8rem;
+    color: #a1a1aa;
+    word-break: break-all;
+  }
+
+  .logout-btn {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #fff;
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .logout-btn:hover {
+    background: rgba(239, 68, 68, 0.4);
   }
 
   .sidebar-footer {
     margin-top: auto;
     display: flex;
-    justify-content: flex-end;
+    flex-direction: column;
   }
 
   .nav-actions {
@@ -207,8 +271,8 @@
 
   .floating-reopen-btn {
     position: absolute;
-    bottom: 24px;
-    left: 24px;
+    bottom: 2rem;
+    right: 2rem;
     background: var(--bg-color);
     border: 1px solid var(--glass-border);
     color: var(--text-color);

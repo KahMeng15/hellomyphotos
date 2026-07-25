@@ -11,7 +11,7 @@
   // Group files by date
   let groupedFiles = $derived(() => {
     const groups: { date: string, files: any[], startIndex: number }[] = [];
-    let currentGroup = null;
+    let currentGroup: { date: string, files: any[], startIndex: number } | null = null;
 
     data.files.forEach((file, index) => {
       let dateStr = 'Unknown Date';

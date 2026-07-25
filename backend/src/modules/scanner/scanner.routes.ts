@@ -5,12 +5,13 @@ import { redis } from '../../config/redis';
 import { scannerQueue } from '../../queue/scannerQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
 import { query } from '../../config/db';
+import { requireAuth } from '../../utils/auth';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
 export async function scannerRoutes(fastify: FastifyInstance) {
   
-  fastify.post<{ Body: { folder: string, mediaId: string } }>('/api/folder/cover', async (request, reply) => {
+  fastify.post<{ Body: { folder: string, mediaId: string } }>('/api/folder/cover', { preHandler: requireAuth }, async (request, reply) => {
     const { folder, mediaId } = request.body;
     await query(`
       INSERT INTO folder_settings (folder_path, cover_media_id, updated_at) 
@@ -22,7 +23,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true });
   });
 
-  fastify.post<{ Body: { folder: string, description: string } }>('/api/folder/settings', async (request, reply) => {
+  fastify.post<{ Body: { folder: string, description: string } }>('/api/folder/settings', { preHandler: requireAuth }, async (request, reply) => {
     const { folder, description } = request.body;
     await query(`
       INSERT INTO folder_settings (folder_path, description, updated_at) 
@@ -34,13 +35,13 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true });
   });
 
-  fastify.post<{ Body: { folder: string } }>('/api/folder/rescan', async (request, reply) => {
+  fastify.post<{ Body: { folder: string } }>('/api/folder/rescan', { preHandler: requireAuth }, async (request, reply) => {
     const { folder } = request.body;
     await scannerQueue.add('scan-directory', { folderPath: folder });
     return reply.send({ success: true });
   });
 
-  fastify.post<{ Body: { folder: string } }>('/api/folder/rescan-ml', async (request, reply) => {
+  fastify.post<{ Body: { folder: string } }>('/api/folder/rescan-ml', { preHandler: requireAuth }, async (request, reply) => {
     const { folder } = request.body;
     
     // Trigger standard scan
@@ -63,7 +64,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true });
   });
 
-  fastify.get<{ Params: { '*': string } }>('/api/folder/*', async (request, reply) => {
+  fastify.get<{ Params: { '*': string } }>('/api/folder/*', { preHandler: requireAuth }, async (request, reply) => {
     // URL decode the path param and sanitize
     const folderPath = decodeURIComponent(request.params['*'] || '');
     

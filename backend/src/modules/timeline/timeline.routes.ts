@@ -1,8 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { query } from '../../config/db';
+import { requireAuth } from '../../utils/auth';
 
 export async function timelineRoutes(fastify: FastifyInstance) {
-  fastify.get('/api/timeline', async (request, reply) => {
+  fastify.get('/api/timeline', { preHandler: requireAuth }, async (request, reply) => {
     // Fetch all media files, ordered by their EXIF dateTimeOriginal descending.
     // If exif_json is null or missing dateTimeOriginal, fall back to created_at (or nulls last).
     const result = await query(`

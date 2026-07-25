@@ -8,10 +8,15 @@ import { WatermarkService } from './watermark.service';
 const CACHE_ROOT = process.env.CACHE_ROOT || '/app/cache';
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
+import { verifyMediaAccess } from '../../utils/auth';
+
 export async function mediaRoutes(fastify: FastifyInstance) {
   
-  fastify.get<{ Params: { id: string } }>('/api/media/:id/thumbnail', async (request, reply) => {
+  fastify.get<{ Params: { id: string }, Querystring: { shareToken?: string } }>('/api/media/:id/thumbnail', async (request, reply) => {
     const { id } = request.params;
+    
+    if (!(await verifyMediaAccess(request, reply, id))) return;
+
     const filePath = path.join(CACHE_ROOT, '480p', `${id}.webp`);
     
     if (fs.existsSync(filePath)) {
@@ -35,8 +40,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     return reply.status(404).send({ error: 'Thumbnail not found or still processing' });
   });
 
-  fastify.get<{ Params: { id: string }, Querystring: { watermark?: string } }>('/api/media/:id/preview', async (request, reply) => {
+  fastify.get<{ Params: { id: string }, Querystring: { watermark?: string, shareToken?: string } }>('/api/media/:id/preview', async (request, reply) => {
     const { id } = request.params;
+    
+    if (!(await verifyMediaAccess(request, reply, id))) return;
+
     const { watermark } = request.query;
     const filePath = path.join(CACHE_ROOT, '1080p', `${id}.webp`);
     
@@ -77,8 +85,11 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     return reply.status(404).send({ error: 'Preview not found' });
   });
 
-  fastify.get<{ Params: { id: string }, Querystring: { download?: string } }>('/api/media/:id/stream', async (request, reply) => {
+  fastify.get<{ Params: { id: string }, Querystring: { download?: string, shareToken?: string } }>('/api/media/:id/stream', async (request, reply) => {
     const { id } = request.params;
+
+    if (!(await verifyMediaAccess(request, reply, id))) return;
+
     const { download } = request.query;
     const result = await query(`SELECT folder_path, file_name, mime_type, size_bytes FROM media_files WHERE id = $1`, [id]);
     

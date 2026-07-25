@@ -157,7 +157,7 @@
 {:else}
 <div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''} {!coverLoaded && fallbackCoverId ? 'skeleton' : ''}" bind:this={headerWrapper}>
   {#if fallbackCoverId}
-    <img src={getPreviewUrl(fallbackCoverId, false)} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
+    <img src={getPreviewUrl(fallbackCoverId, false, data.token)} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -221,8 +221,9 @@
           {/if}
         </div>
         
-        {#if data.share.allow_download_folder}<a href={getFolderZipUrl(data.share.folder_path)} target="_blank" class="icon-btn" title="Download ZIP"><Download size={18} /></a>{/if}
-        
+        <div class="actions">
+          {#if data.share.allow_download_folder}<a href={getFolderZipUrl(data.share.folder_path, data.token)} target="_blank" class="icon-btn" title="Download ZIP"><Download size={18} /></a>{/if}
+        </div>
         
       </div>
       
@@ -262,7 +263,7 @@
   {#each sortedFiles as file, i}
     <BlurhashImage 
       hash={file.blurhash || ''} 
-      src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
+      src={`${getThumbnailUrl(file.id, data.token)}${file.blurhash ? (getThumbnailUrl(file.id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(file.blurhash) : ''}`} 
       alt={file.file_name} 
       isVideo={file.mime_type.startsWith('video/')}
       onclick={() => openLightbox(i)}

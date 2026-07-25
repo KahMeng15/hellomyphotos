@@ -1,10 +1,11 @@
 import { FastifyInstance } from 'fastify';
 import { query } from '../../config/db';
+import { requireAuth } from '../../utils/auth';
 
 export async function mlRoutes(fastify: FastifyInstance) {
   
   // Get all unique people clusters (with a representative face image)
-  fastify.get('/api/faces', async (request, reply) => {
+  fastify.get('/api/faces', { preHandler: requireAuth }, async (request, reply) => {
     const result = await query(`
       SELECT DISTINCT ON (f.person_id) 
         f.person_id, 
@@ -20,7 +21,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
   });
 
   // Get all media files associated with a specific person
-  fastify.get<{ Params: { id: string } }>('/api/faces/:id/media', async (request, reply) => {
+  fastify.get<{ Params: { id: string } }>('/api/faces/:id/media', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
     
     const result = await query(`
@@ -34,7 +35,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
   });
 
   // Get all faces in a specific media file
-  fastify.get<{ Params: { id: string } }>('/api/media/:id/faces', async (request, reply) => {
+  fastify.get<{ Params: { id: string } }>('/api/media/:id/faces', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
     
     const result = await query(`

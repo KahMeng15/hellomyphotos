@@ -19,7 +19,7 @@ export interface DirectoryInfo {
 
 export async function fetchFolderContent(folderPath: string): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean, folderCoverId: string | null, folderDescription: string }> {
   // Use Vite's dev server proxy or direct URL
-  const res = await fetch(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`);
+  const res = await fetch(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch folder');
   const data = await res.json();
   return { 
@@ -37,7 +37,8 @@ export async function setFolderDescription(folderPath: string, description: stri
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ folder: folderPath, description })
+    body: JSON.stringify({ folder: folderPath, description }),
+    credentials: 'include'
   });
   if (!res.ok) throw new Error('Failed to set folder description');
 }
@@ -46,7 +47,8 @@ export async function rescanFolder(folderPath: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/folder/rescan`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folder: folderPath })
+    body: JSON.stringify({ folder: folderPath }),
+    credentials: 'include'
   });
   if (!res.ok) throw new Error('Failed to rescan folder');
 }
@@ -66,36 +68,38 @@ export async function setFolderCover(folderPath: string, mediaId: string): Promi
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ folder: folderPath, mediaId })
+    body: JSON.stringify({ folder: folderPath, mediaId }),
+    credentials: 'include'
   });
   if (!res.ok) throw new Error('Failed to set folder cover');
 }
 
 export async function fetchTimeline(): Promise<MediaFile[]> {
-  const res = await fetch(`${API_BASE}/api/timeline`);
+  const res = await fetch(`${API_BASE}/api/timeline`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch timeline');
   const data = await res.json();
   return data.files || [];
 }
 
 export async function fetchMediaFaces(mediaId: string): Promise<{person_id: string, bounding_box: any}[]> {
-  const res = await fetch(`${API_BASE}/api/media/${mediaId}/faces`);
+  const res = await fetch(`${API_BASE}/api/media/${mediaId}/faces`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch faces');
   return res.json();
 }
 
-export function getThumbnailUrl(id: string): string {
-  return `${API_BASE}/api/media/${id}/thumbnail`;
+export function getThumbnailUrl(id: string, token?: string): string {
+  return `${API_BASE}/api/media/${id}/thumbnail${token ? `?shareToken=${token}` : ''}`;
 }
 
-export function getPreviewUrl(id: string, lowBandwidth: boolean = false): string {
-  return lowBandwidth ? getThumbnailUrl(id) : `${API_BASE}/api/media/${id}/preview`;
+export function getPreviewUrl(id: string, lowBandwidth: boolean = false, token?: string): string {
+  if (lowBandwidth) return getThumbnailUrl(id, token);
+  return `${API_BASE}/api/media/${id}/preview${token ? `?shareToken=${token}` : ''}`;
 }
 
-export function getStreamUrl(id: string): string {
-  return `${API_BASE}/api/media/${id}/stream`;
+export function getStreamUrl(id: string, token?: string): string {
+  return `${API_BASE}/api/media/${id}/stream${token ? `?shareToken=${token}` : ''}`;
 }
 
-export function getFolderZipUrl(folderPath: string): string {
-  return `${API_BASE}/api/zip/${encodeURIComponent(folderPath || '')}`;
+export function getFolderZipUrl(folderPath: string, token?: string): string {
+  return `${API_BASE}/api/zip/${encodeURIComponent(folderPath || '')}${token ? `?shareToken=${token}` : ''}`;
 }
