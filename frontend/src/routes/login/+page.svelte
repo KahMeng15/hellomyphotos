@@ -67,10 +67,11 @@
             placeholder="••••••••" 
             required 
             autocomplete="current-password"
+            onkeydown={(e) => e.key === 'Enter' && handleSubmit(e)}
           />
         </div>
 
-        <button type="submit" class="submit-btn" disabled={loading || !email || !password}>
+        <button type="submit" class="submit-btn" disabled={loading}>
           {#if loading}
             <div class="spinner"></div>
           {:else}
@@ -222,11 +223,10 @@
     display: inline-flex;
     justify-content: center;
     align-items: center;
-    gap: 0.5rem;
     transition: all 0.3s ease;
     box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3);
-    align-self: flex-start;
-    min-width: 120px;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .submit-btn:hover:not(:disabled) {

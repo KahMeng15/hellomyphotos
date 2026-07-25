@@ -5,6 +5,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { getAuthUser, logout } from '$lib/api/auth';
+  import { LogOut } from '@lucide/svelte';
   
   let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login');
   let currentUser = $state<any>(null);
@@ -13,6 +14,14 @@
   $effect(() => {
     if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') {
       isSidebarOpen = false;
+    } else {
+      isSidebarOpen = true; // Auto-open when leaving login page
+      if (!currentUser && !isAuthChecking) {
+        getAuthUser().then(user => {
+          if (!user) goto('/login');
+          else currentUser = user;
+        }).catch(() => goto('/login'));
+      }
     }
   });
 
@@ -63,6 +72,7 @@
   });
 
   async function handleLogout() {
+    currentUser = null;
     await logout();
     goto('/login');
   }
@@ -108,15 +118,18 @@
       </nav>
 
       <div class="sidebar-footer">
+        <button class="icon-btn hide-sidebar-btn" onclick={() => isSidebarOpen = false} title="Hide sidebar" style="margin-bottom: 1rem; width: 100%; display: flex; justify-content: flex-end; border: none; background: transparent; cursor: pointer;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #a1a1aa;"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
+        </button>
+
         {#if currentUser}
           <div class="user-info">
-            <span class="user-email">{currentUser.email}</span>
-            <button class="logout-btn" onclick={handleLogout}>Logout</button>
+            <span class="user-name" title={currentUser.name}>{currentUser.name || 'Unknown'}</span>
+            <button class="icon-btn logout-btn" onclick={handleLogout} title="Logout">
+              <LogOut size={16} />
+            </button>
           </div>
         {/if}
-        <button class="icon-btn hide-sidebar-btn" onclick={() => isSidebarOpen = false} title="Hide sidebar">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
-        </button>
       </div>
     </aside>
   {/if}
@@ -133,8 +146,15 @@
     {/if}
     {#if $page.url.pathname !== '/login'}
       <footer class="app-footer">
-        <p>Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a></p>
+        <p>
+          {#if $page.url.pathname.startsWith('/share/')}
+            Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a>
+          {:else}
+            Hosted with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a>
+          {/if}
+        </p>
         <p>Learn more about this app at <a href="https://kahmeng15.github.io/hellomyphotos" target="_blank" rel="noopener noreferrer">kahmeng15.github.io/hellomyphotos</a></p>
+        <p>Got any feedback? Please submit <a href="https://kahmeng15.github.io/feedback" target="_blank" rel="noopener noreferrer">here</a>.</p>
       </footer>
     {/if}
   </main>
@@ -215,32 +235,34 @@
   
   .user-info {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
     gap: 0.5rem;
-    margin-bottom: 1rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255,255,255,0.1);
   }
 
-  .user-email {
-    font-size: 0.8rem;
-    color: #a1a1aa;
-    word-break: break-all;
+  .user-name {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #e4e4e7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
   }
 
   .logout-btn {
-    background: rgba(255,255,255,0.1);
-    border: none;
-    color: #fff;
-    padding: 0.4rem 0.8rem;
-    border-radius: 6px;
-    font-size: 0.8rem;
+    color: #a1a1aa;
+    padding: 0.4rem;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: all 0.2s;
   }
 
   .logout-btn:hover {
-    background: rgba(239, 68, 68, 0.4);
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
   }
 
   .sidebar-footer {

@@ -35,6 +35,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     const token = jwt.sign({
       id: user.id,
       email: user.email,
+      name: user.name,
       role: user.role,
       folders: user.role === 'admin' ? ['*'] : folders
     }, JWT_SECRET, { expiresIn: '7d' });
@@ -52,6 +53,7 @@ export async function authRoutes(fastify: FastifyInstance) {
       user: {
         id: user.id,
         email: user.email,
+        name: user.name,
         role: user.role,
         folders: user.role === 'admin' ? ['*'] : folders
       }

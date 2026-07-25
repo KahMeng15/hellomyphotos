@@ -6,8 +6,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_please_change
 export interface AuthUser {
   id: string;
   email: string;
+  name?: string;
   role: 'admin' | 'user' | 'viewer';
-  folders: string[];
+  folders: string[]; // '*' for all, or specific paths
 }
 
 // Add user to FastifyRequest interface

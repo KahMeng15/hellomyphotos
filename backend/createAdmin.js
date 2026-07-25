@@ -16,7 +16,7 @@ async function run() {
 
   try {
     await pool.query(
-      `INSERT INTO users (email, password_hash, role) VALUES ($1, $2, 'admin') ON CONFLICT (email) DO NOTHING`,
+      `INSERT INTO users (email, name, password_hash, role) VALUES ($1, 'Admin', $2, 'admin') ON CONFLICT (email) DO NOTHING`,
       [email, passwordHash]
     );
     console.log(`Admin user ${email} created with password ${password}`);
