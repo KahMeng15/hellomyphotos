@@ -4,14 +4,14 @@ import crypto from 'crypto';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', async (request, reply) => {
-    const { folderPath, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt } = request.body as any;
+    const { folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt } = request.body as any;
     
     const shareToken = crypto.randomBytes(16).toString('hex');
     
     await query(`
-      INSERT INTO shared_folders (folder_path, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `, [folderPath, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null]);
+      INSERT INTO shared_folders (folder_path, media_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [folderPath || null, mediaId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null]);
     
     return reply.send({ shareToken });
   });
@@ -29,6 +29,11 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
     
     const share = result.rows[0];
+    
+    if (share.media_id) {
+      const fileRes = await query(`SELECT * FROM media_files WHERE id = $1`, [share.media_id]);
+      return reply.send({ share, files: fileRes.rows, folderCoverId: null });
+    }
     
     // Fetch folder contents
     const filesResult = await query(

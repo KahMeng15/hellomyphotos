@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { redis } from '../../config/redis';
 import { scannerQueue } from '../../queue/scannerQueue';
+import { mediaQueue } from '../../queue/mediaQueue';
 import { query } from '../../config/db';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
@@ -29,6 +30,35 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       ON CONFLICT (folder_path) DO UPDATE 
       SET description = EXCLUDED.description, updated_at = NOW()
     `, [folder, description]);
+    
+    return reply.send({ success: true });
+  });
+
+  fastify.post<{ Body: { folder: string } }>('/api/folder/rescan', async (request, reply) => {
+    const { folder } = request.body;
+    await scannerQueue.add('scan-directory', { folderPath: folder });
+    return reply.send({ success: true });
+  });
+
+  fastify.post<{ Body: { folder: string } }>('/api/folder/rescan-ml', async (request, reply) => {
+    const { folder } = request.body;
+    
+    // Trigger standard scan
+    await scannerQueue.add('scan-directory', { folderPath: folder });
+    
+    // Queue ML processing for all media files in this folder
+    const result = await query(
+      `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE folder_path = $1`, 
+      [folder]
+    );
+    
+    for (const row of result.rows) {
+      await mediaQueue.add('process-media', { 
+        mediaId: row.id, 
+        fullPath: path.join(MEDIA_ROOT, row.folder_path, row.file_name),
+        mimeType: row.mime_type 
+      });
+    }
     
     return reply.send({ success: true });
   });

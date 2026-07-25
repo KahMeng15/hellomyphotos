@@ -3,8 +3,9 @@
   import { fade, slide } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
   import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces } from '$lib/api/media';
+  import { createShare } from '$lib/api/shares';
   import BlurhashImage from './BlurhashImage.svelte';
-  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight } from '@lucide/svelte';
+  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check } from '@lucide/svelte';
 
   let { media, allowDownload = true }: { media: MediaFile, allowDownload?: boolean } = $props();
   const dispatch = createEventDispatcher();
@@ -65,8 +66,28 @@
     window.location.href = url;
   }
 
-  function share() {
-    alert('Share functionality coming soon!');
+  let isSharing = $state(false);
+  let justShared = $state(false);
+
+  async function share() {
+    if (isSharing || justShared) return;
+    try {
+      isSharing = true;
+      const date = new Date();
+      date.setDate(date.getDate() + 7); // Default 7 days expiry for quick image shares
+      const token = await createShare(media.folder_path, media.id, allowDownload, false, false, date.toISOString());
+      
+      const url = `${window.location.origin}/share/${token}`;
+      await navigator.clipboard.writeText(url);
+      
+      justShared = true;
+      setTimeout(() => justShared = false, 2000);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to share image');
+    } finally {
+      isSharing = false;
+    }
   }
 
   async function makeCoverImage() {
@@ -99,8 +120,12 @@
             <Download size={20} strokeWidth={2} />
           </button>
         {/if}
-        <button class="icon-btn" on:click={share} title="Share">
-          <Share2 size={20} strokeWidth={2} />
+        <button class="icon-btn {justShared ? 'success' : ''}" on:click={share} title="Share">
+          {#if justShared}
+            <Check size={20} strokeWidth={2} />
+          {:else}
+            <Share2 size={20} strokeWidth={2} />
+          {/if}
         </button>
         <button class="icon-btn {showInfo ? 'active' : ''}" on:click={toggleInfo} title="Info">
           <Info size={20} strokeWidth={2} />
@@ -240,6 +265,12 @@
   
   .icon-btn:hover, .icon-btn.active {
     background: rgba(255, 255, 255, 0.2);
+    color: white;
+  }
+
+  .icon-btn.success {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.1);
   }
 
   .close-btn {

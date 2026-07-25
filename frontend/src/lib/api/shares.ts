@@ -10,11 +10,11 @@ export interface ShareData {
   created_at?: string;
 }
 
-export async function createShare(folderPath: string, allowDownloadImages: boolean, allowDownloadFolder: boolean, watermarkEnabled: boolean, expiresAt: string | null): Promise<string> {
+export async function createShare(folderPath: string, mediaId: string | null, allowDownloadImages: boolean, allowDownloadFolder: boolean, watermarkEnabled: boolean, expiresAt: string | null): Promise<string> {
   const res = await fetch(`${API_BASE}/api/shares`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folderPath, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt })
+    body: JSON.stringify({ folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt })
   });
   if (!res.ok) throw new Error('Failed to create share');
   const data = await res.json();

@@ -42,6 +42,24 @@ export async function setFolderDescription(folderPath: string, description: stri
   if (!res.ok) throw new Error('Failed to set folder description');
 }
 
+export async function rescanFolder(folderPath: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/folder/rescan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder: folderPath })
+  });
+  if (!res.ok) throw new Error('Failed to rescan folder');
+}
+
+export async function rescanFolderML(folderPath: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/folder/rescan-ml`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder: folderPath })
+  });
+  if (!res.ok) throw new Error('Failed to rescan folder ML');
+}
+
 export async function setFolderCover(folderPath: string, mediaId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/folder/cover`, {
     method: 'POST',

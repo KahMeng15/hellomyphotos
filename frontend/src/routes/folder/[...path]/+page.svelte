@@ -1,7 +1,7 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML } from '$lib/api/media';
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
   import { invalidateAll } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
@@ -53,7 +53,7 @@
         expiresAt = date.toISOString();
       }
       
-      const token = await createShare(data.folderPath || '', shareAllowDownloadImages, shareAllowDownloadFolder, false, expiresAt);
+      const token = await createShare(data.folderPath || '', null, shareAllowDownloadImages, shareAllowDownloadFolder, false, expiresAt);
       newlyCreatedShareToken = token;
       await loadActiveShares();
     } catch (e) {
@@ -97,6 +97,45 @@
       alert('Failed to save settings');
     } finally {
       isSavingSettings = false;
+    }
+  }
+
+  let isRescanning = $state(false);
+  let isRescanningML = $state(false);
+
+  let alertModalTitle = $state('');
+  let alertModalMessage = $state('');
+  let showAlertModal = $state(false);
+
+  function showAppAlert(title: string, message: string) {
+    alertModalTitle = title;
+    alertModalMessage = message;
+    showAlertModal = true;
+  }
+
+  async function handleRescanFolder() {
+    try {
+      isRescanning = true;
+      await rescanFolder(data.folderPath || '');
+      showAppAlert('Scan Queued', 'Folder scan queued! Wait a few moments for new files to appear.');
+    } catch (e) {
+      console.error(e);
+      showAppAlert('Error', 'Failed to rescan folder');
+    } finally {
+      isRescanning = false;
+    }
+  }
+
+  async function handleRescanML() {
+    try {
+      isRescanningML = true;
+      await rescanFolderML(data.folderPath || '');
+      showAppAlert('ML Processing Queued', 'ML processing queued! It may take a while to extract faces and items.');
+    } catch (e) {
+      console.error(e);
+      showAppAlert('Error', 'Failed to trigger ML rescan');
+    } finally {
+      isRescanningML = false;
     }
   }
   
@@ -476,6 +515,35 @@
             {/if}
           </button>
         </div>
+
+        <hr style="border-color: rgba(255,255,255,0.1); margin: 24px 0;" />
+        
+        <h4 style="margin-bottom: 16px; font-weight: 500;">Advanced Actions</h4>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRescanFolder} disabled={isRescanning}>
+            {isRescanning ? 'Queuing...' : 'Rescan Folder for New Images'}
+          </button>
+          
+          <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRescanML} disabled={isRescanningML}>
+            {isRescanningML ? 'Queuing...' : 'Rescan Faces & Items in Images'}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showAlertModal}
+  <div class="modal-backdrop" onclick={() => showAlertModal = false} style="z-index: 9999;">
+    <div class="modal glass-panel" onclick={e => e.stopPropagation()} style="max-width: 400px; text-align: center;">
+      <div class="modal-header" style="justify-content: center;">
+        <h3 style="margin: 0;">{alertModalTitle}</h3>
+      </div>
+      <div class="modal-body">
+        <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">{alertModalMessage}</p>
+        <button class="btn" style="width: 100%; justify-content: center; background: white; color: black;" onclick={() => showAlertModal = false}>
+          Okay
+        </button>
       </div>
     </div>
   </div>
