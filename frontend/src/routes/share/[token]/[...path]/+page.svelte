@@ -8,6 +8,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
   import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock } from '@lucide/svelte';
+  import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
   
@@ -193,7 +194,7 @@
     
     <div class="header-right">
       <div class="toolbar">
-        <div class="dropdown-container">
+        <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
           <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort">
             <ArrowDownUp size={18} />
           </button>
@@ -207,7 +208,7 @@
           {/if}
         </div>
         
-        <div class="dropdown-container">
+        <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
           <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
             <LayoutGrid size={18} />
           </button>

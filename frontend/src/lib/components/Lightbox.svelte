@@ -6,6 +6,7 @@
   import { createShare } from '$lib/api/shares';
   import BlurhashImage from './BlurhashImage.svelte';
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check } from '@lucide/svelte';
+  import { clickOutside } from '$lib/actions/clickOutside';
 
   let { media, allowDownload = true, isSharedView = false, token }: { media: MediaFile, allowDownload?: boolean, isSharedView?: boolean, token?: string } = $props();
   const dispatch = createEventDispatcher();
@@ -133,7 +134,7 @@
           <Info size={20} strokeWidth={2} />
         </button>
         {#if !isSharedView}
-          <div style="position: relative;">
+          <div style="position: relative;" use:clickOutside={() => showMenu = false}>
             <button class="icon-btn" on:click={() => showMenu = !showMenu} title="More">
               <MoreHorizontal size={20} strokeWidth={2} />
             </button>

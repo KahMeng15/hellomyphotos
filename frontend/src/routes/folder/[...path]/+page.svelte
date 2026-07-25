@@ -8,6 +8,7 @@
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
   import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical } from '@lucide/svelte';
+  import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
   
@@ -296,9 +297,6 @@
   }
 
   onMount(() => {
-    const handleGlobalClick = () => { activeFolderMenu = null; };
-    window.addEventListener('click', handleGlobalClick);
-
     pollInterval = setInterval(() => {
       // Poll if any file lacks a blurhash (still processing) or if the scanner is active
       const stillProcessing = data.files.some(f => !f.blurhash) || data.scanning;
@@ -362,7 +360,7 @@
     
     <div class="header-right">
       <div class="toolbar">
-        <div class="dropdown-container">
+        <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
           <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort">
             <ArrowDownUp size={18} />
           </button>
@@ -376,7 +374,7 @@
           {/if}
         </div>
         
-        <div class="dropdown-container">
+        <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
           <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
             <LayoutGrid size={18} />
           </button>
@@ -427,7 +425,7 @@
         </div>
         <div class="dir-info" style="position: relative; display: flex; align-items: center; justify-content: space-between; flex: 1;">
           <span class="dir-name">{dir.name}</span>
-          <div class="dir-actions" style="position: relative;">
+          <div class="dir-actions" style="position: relative;" use:clickOutside={() => activeFolderMenu = null}>
             <button class="icon-btn" style="padding: 4px;" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
               <MoreVertical size={16} />
             </button>
