@@ -110,6 +110,7 @@
     (data.directories && data.directories.length > 0 ? (data.directories.find((d: any) => d.cover_id)?.cover_id || null) : null)
   );
 
+  let coverLoaded = $state(false);
   let coverBackgroundPosition = $state('center 50%');
 
   $effect(() => {
@@ -154,9 +155,9 @@
     <h2>{data.error}</h2>
   </div>
 {:else}
-<div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
+<div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''} {!coverLoaded && fallbackCoverId ? 'skeleton' : ''}" bind:this={headerWrapper}>
   {#if fallbackCoverId}
-    <div class="header-bg" style="background-image: url('{getPreviewUrl(fallbackCoverId, false)}'); background-position: {coverBackgroundPosition};"></div>
+    <img src={getPreviewUrl(fallbackCoverId, false)} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -268,6 +269,7 @@
       objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
       square={viewMode.includes('square')}
       targetHeight={viewMode.includes('small') ? 150 : viewMode.includes('large') ? 350 : 250}
+      priority={i < 8}
     />
   {/each}
 </div>
@@ -289,15 +291,31 @@
     min-height: 40vh;
   }
   
+  .header-wrapper.skeleton {
+    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+  
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  
   .header-bg {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background-size: cover;
-    background-position: center 50%;
+    object-fit: cover;
     z-index: 0;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+  }
+  
+  .header-bg.loaded {
+    opacity: 1;
   }
   
   .header-gradient {

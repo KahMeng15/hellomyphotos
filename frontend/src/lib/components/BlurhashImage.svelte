@@ -30,12 +30,12 @@
   import { decode } from 'blurhash';
   import { Play } from '@lucide/svelte';
 
-  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, targetHeight = 250, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, targetHeight?: number, onclick?: (e: MouseEvent) => void } = $props();
+  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, targetHeight = 250, priority = false, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, targetHeight?: number, priority?: boolean, onclick?: (e: MouseEvent) => void } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
   let observer: IntersectionObserver;
-  let visible = $state(false);
+  let visible = $state(priority); // If priority, it is visible immediately during SSR
   let container: HTMLDivElement | undefined = $state();
   
   let aspectRatio = $state(1.5);
@@ -90,18 +90,20 @@
 
   onMount(() => {
 
-    // Lazy load image using Intersection Observer
-    observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) {
-        enqueueLoad(() => {
-          visible = true;
-        });
-        observer.disconnect();
+    // Lazy load image using Intersection Observer ONLY if it's not a priority image
+    if (!priority) {
+      observer = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+          enqueueLoad(() => {
+            visible = true;
+          });
+          observer.disconnect();
+        }
+      }, { rootMargin: '100px' });
+      
+      if (container) {
+        observer.observe(container);
       }
-    }, { rootMargin: '100px' });
-    
-    if (container) {
-      observer.observe(container);
     }
 
     return () => {
@@ -115,7 +117,7 @@
     <div class="zoom-wrapper skeleton" style="animation-delay: -{randomDelay}s;">
       {#if visible}
         <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
-        <img {src} {alt} onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? `transform: scale(${transformScale});` : ''}" />
+        <img {src} {alt} onload={handleLoad} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? `transform: scale(${transformScale});` : ''}" />
       {/if}
     </div>
   </div>
