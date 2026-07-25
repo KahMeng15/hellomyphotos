@@ -7,7 +7,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
-  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical } from '@lucide/svelte';
+  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
@@ -149,6 +149,18 @@
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
+
+  type FolderViewMode = 'small-grid' | 'medium-grid' | 'large-grid' | 'list';
+  let folderViewMode: FolderViewMode = $state('small-grid');
+  let showFolderViewMenu = $state(false);
+
+  let isFolderOnly = $derived(data.files.length === 0 && data.directories.length > 0);
+
+  let sortedDirectories = $derived([...data.directories].sort((a, b) => {
+    if (sortMode === 'a-z') return a.name.localeCompare(b.name);
+    if (sortMode === 'z-a') return b.name.localeCompare(a.name);
+    return 0;
+  }));
 
   let activeFolderMenu = $state<string | null>(null);
 
@@ -311,7 +323,6 @@
     }
 
     return () => {
-      window.removeEventListener('click', handleGlobalClick);
       if (pollInterval) clearInterval(pollInterval);
       if (mainContent) {
         mainContent.removeEventListener('scroll', handleScroll);
@@ -361,32 +372,53 @@
     <div class="header-right">
       <div class="toolbar">
         <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
-          <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort">
+          <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; showFolderViewMenu = false; }} title="Sort">
             <ArrowDownUp size={18} />
           </button>
           {#if showSortMenu}
             <div class="dropdown-menu">
-              <button class:active={sortMode === 'newest'} onclick={() => { sortMode = 'newest'; showSortMenu = false; }}>Newest to Oldest</button>
-              <button class:active={sortMode === 'oldest'} onclick={() => { sortMode = 'oldest'; showSortMenu = false; }}>Oldest to Newest</button>
-              <button class:active={sortMode === 'a-z'} onclick={() => { sortMode = 'a-z'; showSortMenu = false; }}>A to Z</button>
-              <button class:active={sortMode === 'z-a'} onclick={() => { sortMode = 'z-a'; showSortMenu = false; }}>Z to A</button>
+              {#if isFolderOnly}
+                <button class:active={sortMode === 'a-z'} onclick={() => { sortMode = 'a-z'; showSortMenu = false; }}>A to Z</button>
+                <button class:active={sortMode === 'z-a'} onclick={() => { sortMode = 'z-a'; showSortMenu = false; }}>Z to A</button>
+              {:else}
+                <button class:active={sortMode === 'newest'} onclick={() => { sortMode = 'newest'; showSortMenu = false; }}>Newest to Oldest</button>
+                <button class:active={sortMode === 'oldest'} onclick={() => { sortMode = 'oldest'; showSortMenu = false; }}>Oldest to Newest</button>
+                <button class:active={sortMode === 'a-z'} onclick={() => { sortMode = 'a-z'; showSortMenu = false; }}>A to Z</button>
+                <button class:active={sortMode === 'z-a'} onclick={() => { sortMode = 'z-a'; showSortMenu = false; }}>Z to A</button>
+              {/if}
             </div>
           {/if}
         </div>
         
-        <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
-          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
-            <LayoutGrid size={18} />
-          </button>
-          {#if showViewMenu}
-            <div class="dropdown-menu">
-              <button class:active={viewMode === 'small-fit'} onclick={() => { viewMode = 'small-fit'; showViewMenu = false; }}>Small Fit Size</button>
-              <button class:active={viewMode === 'large-fit'} onclick={() => { viewMode = 'large-fit'; showViewMenu = false; }}>Large Fit Size</button>
-              <button class:active={viewMode === 'small-square'} onclick={() => { viewMode = 'small-square'; showViewMenu = false; }}>Small Square Grid</button>
-              <button class:active={viewMode === 'large-square'} onclick={() => { viewMode = 'large-square'; showViewMenu = false; }}>Large Square Grid</button>
-            </div>
-          {/if}
-        </div>
+        {#if isFolderOnly}
+          <div class="dropdown-container" use:clickOutside={() => showFolderViewMenu = false}>
+            <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; }} title="View">
+              <LayoutGrid size={18} />
+            </button>
+            {#if showFolderViewMenu}
+              <div class="dropdown-menu">
+                <button class:active={folderViewMode === 'small-grid'} onclick={() => { folderViewMode = 'small-grid'; showFolderViewMenu = false; }}>Small Grid</button>
+                <button class:active={folderViewMode === 'medium-grid'} onclick={() => { folderViewMode = 'medium-grid'; showFolderViewMenu = false; }}>Medium Grid</button>
+                <button class:active={folderViewMode === 'large-grid'} onclick={() => { folderViewMode = 'large-grid'; showFolderViewMenu = false; }}>Large Grid</button>
+                <button class:active={folderViewMode === 'list'} onclick={() => { folderViewMode = 'list'; showFolderViewMenu = false; }}>List</button>
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
+            <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
+              <LayoutGrid size={18} />
+            </button>
+            {#if showViewMenu}
+              <div class="dropdown-menu">
+                <button class:active={viewMode === 'small-fit'} onclick={() => { viewMode = 'small-fit'; showViewMenu = false; }}>Small Fit Size</button>
+                <button class:active={viewMode === 'large-fit'} onclick={() => { viewMode = 'large-fit'; showViewMenu = false; }}>Large Fit Size</button>
+                <button class:active={viewMode === 'small-square'} onclick={() => { viewMode = 'small-square'; showViewMenu = false; }}>Small Square Grid</button>
+                <button class:active={viewMode === 'large-square'} onclick={() => { viewMode = 'large-square'; showViewMenu = false; }}>Large Square Grid</button>
+              </div>
+            {/if}
+          </div>
+        {/if}
         
         <button class="icon-btn" onclick={() => showDownloadModal = true} title="Download">
           <Download size={18} />
@@ -407,35 +439,55 @@
 </div>
 
 {#if data.directories.length > 0}
-  <div class="dir-grid {data.files.length > 0 ? 'list-view' : ''}">
-    {#each data.directories as dir}
+  <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (data.files.length > 0 ? 'list-view' : '')}">
+    {#each sortedDirectories as dir, i}
       <a href="/folder/{data.folderPath ? data.folderPath + '/' + dir.name : dir.name}" class="dir-card">
-        <div class="dir-cover">
-          {#if dir.cover_id}
-            <BlurhashImage 
-              hash={dir.blurhash || ''} 
-              src={`${getThumbnailUrl(dir.cover_id)}${dir.blurhash ? '?cb=' + encodeURIComponent(dir.blurhash) : ''}`} 
-              alt={dir.name}
-              objectFit="cover"
-              square={true}
-            />
-          {:else}
-            <div class="dir-placeholder"></div>
-          {/if}
-        </div>
-        <div class="dir-info" style="position: relative; display: flex; align-items: center; justify-content: space-between; flex: 1;">
-          <span class="dir-name">{dir.name}</span>
-          <div class="dir-actions" style="position: relative;" use:clickOutside={() => activeFolderMenu = null}>
-            <button class="icon-btn" style="padding: 4px;" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
-              <MoreVertical size={16} />
-            </button>
-            {#if activeFolderMenu === dir.name}
-              <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; min-width: 150px; z-index: 10;" onclick={(e) => e.stopPropagation()}>
-                <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
-              </div>
+        {#if isFolderOnly && folderViewMode === 'list'}
+          <div class="dir-info">
+            <div class="dir-label">
+              <Folder size={18} />
+              <span class="dir-name">{dir.name}</span>
+            </div>
+            <div class="dir-actions" use:clickOutside={() => activeFolderMenu = null}>
+              <button class="icon-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
+                <MoreVertical size={16} />
+              </button>
+              {#if activeFolderMenu === dir.name}
+                <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; min-width: 150px; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
+                  <button onclick={() => { activeFolderMenu = null; window.open(getFolderZipUrl(data.folderPath ? data.folderPath + '/' + dir.name : dir.name), '_blank'); }}>Download ZIP</button>
+                </div>
+              {/if}
+            </div>
+          </div>
+        {:else}
+          <div class="dir-cover">
+            {#if dir.cover_id}
+              <BlurhashImage 
+                hash={dir.blurhash || ''} 
+                src={`${getThumbnailUrl(dir.cover_id)}${dir.blurhash ? '?cb=' + encodeURIComponent(dir.blurhash) : ''}`} 
+                alt={dir.name}
+                objectFit="cover"
+                square={true}
+              />
+            {:else}
+              <div class="dir-placeholder"></div>
             {/if}
           </div>
-        </div>
+          <div class="dir-info">
+            <span class="dir-name">{dir.name}</span>
+            <div class="dir-actions" use:clickOutside={() => activeFolderMenu = null}>
+              <button class="icon-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
+                <MoreVertical size={16} />
+              </button>
+              {#if activeFolderMenu === dir.name}
+                <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; min-width: 150px; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
+                  <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
+                  <button onclick={() => { activeFolderMenu = null; window.open(getFolderZipUrl(data.folderPath ? data.folderPath + '/' + dir.name : dir.name), '_blank'); }}>Download ZIP</button>
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
       </a>
     {/each}
   </div>
@@ -799,6 +851,75 @@
     padding-bottom: 24px;
   }
 
+  .dir-grid.folder-mode-small-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 6px;
+  }
+
+  .dir-grid.folder-mode-medium-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+  }
+
+  .dir-grid.folder-mode-large-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+  }
+
+  .dir-grid.folder-mode-small-grid .dir-cover,
+  .dir-grid.folder-mode-medium-grid .dir-cover,
+  .dir-grid.folder-mode-large-grid .dir-cover {
+    border-radius: 0;
+  }
+
+  .dir-grid.folder-mode-small-grid .dir-info,
+  .dir-grid.folder-mode-medium-grid .dir-info,
+  .dir-grid.folder-mode-large-grid .dir-info {
+    padding: 8px 2px;
+    align-items: flex-start;
+  }
+
+  .dir-grid.folder-mode-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding-bottom: 24px;
+  }
+
+  .dir-grid.folder-mode-list .dir-card {
+    display: block;
+    text-decoration: none;
+    color: var(--text-color);
+  }
+
+  .dir-grid.folder-mode-list .dir-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+  }
+
+  .dir-grid.folder-mode-list .dir-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+    color: #d4d4d8;
+  }
+
+  .dir-grid.folder-mode-list .dir-card:not(:hover) .dir-info {
+    background: transparent;
+  }
+
+  .dir-grid.folder-mode-list .dir-card:nth-child(odd) .dir-info {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .dir-grid.folder-mode-list .dir-card:hover .dir-info {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
   .dir-grid.list-view {
     display: flex;
     flex-wrap: wrap;
@@ -819,7 +940,6 @@
   .dir-grid.list-view .dir-cover {
     width: 48px;
     height: 48px;
-    border-radius: 6px;
     flex-shrink: 0;
   }
 
@@ -852,7 +972,6 @@
     aspect-ratio: 1;
     position: relative;
     overflow: hidden;
-    border-radius: 8px;
     background: #111;
   }
 
@@ -872,11 +991,31 @@
   .dir-name {
     font-family: 'Cabinet Grotesk', sans-serif;
     font-weight: 700;
-    font-size: 1.125rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 1rem;
+    line-height: 1.3;
+    word-break: break-word;
     flex: 1;
+  }
+
+  .folder-mode-small-grid .dir-name {
+    font-size: 0.8rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .folder-mode-medium-grid .dir-name,
+  .folder-mode-large-grid .dir-name {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .dir-actions {
+    margin-left: 12px;
+    flex-shrink: 0;
   }
 
   .grid {
