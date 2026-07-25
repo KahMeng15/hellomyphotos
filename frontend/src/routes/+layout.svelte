@@ -1,5 +1,45 @@
 <script lang="ts">
   import '../app.css';
+  import { slide, fly } from 'svelte/transition';
+  import { onMount } from 'svelte';
+  
+  let isSidebarOpen = $state(true);
+  let canGoForward = $state(false);
+  let canGoBack = $state(true);
+
+  onMount(() => {
+    const checkHistory = () => {
+      if ('navigation' in window) {
+        canGoForward = (window as any).navigation.canGoForward;
+        canGoBack = (window as any).navigation.canGoBack;
+      } else {
+        canGoBack = window.history.length > 1;
+        canGoForward = true; // Fallback for browsers without Navigation API
+      }
+    };
+    
+    checkHistory();
+    
+    if ('navigation' in window) {
+      (window as any).navigation.addEventListener('currententrychange', checkHistory);
+      return () => {
+        (window as any).navigation.removeEventListener('currententrychange', checkHistory);
+      };
+    } else {
+      window.addEventListener('popstate', checkHistory);
+      return () => {
+        window.removeEventListener('popstate', checkHistory);
+      };
+    }
+  });
+
+  function goBack() {
+    window.history.back();
+  }
+
+  function goForward() {
+    window.history.forward();
+  }
 </script>
 
 <svelte:head>
@@ -7,25 +47,47 @@
 </svelte:head>
 
 <div class="app-layout">
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <a href="/" style="text-decoration: none;">
-        <h1>HelloMyPhotos</h1>
-      </a>
-    </div>
-    
-    <nav class="sidebar-nav">
-      <a href="/folder">Photos</a>
-      <a href="/faces">Faces</a>
-      <a href="/timeline">Timeline</a>
-      <a href="/settings">Settings</a>
-      <a href="/admin">Admin</a>
-    </nav>
-  </aside>
+  {#if isSidebarOpen}
+    <aside class="sidebar" transition:slide={{ axis: 'x', duration: 300 }}>
+      <div class="sidebar-header">
+        <a href="/" style="text-decoration: none;">
+          <h1>HelloMyPhotos</h1>
+        </a>
+        <div class="nav-actions">
+          <button class="icon-btn" onclick={goBack} title="Go back" disabled={!canGoBack}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <button class="icon-btn" onclick={goForward} title="Go forward" disabled={!canGoForward}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+      </div>
+      
+      <nav class="sidebar-nav">
+        <a href="/folder">Photos</a>
+        <a href="/faces">Faces</a>
+        <a href="/timeline">Timeline</a>
+        <a href="/settings">Settings</a>
+        <a href="/admin">Admin</a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="icon-btn hide-sidebar-btn" onclick={() => isSidebarOpen = false} title="Hide sidebar">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
+        </button>
+      </div>
+    </aside>
+  {/if}
 
   <main class="main-content">
     <slot />
   </main>
+
+  {#if !isSidebarOpen}
+    <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => isSidebarOpen = true} title="Open sidebar">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg>
+    </button>
+  {/if}
 </div>
 
 <style>
@@ -34,6 +96,7 @@
     min-height: 100vh;
     width: 100vw;
     overflow: hidden;
+    position: relative;
   }
   
   .main-content {
@@ -56,11 +119,15 @@
   
   .sidebar-header {
     margin-bottom: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
   
   .sidebar-header h1 {
     font-size: 1.25rem;
     color: var(--text-color);
+    margin: 0;
   }
   
   .sidebar-nav {
@@ -80,5 +147,62 @@
   
   .sidebar-nav a:hover {
     opacity: 0.7;
+  }
+
+  .sidebar-footer {
+    margin-top: auto;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .nav-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-color);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s, opacity 0.2s;
+  }
+
+  .icon-btn:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .icon-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .floating-reopen-btn {
+    position: absolute;
+    bottom: 24px;
+    left: 24px;
+    background: var(--bg-color);
+    border: 1px solid var(--glass-border);
+    color: var(--text-color);
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 100;
+    transition: transform 0.2s, background-color 0.2s;
+  }
+
+  .floating-reopen-btn:hover {
+    transform: scale(1.05);
+    background-color: rgba(255, 255, 255, 0.05);
   }
 </style>

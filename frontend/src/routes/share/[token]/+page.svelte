@@ -166,7 +166,7 @@
       </div>
       
       <span class="count">
-        {data.files.length} media items
+        {data.files.length} {data.files.length === 1 ? 'item' : 'items'}
       </span>
     </div>
   </div>

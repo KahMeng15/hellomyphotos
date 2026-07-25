@@ -314,7 +314,7 @@
       </div>
       
       <span class="count">
-        {#if data.directories.length > 0}{data.directories.length} folders, {/if}{data.files.length} media items
+        {#if data.directories.length > 0}{data.directories.length} {data.directories.length === 1 ? 'folder' : 'folders'}{#if data.files.length > 0}{' & '}{/if}{/if}{#if data.files.length > 0 || data.directories.length === 0}{data.files.length} {data.files.length === 1 ? 'item' : 'items'}{/if}
       </span>
     </div>
   </div>
