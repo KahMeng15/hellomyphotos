@@ -12,10 +12,30 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', requireAuth);
   
   fastify.addHook('onRequest', async (request, reply) => {
-    if (request.user?.role !== 'admin') {
+    if (request.user?.role !== 'admin' && request.user?.role !== 'super_admin') {
       return reply.status(403).send({ error: 'Admin access required' });
     }
   });
+
+  async function verifyAdminPassword(request: any, reply: any) {
+    const adminPassword = request.headers['x-admin-password'];
+    if (!adminPassword || typeof adminPassword !== 'string') {
+      reply.status(401).send({ error: 'Admin password is required to perform this action' });
+      return false;
+    }
+    const adminId = request.user?.id;
+    const adminRes = await query('SELECT password_hash FROM users WHERE id = $1', [adminId]);
+    if (adminRes.rows.length === 0) {
+      reply.status(401).send({ error: 'Admin user not found' });
+      return false;
+    }
+    const isValid = await bcrypt.compare(adminPassword, adminRes.rows[0].password_hash);
+    if (!isValid) {
+      reply.status(401).send({ error: 'Incorrect admin password' });
+      return false;
+    }
+    return true;
+  }
 
   // Users Management
   fastify.get('/api/admin/users', async (request, reply) => {
@@ -31,6 +51,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post('/api/admin/users', async (request, reply) => {
+    if (!(await verifyAdminPassword(request, reply))) return;
     const { email, password, name, role, folders } = request.body as any;
     if (!email || !password || !role) return reply.status(400).send({ error: 'Missing fields' });
     
@@ -42,7 +63,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       );
       const userId = rows[0].id;
       
-      if (role !== 'admin' && Array.isArray(folders)) {
+      if (role !== 'admin' && role !== 'super_admin' && Array.isArray(folders)) {
         for (const f of folders) {
           await query('INSERT INTO user_folder_access (user_id, folder_path) VALUES ($1, $2)', [userId, f]);
         }
@@ -55,8 +76,20 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.put('/api/admin/users/:id', async (request, reply) => {
+    if (!(await verifyAdminPassword(request, reply))) return;
     const { id } = request.params as any;
     const { email, name, role, password, folders } = request.body as any;
+    
+    // Safety check: don't demote the last super_admin
+    if (role !== 'super_admin') {
+      const userRes = await query('SELECT role FROM users WHERE id = $1', [id]);
+      if (userRes.rows.length > 0 && userRes.rows[0].role === 'super_admin') {
+        const adminCountRes = await query("SELECT COUNT(*) FROM users WHERE role = 'super_admin'");
+        if (parseInt(adminCountRes.rows[0].count) <= 1) {
+          return reply.status(400).send({ error: 'Cannot demote the last super admin.' });
+        }
+      }
+    }
     
     let updateQuery = 'UPDATE users SET email = $1, name = $2, role = $3';
     let params: any[] = [email, name, role];
@@ -74,7 +107,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     
     await query(updateQuery, params);
     
-    if (role !== 'admin') {
+    if (role !== 'admin' && role !== 'super_admin') {
       await query('DELETE FROM user_folder_access WHERE user_id = $1', [id]);
       if (Array.isArray(folders)) {
         for (const f of folders) {
@@ -87,7 +120,22 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.delete('/api/admin/users/:id', async (request, reply) => {
+    if (!(await verifyAdminPassword(request, reply))) return;
     const { id } = request.params as any;
+    
+    // Safety check: Don't delete the last super_admin
+    const userRes = await query('SELECT role FROM users WHERE id = $1', [id]);
+    if (userRes.rows.length === 0) {
+      return reply.status(404).send({ error: 'User not found' });
+    }
+    
+    if (userRes.rows[0].role === 'super_admin') {
+      const adminCountRes = await query("SELECT COUNT(*) FROM users WHERE role = 'super_admin'");
+      if (parseInt(adminCountRes.rows[0].count) <= 1) {
+        return reply.status(400).send({ error: 'Cannot delete the last super admin.' });
+      }
+    }
+    
     await query('DELETE FROM users WHERE id = $1', [id]);
     return reply.send({ success: true });
   });

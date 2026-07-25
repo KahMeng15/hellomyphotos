@@ -7,7 +7,7 @@ export interface AuthUser {
   id: string;
   email: string;
   name?: string;
-  role: 'admin' | 'user' | 'viewer';
+  role: 'super_admin' | 'admin' | 'user' | 'viewer';
   folders: string[]; // '*' for all, or specific paths
 }
 
@@ -36,14 +36,14 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
   await requireAuth(request, reply);
   if (reply.sent) return;
 
-  if (request.user?.role !== 'admin') {
+  if (request.user?.role !== 'admin' && request.user?.role !== 'super_admin') {
     return reply.status(403).send({ error: 'Forbidden: Admin access required' });
   }
 }
 
 // Check if user has access to a specific folder
 export function hasFolderAccess(user: AuthUser, folderPath: string): boolean {
-  if (user.role === 'admin' || user.folders.includes('*')) {
+  if (user.role === 'admin' || user.role === 'super_admin' || user.folders.includes('*')) {
     return true;
   }
   

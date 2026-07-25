@@ -112,7 +112,7 @@
         <a href="/faces">Faces</a>
         <a href="/timeline">Timeline</a>
         <a href="/settings">Settings</a>
-        {#if currentUser?.role === 'admin'}
+        {#if currentUser?.role === 'admin' || currentUser?.role === 'super_admin'}
           <a href="/admin">Admin</a>
         {/if}
       </nav>

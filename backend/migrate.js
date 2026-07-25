@@ -14,7 +14,7 @@ async function run() {
         email VARCHAR(255) UNIQUE NOT NULL,
         name VARCHAR(255) DEFAULT 'Unknown',
         password_hash TEXT NOT NULL,
-        role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'user', 'viewer')),
+        role VARCHAR(50) NOT NULL CHECK (role IN ('super_admin', 'admin', 'user', 'viewer')),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 

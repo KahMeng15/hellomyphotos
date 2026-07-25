@@ -6,7 +6,8 @@
   import { invalidateAll } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
-  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, MoreVertical } from '@lucide/svelte';
+  import Modal from '$lib/components/Modal.svelte';
+  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical } from '@lucide/svelte';
   
   let { data }: { data: PageData } = $props();
   
@@ -468,184 +469,143 @@
   />
 {/if}
 
-{#if showDownloadModal}
-  <div class="modal-backdrop" onclick={() => showDownloadModal = false}>
-    <div class="modal glass-panel" onclick={e => e.stopPropagation()}>
-      <div class="modal-header">
-        <h3>Download Folder</h3>
-        <button class="icon-btn" onclick={() => showDownloadModal = false}><X size={20} /></button>
-      </div>
-      <div class="modal-body">
-        <a href={getFolderZipUrl(data.folderPath || '')} target="_blank" class="btn" style="display: block; text-align: center; text-decoration: none; width: 100%; margin-bottom: 12px; background: var(--text-color); color: var(--bg-color);" onclick={() => showDownloadModal = false}>Download All in One Zip</a>
-        <button class="btn" style="width: 100%; background: var(--glass-bg); border: 1px solid var(--glass-border); color: white;">Download as Multi-part Zips (Coming Soon)</button>
-      </div>
-    </div>
-  </div>
-{/if}
+<Modal bind:show={showDownloadModal} id="download-folder" title="Download Folder">
+  <a href={getFolderZipUrl(data.folderPath || '')} target="_blank" class="btn" style="display: block; text-align: center; text-decoration: none; width: 100%; margin-bottom: 12px; background: var(--text-color); color: var(--bg-color);" onclick={() => showDownloadModal = false}>Download All in One Zip</a>
+  <button class="btn" style="width: 100%; background: var(--glass-bg); border: 1px solid var(--glass-border); color: white;">Download as Multi-part Zips (Coming Soon)</button>
+</Modal>
 
-{#if showShareModal}
-  <div class="modal-backdrop" onclick={() => showShareModal = false}>
-    <div class="modal glass-panel" onclick={e => e.stopPropagation()}>
-      <div class="modal-header">
-        <h3>Share Settings</h3>
-        <button class="icon-btn" onclick={() => showShareModal = false}><X size={20} /></button>
-      </div>
-      <div class="modal-body">
-        
-        {#if newlyCreatedShareToken}
-          <div style="background: rgba(0,255,100,0.1); border: 1px solid rgba(0,255,100,0.3); padding: 16px; border-radius: 8px; margin-bottom: 24px;">
-            <p style="color: #4ade80; margin-bottom: 8px; font-weight: 500;">Share link created successfully!</p>
-            <div style="display: flex; gap: 8px;">
-              <input type="text" readonly value="{window.location.origin}/share/{newlyCreatedShareToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
-              <button class="icon-btn" style="display: flex; align-items: center; justify-content: center;" onclick={() => copyShareLink(newlyCreatedShareToken!)}>
-                {#if copiedToken === newlyCreatedShareToken}
-                  <Check size={18} color="#10b981" />
-                {:else}
-                  <Copy size={18} color="#a1a1aa" />
-                {/if}
-              </button>
-            </div>
-          </div>
-        {/if}
-
-        <div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--glass-border);">
-          <h4 style="margin-bottom: 16px; font-weight: 500;">Create New Share Link</h4>
-          
-          <div class="form-group" style="margin-bottom: 16px;">
-            <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Expiration</label>
-            <select bind:value={shareExpiryDays} style="width: 100%; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;">
-              <option value={1}>1 Day</option>
-              <option value={7}>7 Days</option>
-              <option value={30}>30 Days</option>
-              <option value={0}>Never Expires</option>
-            </select>
-          </div>
-          
-          <div class="form-group" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
-            <input type="checkbox" id="allowDlsImg" bind:checked={shareAllowDownloadImages} style="width: 18px; height: 18px;" />
-            <label for="allowDlsImg" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading individual images</label>
-          </div>
-
-          <div class="form-group" style="margin-bottom: 24px; display: flex; align-items: center; gap: 12px;">
-            <input type="checkbox" id="allowDlsFolder" bind:checked={shareAllowDownloadFolder} style="width: 18px; height: 18px;" />
-            <label for="allowDlsFolder" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading the entire folder (ZIP)</label>
-          </div>
-          
-          <button class="btn" style="width: 100%; background: var(--text-color); color: var(--bg-color);" onclick={handleCreateShare} disabled={isCreatingShare}>
-            {isCreatingShare ? 'Generating Link...' : 'Generate Share Link'}
-          </button>
-        </div>
-
-        <div>
-          <h4 style="margin-bottom: 16px; font-weight: 500;">Active Share Links</h4>
-          {#if activeShares.length === 0}
-            <p style="color: #666; font-size: 0.875rem;">No active links for this folder.</p>
+<Modal bind:show={showShareModal} id="share-settings" title="Share Settings">
+  {#if newlyCreatedShareToken}
+    <div style="background: rgba(0,255,100,0.1); border: 1px solid rgba(0,255,100,0.3); padding: 16px; border-radius: 8px; margin-bottom: 24px;">
+      <p style="color: #4ade80; margin-bottom: 8px; font-weight: 500;">Share link created successfully!</p>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" readonly value="{window.location.origin}/share/{newlyCreatedShareToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
+        <button class="icon-btn" style="display: flex; align-items: center; justify-content: center;" onclick={() => copyShareLink(newlyCreatedShareToken!)}>
+          {#if copiedToken === newlyCreatedShareToken}
+            <Check size={18} color="#10b981" />
           {:else}
-            <div style="display: flex; flex-direction: column; gap: 12px; max-height: 200px; overflow-y: auto;">
-              {#each activeShares as share}
-                <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
-                  <div>
-                    <div style="font-family: monospace; color: #e4e4e7; margin-bottom: 4px;">...{share.share_token.substring(0, 8)}</div>
-                    <div style="font-size: 0.75rem; color: #888; display: flex; gap: 12px;">
-                      <span style="display: flex; align-items: center; gap: 4px;">
-                        <Clock size={12} />
-                        {share.expires_at ? new Date(share.expires_at).toLocaleDateString() : 'Never'}
-                      </span>
-                      <span>
-                        {#if share.allow_download_images && share.allow_download_folder}
-                          Full DLs
-                        {:else if share.allow_download_images}
-                          Images DL Only
-                        {:else if share.allow_download_folder}
-                          Folder DL Only
-                        {:else}
-                          View Only
-                        {/if}
-                      </span>
-                    </div>
-                  </div>
-                  <div style="display: flex; gap: 8px;">
-                    <button class="icon-btn" title="Copy Link" onclick={() => copyShareLink(share.share_token)}>
-                      {#if copiedToken === share.share_token}
-                        <Check size={16} color="#10b981" />
-                      {:else}
-                        <Copy size={16} color="#a1a1aa" />
-                      {/if}
-                    </button>
-                    <button class="icon-btn" title="Revoke Link" onclick={() => handleRevokeShare(share.share_token)}>
-                      <Trash2 size={16} color="#a1a1aa" />
-                    </button>
-                  </div>
-                </div>
-              {/each}
-            </div>
+            <Copy size={18} color="#a1a1aa" />
           {/if}
-        </div>
-
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if showSettingsModal}
-  <div class="modal-backdrop" onclick={() => showSettingsModal = false}>
-    <div class="modal glass-panel" onclick={e => e.stopPropagation()}>
-      <div class="modal-header">
-        <h3>Folder Settings</h3>
-        <button class="icon-btn" onclick={() => showSettingsModal = false}><X size={20} /></button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group" style="margin-bottom: 16px;">
-          <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #888;">View Name (Read Only)</label>
-          <input type="text" readonly value={data.folderPath || 'Home'} style="width: 100%; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: #888; border-radius: 4px;" />
-        </div>
-        <div class="form-group">
-          <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Description</label>
-          <textarea bind:value={folderDescInput} placeholder="Add a description..." style="width: 100%; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; min-height: 100px; font-family: inherit; resize: vertical;"></textarea>
-        </div>
-        <div style="margin-top: 24px; display: flex; justify-content: flex-end;">
-          <button class="btn" onclick={handleSaveSettings} disabled={isSavingSettings}>
-            {#if isSavingSettings}
-              Saving...
-            {:else}
-              <Check size={18} style="margin-right: 8px; display: inline-block; vertical-align: middle;" />
-              <span style="display: inline-block; vertical-align: middle;">Save Changes</span>
-            {/if}
-          </button>
-        </div>
-
-        <hr style="border-color: rgba(255,255,255,0.1); margin: 24px 0;" />
-        
-        <h4 style="margin-bottom: 16px; font-weight: 500;">Advanced Actions</h4>
-        <div style="display: flex; flex-direction: column; gap: 12px;">
-          <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRescanFolder} disabled={isRescanning}>
-            {isRescanning ? 'Queuing...' : 'Rescan Folder for New Images'}
-          </button>
-          
-          <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRescanML} disabled={isRescanningML}>
-            {isRescanningML ? 'Queuing...' : 'Rescan Faces & Items in Images'}
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if showAlertModal}
-  <div class="modal-backdrop" onclick={() => showAlertModal = false} style="z-index: 9999;">
-    <div class="modal glass-panel" onclick={e => e.stopPropagation()} style="max-width: 400px; text-align: center;">
-      <div class="modal-header" style="justify-content: center;">
-        <h3 style="margin: 0;">{alertModalTitle}</h3>
-      </div>
-      <div class="modal-body">
-        <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">{alertModalMessage}</p>
-        <button class="btn" style="width: 100%; justify-content: center; background: white; color: black;" onclick={() => showAlertModal = false}>
-          Okay
         </button>
       </div>
     </div>
+  {/if}
+
+  <div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--glass-border);">
+    <h4 style="margin-bottom: 16px; font-weight: 500;">Create New Share Link</h4>
+    
+    <div class="form-group" style="margin-bottom: 16px;">
+      <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Expiration</label>
+      <select bind:value={shareExpiryDays} style="width: 100%; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;">
+        <option value={1}>1 Day</option>
+        <option value={7}>7 Days</option>
+        <option value={30}>30 Days</option>
+        <option value={0}>Never Expires</option>
+      </select>
+    </div>
+    
+    <div class="form-group" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
+      <input type="checkbox" id="allowDlsImg" bind:checked={shareAllowDownloadImages} style="width: 18px; height: 18px;" />
+      <label for="allowDlsImg" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading individual images</label>
+    </div>
+
+    <div class="form-group" style="margin-bottom: 24px; display: flex; align-items: center; gap: 12px;">
+      <input type="checkbox" id="allowDlsFolder" bind:checked={shareAllowDownloadFolder} style="width: 18px; height: 18px;" />
+      <label for="allowDlsFolder" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading the entire folder (ZIP)</label>
+    </div>
+    
+    <button class="btn" style="width: 100%; background: var(--text-color); color: var(--bg-color);" onclick={handleCreateShare} disabled={isCreatingShare}>
+      {isCreatingShare ? 'Generating Link...' : 'Generate Share Link'}
+    </button>
   </div>
-{/if}
+
+  <div>
+    <h4 style="margin-bottom: 16px; font-weight: 500;">Active Share Links</h4>
+    {#if activeShares.length === 0}
+      <p style="color: #666; font-size: 0.875rem;">No active links for this folder.</p>
+    {:else}
+      <div style="display: flex; flex-direction: column; gap: 12px; max-height: 200px; overflow-y: auto;">
+        {#each activeShares as share}
+          <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-family: monospace; color: #e4e4e7; margin-bottom: 4px;">...{share.share_token.substring(0, 8)}</div>
+              <div style="font-size: 0.75rem; color: #888; display: flex; gap: 12px;">
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <Clock size={12} />
+                  {share.expires_at ? new Date(share.expires_at).toLocaleDateString() : 'Never'}
+                </span>
+                <span>
+                  {#if share.allow_download_images && share.allow_download_folder}
+                    Full DLs
+                  {:else if share.allow_download_images}
+                    Images DL Only
+                  {:else if share.allow_download_folder}
+                    Folder DL Only
+                  {:else}
+                    View Only
+                  {/if}
+                </span>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="icon-btn" title="Copy Link" onclick={() => copyShareLink(share.share_token)}>
+                {#if copiedToken === share.share_token}
+                  <Check size={16} color="#10b981" />
+                {:else}
+                  <Copy size={16} color="#a1a1aa" />
+                {/if}
+              </button>
+              <button class="icon-btn" title="Revoke Link" onclick={() => handleRevokeShare(share.share_token)}>
+                <Trash2 size={16} color="#a1a1aa" />
+              </button>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
+</Modal>
+
+<Modal bind:show={showSettingsModal} id="folder-settings" title="Folder Settings">
+  <div class="form-group" style="margin-bottom: 16px;">
+    <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #888;">View Name (Read Only)</label>
+    <input type="text" readonly value={data.folderPath || 'Home'} style="width: 100%; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: #888; border-radius: 4px;" />
+  </div>
+  <div class="form-group">
+    <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Description</label>
+    <textarea bind:value={folderDescInput} placeholder="Add a description..." style="width: 100%; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; min-height: 100px; font-family: inherit; resize: vertical;"></textarea>
+  </div>
+  <div style="margin-top: 24px; display: flex; justify-content: flex-end;">
+    <button class="btn" onclick={handleSaveSettings} disabled={isSavingSettings}>
+      {#if isSavingSettings}
+        Saving...
+      {:else}
+        <Check size={18} style="margin-right: 8px; display: inline-block; vertical-align: middle;" />
+        <span style="display: inline-block; vertical-align: middle;">Save Changes</span>
+      {/if}
+    </button>
+  </div>
+
+  <hr style="border-color: rgba(255,255,255,0.1); margin: 24px 0;" />
+  
+  <h4 style="margin-bottom: 16px; font-weight: 500;">Advanced Actions</h4>
+  <div style="display: flex; flex-direction: column; gap: 12px;">
+    <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRescanFolder} disabled={isRescanning}>
+      {isRescanning ? 'Queuing...' : 'Rescan Folder for New Images'}
+    </button>
+    
+    <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRescanML} disabled={isRescanningML}>
+      {isRescanningML ? 'Queuing...' : 'Rescan Faces & Items in Images'}
+    </button>
+  </div>
+</Modal>
+
+<Modal bind:show={showAlertModal} id="folder-alert" title={alertModalTitle}>
+  <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">{alertModalMessage}</p>
+  <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
+    <button class="btn" style="background: white; color: black;" onclick={() => showAlertModal = false}>Okay</button>
+  </div>
+</Modal>
 
 <style>
   .header-wrapper {

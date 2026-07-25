@@ -1,12 +1,49 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { UserPlus, Edit2, Trash2, Shield, Folder, X, Check } from '@lucide/svelte';
+  import Modal from '$lib/components/Modal.svelte';
+  import { UserPlus, Edit2, Trash2, Shield, Folder, Check } from '@lucide/svelte';
 
   let users: any[] = $state([]);
   let loading = $state(true);
   let showModal = $state(false);
   let editingUser: any = $state(null);
+
+  let showPasswordPrompt = $state(false);
+  let adminPasswordInput = $state('');
+  let pendingAction: ((password: string) => Promise<void>) | null = $state(null);
+
+  let showAlertModal = $state(false);
+  let alertModalMessage = $state('');
+
+  let showConfirmModal = $state(false);
+  let confirmDeleteId = $state<string | null>(null);
+
+  function showError(msg: string) {
+    alertModalMessage = msg;
+    showAlertModal = true;
+  }
+
+  function closeAlert() {
+    showAlertModal = false;
+  }
+
+  function promptAdminPassword(action: (password: string) => Promise<void>) {
+    adminPasswordInput = '';
+    pendingAction = action;
+    showPasswordPrompt = true;
+  }
+
+  function closePasswordPrompt() {
+    showPasswordPrompt = false;
+  }
+
+  async function executePendingAction() {
+    if (!adminPasswordInput) return;
+    if (pendingAction) {
+      await pendingAction(adminPasswordInput);
+    }
+  }
 
   // Form states
   let formEmail = $state('');
@@ -54,40 +91,64 @@
     showModal = true;
   }
 
-  async function saveUser() {
-    const payload = {
-      email: formEmail,
-      name: formName,
-      role: formRole,
-      password: formPassword || undefined,
-      folders: formFolders.split(',').map(f => f.trim()).filter(f => f)
-    };
+  function saveUser() {
+    promptAdminPassword(async (password) => {
+      const payload = {
+        email: formEmail,
+        name: formName,
+        role: formRole,
+        password: formPassword || undefined,
+        folders: formFolders.split(',').map(f => f.trim()).filter(f => f)
+      };
 
-    const method = editingUser ? 'PUT' : 'POST';
-    const url = editingUser 
-      ? `${API_BASE}/api/admin/users/${editingUser.id}` 
-      : `${API_BASE}/api/admin/users`;
+      const method = editingUser ? 'PUT' : 'POST';
+      const url = editingUser 
+        ? `${API_BASE}/api/admin/users/${editingUser.id}` 
+        : `${API_BASE}/api/admin/users`;
 
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(payload)
+      const res = await fetch(url, {
+        method,
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-admin-password': password
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        showModal = false;
+        showPasswordPrompt = false;
+        loadUsers();
+      } else {
+        const data = await res.json();
+        showError(data.error || 'Failed to save user');
+      }
     });
-
-    if (res.ok) {
-      showModal = false;
-      loadUsers();
-    } else {
-      const data = await res.json();
-      alert(data.error || 'Failed to save user');
-    }
   }
 
-  async function deleteUser(id: string) {
-    if (confirm('Are you sure you want to delete this user? This cannot be undone.')) {
-      await fetch(`${API_BASE}/api/admin/users/${id}`, { method: 'DELETE', credentials: 'include' });
-      loadUsers();
+  function showDeleteConfirm(id: string) {
+    confirmDeleteId = id;
+    showConfirmModal = true;
+  }
+
+  function confirmDeleteUser() {
+    showConfirmModal = false;
+    if (confirmDeleteId) {
+      promptAdminPassword(async (password) => {
+        const res = await fetch(`${API_BASE}/api/admin/users/${confirmDeleteId}`, { 
+          method: 'DELETE', 
+          headers: { 'x-admin-password': password },
+          credentials: 'include' 
+        });
+        if (res.ok) {
+          showPasswordPrompt = false;
+          loadUsers();
+        } else {
+          const data = await res.json();
+          showError(data.error || 'Failed to delete user');
+        }
+      });
     }
   }
 </script>
@@ -124,14 +185,14 @@
               <td class="email-cell">{user.email}</td>
               <td>
                 <span class="badge {user.role}">
-                  {#if user.role === 'admin'}
+                  {#if user.role === 'admin' || user.role === 'super_admin'}
                     <Shield size={14} />
                   {/if}
                   {user.role}
                 </span>
               </td>
               <td class="folders-cell">
-                {#if user.role === 'admin'}
+                {#if user.role === 'admin' || user.role === 'super_admin'}
                   <span class="muted">Full Access</span>
                 {:else if user.folders && user.folders.length > 0}
                   <div class="folder-tags">
@@ -148,7 +209,7 @@
                   <Edit2 size={16} />
                 </button>
                 {#if user.email !== 'admin@example.com'}
-                  <button class="icon-btn delete" onclick={() => deleteUser(user.id)} title="Delete">
+                  <button class="icon-btn delete" onclick={() => showDeleteConfirm(user.id)} title="Delete">
                     <Trash2 size={16} />
                   </button>
                 {/if}
@@ -161,57 +222,76 @@
   {/if}
 </div>
 
-{#if showModal}
-  <div class="modal-backdrop" onclick={() => showModal = false} role="button" tabindex="0" onkeydown={(e) => e.key === 'Escape' && (showModal = false)}>
-    <div class="modal glass-panel" onclick={(e) => e.stopPropagation()} role="document" tabindex="0" onkeydown={(e) => {}}>
-      <div class="modal-header">
-        <h3>{editingUser ? 'Edit User' : 'Create New User'}</h3>
-        <button class="icon-btn" onclick={() => showModal = false}><X size={20} /></button>
-      </div>
-      
-      <div class="modal-body">
-        <div class="form-group">
-          <label>Display Name</label>
-          <input type="text" bind:value={formName} placeholder="Jane Doe" />
-        </div>
-        
-        <div class="form-group">
-          <label>Email Address</label>
-          <input type="email" bind:value={formEmail} placeholder="jane@example.com" />
-        </div>
-
-        <div class="form-group">
-          <label>Password {editingUser ? '(Leave blank to keep current)' : ''}</label>
-          <input type="password" bind:value={formPassword} placeholder="••••••••" />
-        </div>
-
-        <div class="form-group">
-          <label>Role</label>
-          <select bind:value={formRole}>
-            <option value="admin">Admin (Full Access)</option>
-            <option value="user">User (View/Share)</option>
-            <option value="viewer">Viewer (Read Only)</option>
-          </select>
-        </div>
-
-        {#if formRole !== 'admin'}
-          <div class="form-group">
-            <label>Folder Scopes (Comma-separated paths)</label>
-            <p class="help-text">E.g. "family_photos, vacations/2023"</p>
-            <input type="text" bind:value={formFolders} placeholder="family_photos, vacations" />
-          </div>
-        {/if}
-        
-        <div class="modal-actions">
-          <button class="btn secondary" onclick={() => showModal = false}>Cancel</button>
-          <button class="btn primary" onclick={saveUser}>
-            <Check size={18} /> Save User
-          </button>
-        </div>
-      </div>
-    </div>
+<Modal bind:show={showModal} id="user-form" title={editingUser ? 'Edit User' : 'Create New User'}>
+  <div class="form-group">
+    <label>Display Name</label>
+    <input type="text" bind:value={formName} placeholder="Jane Doe" />
   </div>
-{/if}
+  
+  <div class="form-group">
+    <label>Email Address</label>
+    <input type="email" bind:value={formEmail} placeholder="jane@example.com" />
+  </div>
+
+  <div class="form-group">
+    <label>Password {editingUser ? '(Leave blank to keep current)' : ''}</label>
+    <input type="password" bind:value={formPassword} placeholder="••••••••" />
+  </div>
+
+  <div class="form-group">
+    <label>Role</label>
+    <select bind:value={formRole}>
+      <option value="super_admin">Super Admin (Master Access)</option>
+      <option value="admin">Admin (Full Access)</option>
+      <option value="user">User (View/Share)</option>
+      <option value="viewer">Viewer (Read Only)</option>
+    </select>
+  </div>
+
+  {#if formRole !== 'admin' && formRole !== 'super_admin'}
+    <div class="form-group">
+      <label>Folder Scopes (Comma-separated paths)</label>
+      <p class="help-text">E.g. "family_photos, vacations/2023"</p>
+      <input type="text" bind:value={formFolders} placeholder="family_photos, vacations" />
+    </div>
+  {/if}
+  
+  <div class="modal-actions">
+    <button class="btn secondary" onclick={() => showModal = false}>Cancel</button>
+    <button class="btn primary" onclick={saveUser}>
+          Save User
+    </button>
+  </div>
+</Modal>
+
+<Modal bind:show={showPasswordPrompt} id="password-prompt" title="Admin Verification">
+  <p style="color: #cbd5e1; margin-bottom: 16px; font-size: 0.95rem;">Please enter your admin password to confirm this action.</p>
+  <div class="form-group">
+    <input type="password" bind:value={adminPasswordInput} placeholder="Admin Password" onkeydown={(e) => e.key === 'Enter' && executePendingAction()} />
+  </div>
+  
+  <div class="modal-actions" style="margin-top: 24px;">
+    <button class="btn secondary" onclick={closePasswordPrompt}>Cancel</button>
+    <button class="btn primary" onclick={executePendingAction}>
+      <Check size={18} /> Confirm
+    </button>
+  </div>
+</Modal>
+
+<Modal bind:show={showAlertModal} id="alert" title="Error">
+  <p style="color: #cbd5e1; margin-bottom: 24px; line-height: 1.5;">{alertModalMessage}</p>
+  <div class="modal-actions">
+    <button class="btn primary" onclick={closeAlert}>Okay</button>
+  </div>
+</Modal>
+
+<Modal bind:show={showConfirmModal} id="delete-confirm" title="Delete User">
+  <p style="color: #cbd5e1; margin-bottom: 24px; line-height: 1.5;">Are you sure you want to delete this user? This cannot be undone.</p>
+  <div class="modal-actions">
+    <button class="btn secondary" onclick={() => showConfirmModal = false}>Cancel</button>
+    <button class="btn primary" onclick={confirmDeleteUser} style="background: linear-gradient(135deg, #ef4444, #dc2626);">Delete</button>
+  </div>
+</Modal>
 
 <style>
   .admin-container {
@@ -376,44 +456,8 @@
     color: white;
   }
 
-  .modal-backdrop {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.7);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-  }
-
-  .modal {
-    width: 100%;
-    max-width: 500px;
-    background: #18181b;
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 12px;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-  }
-
-  .modal-header {
-    padding: 1.5rem;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .modal-header h3 {
-    margin: 0;
-    font-size: 1.25rem;
-  }
-
-  .modal-body {
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
+  .form-group {
+    margin-bottom: 1.25rem;
   }
 
   .form-group label {

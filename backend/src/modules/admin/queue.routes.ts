@@ -7,7 +7,7 @@ import { scannerQueue } from '../../queue/scannerQueue';
 export async function queueRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', requireAuth);
   fastify.addHook('onRequest', async (request, reply) => {
-    if ((request as any).user?.role !== 'admin') {
+    if ((request as any).user?.role !== 'admin' && (request as any).user?.role !== 'super_admin') {
       return reply.status(403).send({ error: 'Admin access required' });
     }
   });

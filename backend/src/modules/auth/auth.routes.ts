@@ -27,7 +27,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
     // Determine folder access for non-admins
     let folders: string[] = [];
-    if (user.role !== 'admin') {
+    if (user.role !== 'admin' && user.role !== 'super_admin') {
       const accessRows = await pool.query('SELECT folder_path FROM user_folder_access WHERE user_id = $1', [user.id]);
       folders = accessRows.rows.map(r => r.folder_path);
     }
@@ -37,7 +37,7 @@ export async function authRoutes(fastify: FastifyInstance) {
       email: user.email,
       name: user.name,
       role: user.role,
-      folders: user.role === 'admin' ? ['*'] : folders
+        folders: user.role === 'admin' || user.role === 'super_admin' ? ['*'] : folders
     }, JWT_SECRET, { expiresIn: '7d' });
 
     // Set cookie
@@ -55,7 +55,7 @@ export async function authRoutes(fastify: FastifyInstance) {
         email: user.email,
         name: user.name,
         role: user.role,
-        folders: user.role === 'admin' ? ['*'] : folders
+      folders: user.role === 'admin' || user.role === 'super_admin' ? ['*'] : folders
       }
     };
   });
