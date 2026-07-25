@@ -3,7 +3,7 @@
   import { decode } from 'blurhash';
   import { Play } from '@lucide/svelte';
 
-  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, onclick?: (e: MouseEvent) => void } = $props();
+  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, targetHeight = 250, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, targetHeight?: number, onclick?: (e: MouseEvent) => void } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
@@ -12,7 +12,6 @@
   let container: HTMLDivElement | undefined = $state();
   
   let aspectRatio = $state(1.5);
-  const targetHeight = 250;
   
   let objectPosition = $state('center');
   let transformScale = $state(1);
@@ -76,7 +75,7 @@
   });
 </script>
 
-<div class="grid-item" style="{square ? 'aspect-ratio: 1; flex-grow: 1; flex-basis: auto;' : `flex-grow: ${aspectRatio}; flex-basis: ${targetHeight * aspectRatio}px;`}" {onclick}>
+<div class="grid-item {square ? 'is-square' : ''}" style="{!square ? `flex-grow: ${aspectRatio}; flex-basis: ${targetHeight * aspectRatio}px;` : ''}" {onclick}>
   <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'};">
     <div class="zoom-wrapper">
       <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
@@ -117,7 +116,12 @@
     justify-content: center;
     align-items: center;
     color: white;
-    z-index: 2;
+    border-radius: 0;
+  }
+
+  .grid-item.is-square {
+    aspect-ratio: 1;
+    width: 100%;
   }
 
   .image-container {

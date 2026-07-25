@@ -175,6 +175,7 @@
       onclick={() => openLightbox(i)}
       objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
       square={viewMode.includes('square')}
+      targetHeight={viewMode.includes('small') ? 150 : viewMode.includes('large') ? 350 : 250}
     />
   {/each}
 </div>
@@ -388,14 +389,29 @@
   }
 
   .grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0;
     padding-bottom: 64px;
   }
   
-  /* Trick to prevent the last row from stretching to the edges if there's only 1 or 2 photos */
-  .grid::after {
+  .grid.small-fit, .grid.large-fit {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+  }
+  
+  .grid.small-square {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0;
+  }
+  
+  .grid.large-square {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 0;
+  }
+
+  /* Trick to prevent the last row from stretching to the edges if there's only 1 or 2 photos in flex view */
+  .grid.small-fit::after, .grid.large-fit::after {
     content: "";
     flex-grow: 999999999;
   }
