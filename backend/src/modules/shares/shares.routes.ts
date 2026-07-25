@@ -113,7 +113,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     let folderCoverId = null;
     let folderDescription = '';
     
-    if (share.folder_path) {
+    if (share.folder_path !== null && share.folder_path !== undefined) {
       const currentFolderSettingsRes = await query(`SELECT cover_media_id, description FROM folder_settings WHERE folder_path = $1`, [share.folder_path]);
       if (currentFolderSettingsRes.rows.length > 0) {
         folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id || null;

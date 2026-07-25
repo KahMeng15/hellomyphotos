@@ -200,7 +200,6 @@
     }
     localCoverOverride = dir.cover_id;
     coverRefreshKey++;
-    if (!data.folderPath) savePref('rootFolderCover', dir.cover_id);
     try {
       await setFolderCover(data.folderPath || '', dir.cover_id);
       await invalidateAll();
@@ -263,12 +262,16 @@
 
   async function handleSetCover(event: CustomEvent<string>) {
     const mediaId = event.detail;
+    localCoverOverride = mediaId;
+    coverRefreshKey++;
     try {
       await setFolderCover(data.folderPath || '', mediaId);
-      await invalidateAll(); // Reload page data to reflect the new cover image
+      await invalidateAll();
+      showAppAlert('Cover Updated', 'Folder cover image has been updated.');
     } catch (e) {
+      localCoverOverride = null;
       console.error(e);
-      alert('Failed to set cover image.');
+      showAppAlert('Error', 'Failed to set cover image.');
     }
   }
 
@@ -276,7 +279,7 @@
   let headerWrapper: HTMLElement | undefined = $state();
   let pollInterval: ReturnType<typeof setInterval>;
 
-  let localCoverOverride: string | null = $state(loadPref<string | null>('rootFolderCover', null));
+  let localCoverOverride: string | null = $state(null);
 
   let fallbackCoverId = $derived(
     localCoverOverride ||

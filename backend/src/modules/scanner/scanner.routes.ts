@@ -143,7 +143,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     // 5. Get current folder's custom cover (if any) and description
     let folderCoverId = null;
     let folderDescription = '';
-    if (folderPath) {
+    if (folderPath !== null && folderPath !== undefined) {
       const currentFolderSettingsRes = await query(`SELECT cover_media_id, description FROM folder_settings WHERE folder_path = $1`, [folderPath]);
       if (currentFolderSettingsRes.rows.length > 0) {
         folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id || null;
