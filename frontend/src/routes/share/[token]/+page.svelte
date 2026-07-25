@@ -20,14 +20,21 @@
   let showViewMenu = $state(false);
 
   let sortedFiles = $derived([...data.files].sort((a, b) => {
+    function parseExifDate(dateStr: string | undefined, fallback: number): number {
+      if (!dateStr) return fallback;
+      const normalized = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+      const time = new Date(normalized).getTime();
+      return isNaN(time) ? fallback : time;
+    }
+
     if (sortMode === 'newest') {
-      const dateA = a.exif_json?.dateTimeOriginal ? new Date(a.exif_json.dateTimeOriginal).getTime() : 0;
-      const dateB = b.exif_json?.dateTimeOriginal ? new Date(b.exif_json.dateTimeOriginal).getTime() : 0;
+      const dateA = parseExifDate(a.exif_json?.dateTimeOriginal, 0);
+      const dateB = parseExifDate(b.exif_json?.dateTimeOriginal, 0);
       return dateB - dateA;
     }
     if (sortMode === 'oldest') {
-      const dateA = a.exif_json?.dateTimeOriginal ? new Date(a.exif_json.dateTimeOriginal).getTime() : Number.MAX_SAFE_INTEGER;
-      const dateB = b.exif_json?.dateTimeOriginal ? new Date(b.exif_json.dateTimeOriginal).getTime() : Number.MAX_SAFE_INTEGER;
+      const dateA = parseExifDate(a.exif_json?.dateTimeOriginal, Number.MAX_SAFE_INTEGER);
+      const dateB = parseExifDate(b.exif_json?.dateTimeOriginal, Number.MAX_SAFE_INTEGER);
       return dateA - dateB;
     }
     if (sortMode === 'a-z') return a.file_name.localeCompare(b.file_name);
