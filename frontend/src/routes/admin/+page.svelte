@@ -66,6 +66,16 @@
 <div class="admin-container">
   <h2>Admin Dashboard</h2>
   
+  <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1)); border-color: rgba(168, 85, 247, 0.3);">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h3 style="margin: 0 0 0.5rem 0; color: #f4f4f5;">User Management</h3>
+        <p style="margin: 0; color: #a1a1aa; font-size: 0.9rem;">Create, edit, and delete user accounts. Assign roles and configure folder scopes.</p>
+      </div>
+      <a href="/admin/users" class="btn primary" style="text-decoration: none;">Manage Users</a>
+    </div>
+  </div>
+
   <div class="card">
     <h3>Resource Controls</h3>
     <label>
