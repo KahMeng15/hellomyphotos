@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { login } from '$lib/api/auth';
+  import { currentUser } from '$lib/stores/auth';
   import { ShieldAlert } from '@lucide/svelte';
 
   let email = $state('');
@@ -15,7 +16,8 @@
 
     try {
       const res = await login(email, password);
-      goto('/'); // Redirect to dashboard
+      currentUser.set(res.user);
+      goto('/');
     } catch (err: any) {
       error = err.message || 'Invalid credentials';
     } finally {

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { API_BASE } from '$lib/api/media';
+  import { API_BASE, fetchFolderContent } from '$lib/api/media';
   import Modal from '$lib/components/Modal.svelte';
-  import { UserPlus, Edit2, Trash2, Shield, Folder, Check } from '@lucide/svelte';
+  import { UserPlus, Edit2, Trash2, Shield, Folder, Check, Plus, Minus, ChevronRight } from '@lucide/svelte';
 
   let users: any[] = $state([]);
   let loading = $state(true);
@@ -50,7 +50,11 @@
   let formName = $state('');
   let formPassword = $state('');
   let formRole = $state('user');
-  let formFolders = $state(''); // Comma separated
+  let folderPaths = $state<string[]>([]);
+  let showFolderTree = $state(false);
+  let treeCurrentPath = $state('');
+  let treeSubdirs = $state<string[]>([]);
+  let treeLoading = $state(false);
 
   async function loadUsers() {
     loading = true;
@@ -67,6 +71,56 @@
     }
   }
 
+  let sortedUsers = $derived([...users].sort((a, b) => 
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  ));
+
+  function displayRole(role: string) {
+    return role === 'super_admin' ? 'Super Admin' : role.charAt(0).toUpperCase() + role.slice(1);
+  }
+
+  async function openFolderTree() {
+    treeCurrentPath = '';
+    await loadTreeSubdirs('');
+    showFolderTree = true;
+  }
+
+  async function loadTreeSubdirs(path: string) {
+    treeLoading = true;
+    try {
+      const content = await fetchFolderContent(path || '.');
+      treeSubdirs = (content.directories || []).map(d => d.name).sort();
+      treeCurrentPath = path;
+    } catch {
+      treeSubdirs = [];
+    } finally {
+      treeLoading = false;
+    }
+  }
+
+  async function enterSubdir(name: string) {
+    const newPath = treeCurrentPath ? `${treeCurrentPath}/${name}` : name;
+    await loadTreeSubdirs(newPath);
+  }
+
+  function goUpInTree() {
+    const parts = treeCurrentPath.split('/');
+    parts.pop();
+    const parent = parts.join('/');
+    loadTreeSubdirs(parent);
+  }
+
+  function selectCurrentFolder() {
+    if (treeCurrentPath && !folderPaths.includes(treeCurrentPath)) {
+      folderPaths = [...folderPaths, treeCurrentPath];
+    }
+    showFolderTree = false;
+  }
+
+  function removeFolder(path: string) {
+    folderPaths = folderPaths.filter(p => p !== path);
+  }
+
   onMount(() => {
     loadUsers();
   });
@@ -77,7 +131,7 @@
     formName = '';
     formPassword = '';
     formRole = 'user';
-    formFolders = '';
+    folderPaths = [];
     showModal = true;
   }
 
@@ -87,7 +141,7 @@
     formName = user.name;
     formPassword = '';
     formRole = user.role;
-    formFolders = user.folders ? user.folders.join(', ') : '';
+    folderPaths = user.folders ? [...user.folders] : [];
     showModal = true;
   }
 
@@ -98,7 +152,7 @@
         name: formName,
         role: formRole,
         password: formPassword || undefined,
-        folders: formFolders.split(',').map(f => f.trim()).filter(f => f)
+        folders: folderPaths
       };
 
       const method = editingUser ? 'PUT' : 'POST';
@@ -179,7 +233,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each users as user}
+          {#each sortedUsers as user}
             <tr>
               <td>{user.name}</td>
               <td class="email-cell">{user.email}</td>
@@ -188,7 +242,7 @@
                   {#if user.role === 'admin' || user.role === 'super_admin'}
                     <Shield size={14} />
                   {/if}
-                  {user.role}
+                  {displayRole(user.role)}
                 </span>
               </td>
               <td class="folders-cell">
@@ -250,9 +304,19 @@
 
   {#if formRole !== 'admin' && formRole !== 'super_admin'}
     <div class="form-group">
-      <label>Folder Scopes (Comma-separated paths)</label>
-      <p class="help-text">E.g. "family_photos, vacations/2023"</p>
-      <input type="text" bind:value={formFolders} placeholder="family_photos, vacations" />
+      <label>Folder Access</label>
+      <div class="folder-list">
+        {#each folderPaths as path}
+          <div class="folder-list-item">
+            <Folder size={14} />
+            <span>{path}</span>
+            <button class="icon-btn remove-btn" onclick={() => removeFolder(path)} title="Remove"><Minus size={14} /></button>
+          </div>
+        {/each}
+      </div>
+      <button class="btn secondary add-folder-btn" onclick={openFolderTree}>
+        <Plus size={16} /> Add Folder
+      </button>
     </div>
   {/if}
   
@@ -290,6 +354,34 @@
   <div class="modal-actions">
     <button class="btn secondary" onclick={() => showConfirmModal = false}>Cancel</button>
     <button class="btn primary" onclick={confirmDeleteUser} style="background: linear-gradient(135deg, #ef4444, #dc2626);">Delete</button>
+  </div>
+</Modal>
+
+<Modal bind:show={showFolderTree} id="folder-tree" title={treeCurrentPath || 'Home'}>
+  {#if treeLoading}
+    <div class="spinner"></div>
+  {:else}
+    {#if treeCurrentPath}
+      <button class="btn secondary" style="width: 100%; margin-bottom: 12px; justify-content: center;" onclick={goUpInTree}>.. / Go up</button>
+    {/if}
+    <div class="tree-list">
+      {#each treeSubdirs as dir}
+        <button class="tree-list-item" onclick={() => enterSubdir(dir)}>
+          <Folder size={16} />
+          <span>{dir}</span>
+          <ChevronRight size={14} />
+        </button>
+      {/each}
+    </div>
+    {#if treeSubdirs.length === 0}
+      <p style="color: #71717a; text-align: center; margin: 24px 0;">No subdirectories</p>
+    {/if}
+  {/if}
+  <div class="modal-actions" style="margin-top: 16px;">
+    {#if treeCurrentPath}
+      <button class="btn primary" onclick={selectCurrentFolder} style="flex: 1; justify-content: center;">Add "{treeCurrentPath}"</button>
+    {/if}
+    <button class="btn secondary" onclick={() => showFolderTree = false}>Cancel</button>
   </div>
 </Modal>
 
@@ -365,6 +457,12 @@
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: capitalize;
+  }
+
+  .badge.super_admin {
+    background: rgba(234, 179, 8, 0.2);
+    color: #fde047;
+    border: 1px solid rgba(234, 179, 8, 0.3);
   }
 
   .badge.admin {
@@ -495,6 +593,86 @@
     justify-content: flex-end;
     gap: 1rem;
     margin-top: 1rem;
+  }
+
+  .folder-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .folder-list-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: #e4e4e7;
+  }
+
+  .folder-list-item span {
+    flex: 1;
+  }
+
+  .remove-btn {
+    background: none;
+    border: none;
+    color: #a1a1aa;
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .remove-btn:hover {
+    color: #ef4444;
+    background: rgba(239,68,68,0.15);
+  }
+
+  .add-folder-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .tree-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .tree-list-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.03);
+    border: none;
+    border-radius: 6px;
+    color: #e4e4e7;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-family: inherit;
+    text-align: left;
+    transition: background 0.2s;
+  }
+
+  .tree-list-item:hover {
+    background: rgba(255,255,255,0.08);
+  }
+
+  .tree-list-item span {
+    flex: 1;
   }
 
   .spinner {

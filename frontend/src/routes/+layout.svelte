@@ -4,24 +4,18 @@
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
-  import { getAuthUser, logout } from '$lib/api/auth';
+  import { logout } from '$lib/api/auth';
+  import { currentUser, loadAuthUser } from '$lib/stores/auth';
   import { LogOut } from '@lucide/svelte';
   
   let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login');
-  let currentUser = $state<any>(null);
   let isAuthChecking = $state(true);
 
   $effect(() => {
     if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') {
       isSidebarOpen = false;
     } else {
-      isSidebarOpen = true; // Auto-open when leaving login page
-      if (!currentUser && !isAuthChecking) {
-        getAuthUser().then(user => {
-          if (!user) goto('/login');
-          else currentUser = user;
-        }).catch(() => goto('/login'));
-      }
+      isSidebarOpen = true;
     }
   });
 
@@ -55,14 +49,11 @@
   });
 
   onMount(async () => {
-    // Check auth
     if (!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login') {
       try {
-        const user = await getAuthUser();
+        const user = await loadAuthUser();
         if (!user) {
           goto('/login');
-        } else {
-          currentUser = user;
         }
       } catch (err) {
         goto('/login');
@@ -72,7 +63,7 @@
   });
 
   async function handleLogout() {
-    currentUser = null;
+    currentUser.set(null);
     await logout();
     goto('/login');
   }
@@ -112,7 +103,7 @@
         <a href="/faces">Faces</a>
         <a href="/timeline">Timeline</a>
         <a href="/settings">Settings</a>
-        {#if currentUser?.role === 'admin' || currentUser?.role === 'super_admin'}
+        {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}
           <a href="/admin">Admin</a>
         {/if}
       </nav>
@@ -122,9 +113,9 @@
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #a1a1aa;"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
         </button>
 
-        {#if currentUser}
+        {#if $currentUser}
           <div class="user-info">
-            <span class="user-name" title={currentUser.name}>{currentUser.name || 'Unknown'}</span>
+            <span class="user-name" title={$currentUser.name}>{$currentUser.name || 'Unknown'}</span>
             <button class="icon-btn logout-btn" onclick={handleLogout} title="Logout">
               <LogOut size={16} />
             </button>
