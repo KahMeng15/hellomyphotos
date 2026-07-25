@@ -6,7 +6,7 @@
   import { invalidateAll } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
-  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock } from '@lucide/svelte';
+  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, MoreVertical } from '@lucide/svelte';
   
   let { data }: { data: PageData } = $props();
   
@@ -147,7 +147,34 @@
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
-  
+
+  let activeFolderMenu = $state<string | null>(null);
+
+  function toggleFolderMenu(folderName: string, e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (activeFolderMenu === folderName) {
+      activeFolderMenu = null;
+    } else {
+      activeFolderMenu = folderName;
+    }
+  }
+
+  async function handleSetDirCoverAsParentCover(dir: any) {
+    activeFolderMenu = null;
+    if (!dir.cover_id) {
+      showAppAlert('Cannot Set Cover', 'This folder does not have a cover image to use.');
+      return;
+    }
+    try {
+      await setFolderCover(data.folderPath || '', dir.cover_id);
+      await invalidateAll();
+    } catch (e) {
+      console.error(e);
+      alert('Failed to set cover image.');
+    }
+  }
+
   let showDownloadModal = $state(false);
   let showShareModal = $state(false);
   let showSettingsModal = $state(false);
@@ -214,6 +241,44 @@
     (data.directories.find(d => d.cover_id)?.cover_id || null)
   );
 
+  let coverBackgroundPosition = $state('center 50%');
+
+  $effect(() => {
+    if (fallbackCoverId) {
+      coverBackgroundPosition = 'center 50%'; // Default
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      fetch(`${baseUrl}/api/media/${fallbackCoverId}/faces`)
+        .then(r => r.json())
+        .then(faces => {
+          if (faces && faces.length > 0) {
+            coverBackgroundPosition = 'center 25%'; // Good default for faces
+            const localFile = data.files.find(f => f.id === fallbackCoverId);
+            if (localFile && localFile.exif_json) {
+              const height = parseInt(localFile.exif_json.ImageHeight || localFile.exif_json.ExifImageHeight || '0');
+              if (height > 0) {
+                let totalYCenter = 0;
+                let validCount = 0;
+                faces.forEach((f: any) => {
+                  let box = typeof f.bounding_box === 'string' ? JSON.parse(f.bounding_box) : f.bounding_box;
+                  let y = box.y || box._y || box.top || box.yMin || 0;
+                  let h = box.height || box._height || box.h || 0;
+                  if (y !== undefined && h !== undefined) {
+                    totalYCenter += (y + h/2) / height;
+                    validCount++;
+                  }
+                });
+                if (validCount > 0) {
+                  const avgYPercent = (totalYCenter / validCount) * 100;
+                  coverBackgroundPosition = `center ${Math.max(0, Math.min(100, avgYPercent))}%`;
+                }
+              }
+            }
+          }
+        })
+        .catch(e => console.error(e));
+    }
+  });
+
   let scrollProgress = $state(0);
   let headerWrapper: HTMLElement | undefined = $state();
   let pollInterval: ReturnType<typeof setInterval>;
@@ -229,6 +294,9 @@
   }
 
   onMount(() => {
+    const handleGlobalClick = () => { activeFolderMenu = null; };
+    window.addEventListener('click', handleGlobalClick);
+
     pollInterval = setInterval(() => {
       // Poll if any file lacks a blurhash (still processing) or if the scanner is active
       const stillProcessing = data.files.some(f => !f.blurhash) || data.scanning;
@@ -241,10 +309,17 @@
     if (mainContent) {
       mainContent.addEventListener('scroll', handleScroll);
     }
+
+    return () => {
+      window.removeEventListener('click', handleGlobalClick);
+      if (pollInterval) clearInterval(pollInterval);
+      if (mainContent) {
+        mainContent.removeEventListener('scroll', handleScroll);
+      }
+    };
   });
 
   onDestroy(() => {
-    if (pollInterval) clearInterval(pollInterval);
     if (typeof document !== 'undefined') {
       const mainContent = document.querySelector('.main-content');
       if (mainContent) {
@@ -256,7 +331,7 @@
 
 <div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
   {#if fallbackCoverId}
-    <div class="header-bg" style="background-image: url('{getPreviewUrl(fallbackCoverId, false)}');"></div>
+    <div class="header-bg" style="background-image: url('{getPreviewUrl(fallbackCoverId, false)}'); background-position: {coverBackgroundPosition};"></div>
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -348,8 +423,18 @@
             <div class="dir-placeholder"></div>
           {/if}
         </div>
-        <div class="dir-info">
+        <div class="dir-info" style="position: relative; display: flex; align-items: center; justify-content: space-between; flex: 1;">
           <span class="dir-name">{dir.name}</span>
+          <div class="dir-actions" style="position: relative;">
+            <button class="icon-btn" style="padding: 4px;" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
+              <MoreVertical size={16} />
+            </button>
+            {#if activeFolderMenu === dir.name}
+              <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; min-width: 150px; z-index: 10;" onclick={(e) => e.stopPropagation()}>
+                <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
+              </div>
+            {/if}
+          </div>
         </div>
       </a>
     {/each}
@@ -579,7 +664,7 @@
     width: 100%;
     height: 100%;
     background-size: cover;
-    background-position: center 60%;
+    background-position: center 50%;
     z-index: 0;
   }
   
@@ -778,8 +863,8 @@
     text-decoration: none;
     color: var(--text-color);
     background: transparent;
-    overflow: hidden;
     transition: filter 0.2s ease, background-color 0.2s ease;
+    position: relative;
   }
 
   .dir-card:hover {
@@ -791,6 +876,7 @@
     aspect-ratio: 1;
     position: relative;
     overflow: hidden;
+    border-radius: 8px;
     background: #111;
   }
 
@@ -802,6 +888,9 @@
 
   .dir-info {
     padding: 12px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
   .dir-name {
@@ -811,6 +900,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex: 1;
   }
 
   .grid {

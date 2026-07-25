@@ -111,8 +111,20 @@ export async function scannerRoutes(fastify: FastifyInstance) {
             };
           }
 
-          // Fallback: Find the first media file inside this directory or its subdirectories
-          const coverResult = await query(`SELECT id, blurhash FROM media_files WHERE folder_path LIKE $1 LIMIT 1`, [`${subPath}%`]);
+          // Fallback: Find a media file inside this directory or its subdirectories, preferring landscape and more faces
+          const coverResult = await query(`
+            SELECT m.id, m.blurhash,
+              (SELECT COUNT(*) FROM face_embeddings f WHERE f.media_id = m.id) as face_count,
+              CASE 
+                WHEN CAST(m.exif_json->>'ImageWidth' AS INTEGER) > CAST(m.exif_json->>'ImageHeight' AS INTEGER) THEN 1 
+                WHEN CAST(m.exif_json->>'ExifImageWidth' AS INTEGER) > CAST(m.exif_json->>'ExifImageHeight' AS INTEGER) THEN 1 
+                ELSE 0 
+              END as is_landscape
+            FROM media_files m 
+            WHERE m.folder_path LIKE $1 AND m.mime_type LIKE 'image/%'
+            ORDER BY is_landscape DESC, face_count DESC, m.id ASC
+            LIMIT 1
+          `, [`${subPath}%`]);
           
           return {
             name,
@@ -133,8 +145,28 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     if (folderPath) {
       const currentFolderSettingsRes = await query(`SELECT cover_media_id, description FROM folder_settings WHERE folder_path = $1`, [folderPath]);
       if (currentFolderSettingsRes.rows.length > 0) {
-        folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id;
+        folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id || null;
         folderDescription = currentFolderSettingsRes.rows[0].description || '';
+      }
+    }
+
+    if (!folderCoverId) {
+      const fallbackResult = await query(`
+        SELECT m.id,
+          (SELECT COUNT(*) FROM face_embeddings f WHERE f.media_id = m.id) as face_count,
+          CASE 
+            WHEN CAST(m.exif_json->>'ImageWidth' AS INTEGER) > CAST(m.exif_json->>'ImageHeight' AS INTEGER) THEN 1 
+            WHEN CAST(m.exif_json->>'ExifImageWidth' AS INTEGER) > CAST(m.exif_json->>'ExifImageHeight' AS INTEGER) THEN 1 
+            ELSE 0 
+          END as is_landscape
+        FROM media_files m 
+        WHERE m.folder_path = $1 AND m.mime_type LIKE 'image/%'
+        ORDER BY is_landscape DESC, face_count DESC, m.id ASC
+        LIMIT 1
+      `, [folderPath]);
+      
+      if (fallbackResult.rows.length > 0) {
+        folderCoverId = fallbackResult.rows[0].id;
       }
     }
 
