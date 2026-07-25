@@ -81,6 +81,10 @@
 
   <main class="main-content">
     <slot />
+    <footer class="app-footer">
+      <p>Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a></p>
+      <p>Learn more about this app at <a href="https://kahmeng15.github.io/hellomyphotos" target="_blank" rel="noopener noreferrer">kahmeng15.github.io/hellomyphotos</a></p>
+    </footer>
   </main>
 
   {#if !isSidebarOpen}
@@ -204,5 +208,30 @@
   .floating-reopen-btn:hover {
     transform: scale(1.05);
     background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  .app-footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    padding-bottom: 24px;
+    text-align: center;
+    color: var(--text-color);
+    opacity: 0.7;
+    font-size: 0.875rem;
+  }
+
+  .app-footer p {
+    margin: 4px 0;
+  }
+
+  .app-footer a {
+    color: var(--text-color);
+    text-decoration: underline;
+    font-weight: 500;
+    transition: opacity 0.2s;
+  }
+
+  .app-footer a:hover {
+    opacity: 0.7;
   }
 </style>

@@ -263,8 +263,13 @@
 ">
   <div class="header-content">
     <div class="header-left">
-      {#if data.folderPath}
-        <div class="subheading">{data.folderPath}</div>
+      {#if data.folderPath && data.folderPath.includes('/')}
+        <div class="subheading breadcrumbs">
+          {#each data.folderPath.split('/').slice(0, -1) as part, index}
+            {#if index > 0}<span class="separator"> › </span>{/if}
+            <a href="/folder/{data.folderPath.split('/').slice(0, index + 1).join('/')}">{part}</a>
+          {/each}
+        </div>
       {/if}
       <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
       {#if data.folderDescription}
@@ -624,6 +629,22 @@
     margin-bottom: 4px;
     font-family: 'Instrument Sans', sans-serif;
     text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
+  
+  .subheading a {
+    color: #a1a1aa;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  
+  .subheading a:hover {
+    color: var(--text-color);
+    text-decoration: underline;
+  }
+  
+  .subheading .separator {
+    margin: 0 4px;
+    opacity: 0.5;
   }
   
   .header-right {
