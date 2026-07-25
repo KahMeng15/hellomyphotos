@@ -2,8 +2,16 @@
   import '../app.css';
   import { slide, fly } from 'svelte/transition';
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   
-  let isSidebarOpen = $state(true);
+  let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/'));
+
+  $effect(() => {
+    if ($page.url.pathname.startsWith('/share/')) {
+      isSidebarOpen = false;
+    }
+  });
+
   let canGoForward = $state(false);
   let canGoBack = $state(true);
 

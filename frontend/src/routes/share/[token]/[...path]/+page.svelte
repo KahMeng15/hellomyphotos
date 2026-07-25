@@ -4,6 +4,7 @@
   import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription } from '$lib/api/media';
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
   import { invalidateAll } from '$app/navigation';
+  import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
   import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock } from '@lucide/svelte';
@@ -102,6 +103,50 @@
       }
     }
   });
+
+  let fallbackCoverId = $derived(
+    data.folderCoverId || 
+    (data.files.length > 0 ? data.files[0].id : null) || 
+    (data.directories && data.directories.length > 0 ? (data.directories.find((d: any) => d.cover_id)?.cover_id || null) : null)
+  );
+
+  let coverBackgroundPosition = $state('center 50%');
+
+  $effect(() => {
+    if (fallbackCoverId) {
+      coverBackgroundPosition = 'center 50%'; // Default
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      fetch(`${baseUrl}/api/media/${fallbackCoverId}/faces`)
+        .then(r => r.json())
+        .then(faces => {
+          if (faces && faces.length > 0) {
+            coverBackgroundPosition = 'center 25%'; // Good default for faces
+            const localFile = data.files.find((f: any) => f.id === fallbackCoverId);
+            if (localFile && localFile.exif_json) {
+              const height = parseInt(localFile.exif_json.ImageHeight || localFile.exif_json.ExifImageHeight || '0');
+              if (height > 0) {
+                let totalYCenter = 0;
+                let validCount = 0;
+                faces.forEach((f: any) => {
+                  let box = typeof f.bounding_box === 'string' ? JSON.parse(f.bounding_box) : f.bounding_box;
+                  let y = box.y || box._y || box.top || box.yMin || 0;
+                  let h = box.height || box._height || box.h || 0;
+                  if (y !== undefined && h !== undefined) {
+                    totalYCenter += (y + h/2) / height;
+                    validCount++;
+                  }
+                });
+                if (validCount > 0) {
+                  const avgYPercent = (totalYCenter / validCount) * 100;
+                  coverBackgroundPosition = `center ${Math.max(0, Math.min(100, avgYPercent))}%`;
+                }
+              }
+            }
+          }
+        })
+        .catch(e => console.error(e));
+    }
+  });
 </script>
 
 {#if data.error}
@@ -109,9 +154,9 @@
     <h2>{data.error}</h2>
   </div>
 {:else}
-<div class="header-wrapper {(data.folderCoverId || data.files.length > 0) ? 'has-cover' : ''}" bind:this={headerWrapper}>
-  {#if data.folderCoverId || data.files.length > 0}
-    <div class="header-bg" style="background-image: url('{getPreviewUrl(data.folderCoverId || data.files[0].id, false)}');"></div>
+<div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
+  {#if fallbackCoverId}
+    <div class="header-bg" style="background-image: url('{getPreviewUrl(fallbackCoverId, false)}'); background-position: {coverBackgroundPosition};"></div>
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -124,10 +169,25 @@
 ">
   <div class="header-content">
     <div class="header-left">
-      {#if data.share.folder_path}
-        <div class="subheading">{data.share.folder_path}</div>
+      {#if data.folderPath && data.folderPath.includes('/')}
+        <div class="subheading breadcrumbs">
+          {#each data.folderPath.split('/').slice(0, -1) as part, index}
+            {@const currentPath = data.folderPath.split('/').slice(0, index + 1).join('/')}
+            {#if index > 0}<span class="separator"> &gt; </span>{/if}
+            {#if currentPath === data.baseFolderPath}
+              <a href="/share/{$page.params.token}">{part}</a>
+            {:else if currentPath.startsWith(data.baseFolderPath + '/')}
+              <a href="/share/{$page.params.token}/{currentPath.substring(data.baseFolderPath.length + 1)}">{part}</a>
+            {:else}
+              <span class="breadcrumb unclickable" style="color: #888; cursor: default;">{part}</span>
+            {/if}
+          {/each}
+        </div>
       {/if}
-      <h2>{data.share.folder_path ? data.share.folder_path.split('/').pop() : 'Home'}</h2>
+      <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+      {#if data.folderDescription}
+        <p class="folder-desc">{data.folderDescription}</p>
+      {/if}
     </div>
     
     <div class="header-right">
@@ -166,11 +226,36 @@
       </div>
       
       <span class="count">
-        {data.files.length} {data.files.length === 1 ? 'item' : 'items'}
+        {#if data.directories && data.directories.length > 0}{data.directories.length} {data.directories.length === 1 ? 'folder' : 'folders'}{#if data.files.length > 0}{' & '}{/if}{/if}{#if data.files.length > 0 || (data.directories && data.directories.length === 0)}{data.files.length} {data.files.length === 1 ? 'item' : 'items'}{/if}
       </span>
     </div>
   </div>
 </div>
+
+{#if data.directories && data.directories.length > 0}
+  <div class="dir-grid {data.files.length > 0 ? 'list-view' : ''}">
+    {#each data.directories as dir}
+      <a href="{$page.url.pathname.endsWith('/') ? $page.url.pathname + encodeURIComponent(dir.name) : $page.url.pathname + '/' + encodeURIComponent(dir.name)}" class="dir-card">
+        <div class="dir-cover">
+          {#if dir.cover_id}
+            <BlurhashImage 
+              hash={dir.blurhash || ''} 
+              src={`${getThumbnailUrl(dir.cover_id)}${dir.blurhash ? '?cb=' + encodeURIComponent(dir.blurhash) : ''}`} 
+              alt={dir.name}
+              objectFit="cover"
+              square={true}
+            />
+          {:else}
+            <div class="dir-placeholder"></div>
+          {/if}
+        </div>
+        <div class="dir-info" style="position: relative; display: flex; align-items: center; justify-content: space-between; flex: 1;">
+          <span class="dir-name">{dir.name}</span>
+        </div>
+      </a>
+    {/each}
+  </div>
+{/if}
 
 <div class="grid {viewMode}">
   {#each sortedFiles as file, i}
@@ -188,7 +273,7 @@
 </div>
 
 {#if selectedMediaIndex !== null}
-  <Lightbox media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} on:close={closeLightbox} on:next={nextMedia} on:prev={prevMedia} />
+  <Lightbox media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} on:close={closeLightbox} on:next={nextMedia} on:prev={prevMedia} />
 {/if}
 {/if}
 
@@ -211,7 +296,7 @@
     width: 100%;
     height: 100%;
     background-size: cover;
-    background-position: center 60%;
+    background-position: center 50%;
     z-index: 0;
   }
   
@@ -267,6 +352,22 @@
     margin-bottom: 4px;
     font-family: 'Instrument Sans', sans-serif;
     text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
+  
+  .subheading a {
+    color: #a1a1aa;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  
+  .subheading a:hover {
+    color: var(--text-color);
+    text-decoration: underline;
+  }
+  
+  .subheading .separator {
+    margin: 0 4px;
+    opacity: 0.5;
   }
   
   .header-right {
@@ -352,6 +453,40 @@
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 16px;
     padding-bottom: 24px;
+  }
+
+  .dir-grid.list-view {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .dir-grid.list-view .dir-card {
+    flex-direction: row;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 8px;
+    width: auto;
+    gap: 12px;
+    border: 1px solid var(--glass-border);
+  }
+
+  .dir-grid.list-view .dir-cover {
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .dir-grid.list-view .dir-info {
+    padding: 0;
+    padding-right: 8px;
+  }
+
+  .dir-grid.list-view .dir-name {
+    font-size: 1rem;
+    margin: 0;
   }
 
   .dir-card {

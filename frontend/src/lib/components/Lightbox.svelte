@@ -7,7 +7,7 @@
   import BlurhashImage from './BlurhashImage.svelte';
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check } from '@lucide/svelte';
 
-  let { media, allowDownload = true }: { media: MediaFile, allowDownload?: boolean } = $props();
+  let { media, allowDownload = true, isSharedView = false }: { media: MediaFile, allowDownload?: boolean, isSharedView?: boolean } = $props();
   const dispatch = createEventDispatcher();
   
   function close() {
@@ -120,26 +120,30 @@
             <Download size={20} strokeWidth={2} />
           </button>
         {/if}
-        <button class="icon-btn {justShared ? 'success' : ''}" on:click={share} title="Share">
-          {#if justShared}
-            <Check size={20} strokeWidth={2} />
-          {:else}
-            <Share2 size={20} strokeWidth={2} />
-          {/if}
-        </button>
+        {#if !isSharedView}
+          <button class="icon-btn {justShared ? 'success' : ''}" on:click={share} title="Share">
+            {#if justShared}
+              <Check size={20} strokeWidth={2} />
+            {:else}
+              <Share2 size={20} strokeWidth={2} />
+            {/if}
+          </button>
+        {/if}
         <button class="icon-btn {showInfo ? 'active' : ''}" on:click={toggleInfo} title="Info">
           <Info size={20} strokeWidth={2} />
         </button>
-        <div style="position: relative;">
-          <button class="icon-btn" on:click={() => showMenu = !showMenu} title="More">
-            <MoreHorizontal size={20} strokeWidth={2} />
-          </button>
-          {#if showMenu}
-            <div class="dropdown-menu">
-              <button on:click={makeCoverImage}>Set as Cover Image</button>
-            </div>
-          {/if}
-        </div>
+        {#if !isSharedView}
+          <div style="position: relative;">
+            <button class="icon-btn" on:click={() => showMenu = !showMenu} title="More">
+              <MoreHorizontal size={20} strokeWidth={2} />
+            </button>
+            {#if showMenu}
+              <div class="dropdown-menu">
+                <button on:click={makeCoverImage}>Set as Cover Image</button>
+              </div>
+            {/if}
+          </div>
+        {/if}
         <button class="icon-btn close-btn" on:click={close} title="Close">
           <X size={24} strokeWidth={2} />
         </button>

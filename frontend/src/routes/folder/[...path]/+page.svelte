@@ -347,7 +347,7 @@
       {#if data.folderPath && data.folderPath.includes('/')}
         <div class="subheading breadcrumbs">
           {#each data.folderPath.split('/').slice(0, -1) as part, index}
-            {#if index > 0}<span class="separator"> › </span>{/if}
+            {#if index > 0}<span class="separator"> &gt; </span>{/if}
             <a href="/folder/{data.folderPath.split('/').slice(0, index + 1).join('/')}">{part}</a>
           {/each}
         </div>
