@@ -169,25 +169,29 @@
 ">
   <div class="header-content">
     <div class="header-left">
-      {#if data.folderPath && data.folderPath.includes('/')}
-        <div class="subheading breadcrumbs">
-          {#each data.folderPath.split('/').slice(0, -1) as part, index}
-            {@const currentPath = data.folderPath.split('/').slice(0, index + 1).join('/')}
-            {#if index > 0}<span class="separator"> &gt; </span>{/if}
-            {#if currentPath === data.baseFolderPath}
-              <a href="/share/{$page.params.token}">{part}</a>
-            {:else if currentPath.startsWith(data.baseFolderPath + '/')}
-              <a href="/share/{$page.params.token}/{currentPath.substring(data.baseFolderPath.length + 1)}">{part}</a>
-            {:else}
-              <span class="breadcrumb unclickable" style="color: #888; cursor: default;">{part}</span>
-            {/if}
-          {/each}
-        </div>
-      {/if}
-      <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
-      {#if data.folderDescription}
-        <p class="folder-desc">{data.folderDescription}</p>
-      {/if}
+      <div class="header-text-container">
+        {#key data.folderPath}
+          {#if data.folderPath && data.folderPath.includes('/')}
+            <div class="subheading breadcrumbs">
+              {#each data.folderPath.split('/').slice(0, -1) as part, index}
+                {@const currentPath = data.folderPath.split('/').slice(0, index + 1).join('/')}
+                {#if index > 0}<span class="separator"> &gt; </span>{/if}
+                {#if currentPath === data.baseFolderPath}
+                  <a href="/share/{$page.params.token}">{part}</a>
+                {:else if currentPath.startsWith(data.baseFolderPath + '/')}
+                  <a href="/share/{$page.params.token}/{currentPath.substring(data.baseFolderPath.length + 1)}">{part}</a>
+                {:else}
+                  <span class="breadcrumb unclickable" style="color: #888; cursor: default;">{part}</span>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+          <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+          {#if data.folderDescription}
+            <p class="folder-desc">{data.folderDescription}</p>
+          {/if}
+        {/key}
+      </div>
     </div>
     
     <div class="header-right">
@@ -233,10 +237,11 @@
   </div>
 </div>
 
+{#key data.folderPath}
 {#if data.directories && data.directories.length > 0}
   <div class="dir-grid {data.files.length > 0 ? 'list-view' : ''}">
-    {#each data.directories as dir}
-      <a href="{$page.url.pathname.endsWith('/') ? $page.url.pathname + encodeURIComponent(dir.name) : $page.url.pathname + '/' + encodeURIComponent(dir.name)}" class="dir-card">
+    {#each data.directories as dir, i}
+      <a href="{$page.url.pathname.endsWith('/') ? $page.url.pathname + encodeURIComponent(dir.name) : $page.url.pathname + '/' + encodeURIComponent(dir.name)}" class="dir-card" style="animation-delay: {i * 40}ms">
         <div class="dir-cover">
           {#if dir.cover_id}
             <BlurhashImage 
@@ -257,7 +262,9 @@
     {/each}
   </div>
 {/if}
+{/key}
 
+{#key data.folderPath}
 <div class="grid {viewMode}">
   {#each sortedFiles as file, i}
     <BlurhashImage 
@@ -273,6 +280,7 @@
     />
   {/each}
 </div>
+{/key}
 
 {#if selectedMediaIndex !== null}
   <Lightbox media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} on:close={closeLightbox} on:next={nextMedia} on:prev={prevMedia} />
@@ -280,6 +288,16 @@
 {/if}
 
 <style>
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeInOnly {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
   .header-wrapper {
     position: relative;
     margin: -24px -24px 0 -24px;
@@ -350,6 +368,19 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
+  }
+  
+  .header-left h2 {
+    animation: fadeIn 0.4s ease both;
+  }
+
+  .header-left .subheading,
+  .header-left .folder-desc {
+    animation: fadeInOnly 0.4s ease both;
+  }
+
+  .header-text-container {
+    overflow: hidden;
   }
   
   .header-content h2 {
@@ -515,6 +546,7 @@
     background: transparent;
     overflow: hidden;
     transition: filter 0.2s ease;
+    animation: fadeIn 0.35s ease both;
   }
 
   .dir-card:hover {

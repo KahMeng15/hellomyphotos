@@ -223,6 +223,16 @@
 </div>
 
 <style>
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeInOnly {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
   .lightbox {
     position: fixed;
     top: 0;
@@ -246,6 +256,7 @@
     gap: 12px;
     z-index: 1010;
     transition: opacity 0.4s ease;
+    animation: fadeInOnly 0.4s ease both;
   }
 
   .lightbox.idle .top-bar,
@@ -417,6 +428,7 @@
     display: flex;
     justify-content: center;
     align-items: center;
+    animation: fadeIn 0.4s ease both;
   }
 
   .media-element {

@@ -91,6 +91,20 @@
 {/if}
 
 <style>
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .nav-header h1 {
+    animation: fadeIn 0.4s ease both;
+  }
+
+  .date-header {
+    animation: fadeIn 0.4s ease both;
+    animation-delay: 0.1s;
+  }
+
   .timeline-container {
     padding-bottom: 64px;
   }

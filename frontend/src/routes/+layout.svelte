@@ -136,17 +136,19 @@
       </div>
     {/if}
     {#if $page.url.pathname !== '/login'}
-      <footer class="app-footer">
-        <p>
-          {#if $page.url.pathname.startsWith('/share/')}
-            Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a>
-          {:else}
-            Hosted with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a>
-          {/if}
-        </p>
-        <p>Learn more about this app at <a href="https://kahmeng15.github.io/hellomyphotos" target="_blank" rel="noopener noreferrer">kahmeng15.github.io/hellomyphotos</a></p>
-        <p>Got any feedback? Please submit <a href="https://kahmeng15.github.io/feedback" target="_blank" rel="noopener noreferrer">here</a>.</p>
-      </footer>
+      {#key $page.url.pathname}
+        <footer class="app-footer {$page.url.pathname.startsWith('/folder') || $page.url.pathname.startsWith('/share') ? 'animate-footer' : ''}">
+          <p>
+            {#if $page.url.pathname.startsWith('/share/')}
+              Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a>
+            {:else}
+              Hosted with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a>
+            {/if}
+          </p>
+          <p>Learn more about this app at <a href="https://kahmeng15.github.io/hellomyphotos" target="_blank" rel="noopener noreferrer">kahmeng15.github.io/hellomyphotos</a></p>
+          <p>Got any feedback? Please submit <a href="https://kahmeng15.github.io/feedback" target="_blank" rel="noopener noreferrer">here</a>.</p>
+        </footer>
+      {/key}
     {/if}
   </main>
 
@@ -336,5 +338,15 @@
 
   .app-footer a:hover {
     opacity: 0.7;
+  }
+
+  @keyframes fadeInFooter {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 0.7; transform: translateY(0); }
+  }
+
+  .app-footer.animate-footer {
+    animation: fadeInFooter 0.4s ease both;
+    animation-delay: 0.2s;
   }
 </style>
