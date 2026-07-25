@@ -459,6 +459,7 @@
   </div>
 </div>
 
+{#key data.folderPath}
 {#if data.directories.length > 0}
   <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (data.files.length > 0 ? 'list-view' : '')}">
     {#each sortedDirectories as dir, i}
@@ -513,7 +514,9 @@
     {/each}
   </div>
 {/if}
+{/key}
 
+{#key data.folderPath}
 <div class="grid {viewMode}">
   {#each sortedFiles as file, i}
     <BlurhashImage 
@@ -529,6 +532,7 @@
     />
   {/each}
 </div>
+{/key}
 
 {#if selectedMediaIndex !== null}
   <Lightbox 
