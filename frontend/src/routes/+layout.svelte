@@ -80,7 +80,9 @@
   {/if}
 
   <main class="main-content">
-    <slot />
+    <div class="slot-wrapper">
+      <slot />
+    </div>
     <footer class="app-footer">
       <p>Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a></p>
       <p>Learn more about this app at <a href="https://kahmeng15.github.io/hellomyphotos" target="_blank" rel="noopener noreferrer">kahmeng15.github.io/hellomyphotos</a></p>
@@ -108,6 +110,15 @@
     overflow-y: auto;
     padding: 24px;
     height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .slot-wrapper {
+    flex: 1 0 auto;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
   }
   
   .sidebar {
@@ -211,8 +222,8 @@
   }
 
   .app-footer {
-    margin-top: 64px;
-    padding-top: 24px;
+    margin-top: auto;
+    padding-top: 64px;
     padding-bottom: 24px;
     text-align: center;
     color: var(--text-color);

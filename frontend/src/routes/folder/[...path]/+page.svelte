@@ -208,6 +208,12 @@
     }
   }
 
+  let fallbackCoverId = $derived(
+    data.folderCoverId || 
+    (data.files.length > 0 ? data.files[0].id : null) || 
+    (data.directories.find(d => d.cover_id)?.cover_id || null)
+  );
+
   let scrollProgress = $state(0);
   let headerWrapper: HTMLElement | undefined = $state();
   let pollInterval: ReturnType<typeof setInterval>;
@@ -248,9 +254,9 @@
   });
 </script>
 
-<div class="header-wrapper {(data.folderCoverId || data.files.length > 0) ? 'has-cover' : ''}" bind:this={headerWrapper}>
-  {#if data.folderCoverId || data.files.length > 0}
-    <div class="header-bg" style="background-image: url('{getPreviewUrl(data.folderCoverId || data.files[0].id, false)}');"></div>
+<div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
+  {#if fallbackCoverId}
+    <div class="header-bg" style="background-image: url('{getPreviewUrl(fallbackCoverId, false)}');"></div>
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -326,7 +332,7 @@
 </div>
 
 {#if data.directories.length > 0}
-  <div class="dir-grid">
+  <div class="dir-grid {data.files.length > 0 ? 'list-view' : ''}">
     {#each data.directories as dir}
       <a href="/folder/{data.folderPath ? data.folderPath + '/' + dir.name : dir.name}" class="dir-card">
         <div class="dir-cover">
@@ -732,6 +738,40 @@
     padding-bottom: 24px;
   }
 
+  .dir-grid.list-view {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .dir-grid.list-view .dir-card {
+    flex-direction: row;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 8px;
+    width: auto;
+    gap: 12px;
+    border: 1px solid var(--glass-border);
+  }
+
+  .dir-grid.list-view .dir-cover {
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .dir-grid.list-view .dir-info {
+    padding: 0;
+    padding-right: 8px;
+  }
+
+  .dir-grid.list-view .dir-name {
+    font-size: 1rem;
+    margin: 0;
+  }
+
   .dir-card {
     display: flex;
     flex-direction: column;
@@ -739,7 +779,7 @@
     color: var(--text-color);
     background: transparent;
     overflow: hidden;
-    transition: filter 0.2s ease;
+    transition: filter 0.2s ease, background-color 0.2s ease;
   }
 
   .dir-card:hover {
