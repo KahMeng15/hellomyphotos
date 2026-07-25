@@ -292,7 +292,7 @@
   .floating-reopen-btn {
     position: absolute;
     bottom: 2rem;
-    right: 2rem;
+    left: 2rem;
     background: var(--bg-color);
     border: 1px solid var(--glass-border);
     color: var(--text-color);

@@ -1014,6 +1014,7 @@
     width: 100%;
     aspect-ratio: 1;
     position: relative;
+    z-index: 0;
     background: #111;
   }
 
@@ -1064,31 +1065,21 @@
 
   .dir-actions-overlay {
     position: absolute;
-    bottom: 8px;
-    right: 8px;
-    opacity: 0;
-    transition: opacity 0.2s;
-    z-index: 5;
-  }
-
-  .dir-card:hover .dir-actions-overlay {
-    opacity: 1;
-  }
-
-  .dir-cover::after {
-    content: '';
-    position: absolute;
     bottom: 0;
     right: 0;
     width: 72px;
     height: 72px;
-    background: linear-gradient(135deg, transparent 0%, rgba(0,0,0,0.35) 100%);
-    pointer-events: none;
     opacity: 0;
     transition: opacity 0.2s;
+    z-index: 5;
+    background: radial-gradient(circle at 100% 100%, rgba(0,0,0,0.35) 0%, transparent 70%);
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: 8px;
   }
 
-  .dir-card:hover .dir-cover::after {
+  .dir-card:hover .dir-actions-overlay {
     opacity: 1;
   }
 
