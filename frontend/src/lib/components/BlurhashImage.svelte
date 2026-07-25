@@ -1,3 +1,30 @@
+<script module lang="ts">
+  let loadQueue: (() => void)[] = [];
+  let isProcessingQueue = false;
+
+  function processQueue() {
+    if (loadQueue.length === 0) {
+      isProcessingQueue = false;
+      return;
+    }
+    isProcessingQueue = true;
+    
+    // Process up to 4 images at a time (approx 1 row) to create a cascading effect
+    const batch = loadQueue.splice(0, 4);
+    batch.forEach(fn => fn());
+    
+    // Wait slightly before loading the next row
+    setTimeout(processQueue, 100);
+  }
+
+  function enqueueLoad(fn: () => void) {
+    loadQueue.push(fn);
+    if (!isProcessingQueue) {
+      processQueue();
+    }
+  }
+</script>
+
 <script lang="ts">
   import { onMount } from 'svelte';
   import { decode } from 'blurhash';
@@ -15,6 +42,9 @@
   
   let objectPosition = $state('center');
   let transformScale = $state(1);
+
+  // Randomize the start of the shimmer animation so they don't all pulse in sync
+  let randomDelay = Math.random() * 1.5;
 
   
   function handleLoad(e: Event) {
@@ -41,9 +71,9 @@
     imgLoaded = true;
   }
 
-  onMount(() => {
-    // Render blurhash
-    if (hash && canvas) {
+  $effect(() => {
+    // Decode blurhash only when visible
+    if (visible && hash && canvas) {
       try {
         const pixels = decode(hash, 32, 32);
         const ctx = canvas.getContext('2d');
@@ -56,14 +86,19 @@
         console.error('Blurhash decode failed', err);
       }
     }
+  });
+
+  onMount(() => {
 
     // Lazy load image using Intersection Observer
     observer = new IntersectionObserver((entries) => {
       if (entries[0].isIntersecting) {
-        visible = true;
+        enqueueLoad(() => {
+          visible = true;
+        });
         observer.disconnect();
       }
-    }, { rootMargin: '200px' });
+    }, { rootMargin: '100px' });
     
     if (container) {
       observer.observe(container);
@@ -76,11 +111,11 @@
 </script>
 
 <div class="grid-item {square ? 'is-square' : ''}" style="{!square ? `flex-grow: ${aspectRatio}; flex-basis: ${targetHeight * aspectRatio}px;` : ''}" {onclick}>
-  <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'};">
-    <div class="zoom-wrapper">
-      <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
+  <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'}; aspect-ratio: {aspectRatio};">
+    <div class="zoom-wrapper skeleton" style="animation-delay: -{randomDelay}s;">
       {#if visible}
-        <img {src} {alt} loading="lazy" onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? `transform: scale(${transformScale});` : ''}" />
+        <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
+        <img {src} {alt} onload={handleLoad} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? `transform: scale(${transformScale});` : ''}" />
       {/if}
     </div>
   </div>
@@ -138,6 +173,17 @@
     width: 100%;
     height: 100%;
     transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+  
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 
   canvas {
