@@ -144,14 +144,32 @@
   type SortMode = 'newest' | 'oldest' | 'a-z' | 'z-a';
   type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square';
 
-  let sortMode: SortMode = $state('newest');
-  let viewMode: ViewMode = $state('small-fit');
+  function loadPref<T>(key: string, fallback: T): T {
+    if (typeof localStorage === 'undefined') return fallback;
+    try {
+      const val = localStorage.getItem(key);
+      return val !== null ? JSON.parse(val) as T : fallback;
+    } catch { return fallback; }
+  }
+
+  function savePref(key: string, val: any) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, JSON.stringify(val));
+    }
+  }
+
+  type FolderViewMode = 'small-grid' | 'medium-grid' | 'large-grid' | 'list';
+  let sortMode: SortMode = $state(loadPref<SortMode>('folderSortMode', 'newest'));
+  let viewMode: ViewMode = $state(loadPref<ViewMode>('folderViewMode', 'small-fit'));
+  let folderViewMode: FolderViewMode = $state(loadPref<FolderViewMode>('folderFolderViewMode', 'small-grid'));
+
+  $effect(() => savePref('folderSortMode', sortMode));
+  $effect(() => savePref('folderViewMode', viewMode));
+  $effect(() => savePref('folderFolderViewMode', folderViewMode));
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
 
-  type FolderViewMode = 'small-grid' | 'medium-grid' | 'large-grid' | 'list';
-  let folderViewMode: FolderViewMode = $state('small-grid');
   let showFolderViewMenu = $state(false);
 
   let isFolderOnly = $derived(data.files.length === 0 && data.directories.length > 0);
@@ -472,11 +490,8 @@
             {:else}
               <div class="dir-placeholder"></div>
             {/if}
-          </div>
-          <div class="dir-info">
-            <span class="dir-name">{dir.name}</span>
-            <div class="dir-actions" use:clickOutside={() => activeFolderMenu = null}>
-              <button class="icon-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
+            <div class="dir-actions-overlay" use:clickOutside={() => activeFolderMenu = null}>
+              <button class="overlay-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
                 <MoreVertical size={16} />
               </button>
               {#if activeFolderMenu === dir.name}
@@ -486,6 +501,9 @@
                 </div>
               {/if}
             </div>
+          </div>
+          <div class="dir-info">
+            <span class="dir-name">{dir.name}</span>
           </div>
         {/if}
       </a>
@@ -999,6 +1017,7 @@
 
   .folder-mode-small-grid .dir-name {
     font-size: 0.8rem;
+    padding-top: 3px;
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -1007,6 +1026,7 @@
 
   .folder-mode-medium-grid .dir-name,
   .folder-mode-large-grid .dir-name {
+    padding-top: 3px;
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
@@ -1016,6 +1036,53 @@
   .dir-actions {
     margin-left: 12px;
     flex-shrink: 0;
+  }
+
+  .dir-actions-overlay {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 5;
+  }
+
+  .dir-card:hover .dir-actions-overlay {
+    opacity: 1;
+  }
+
+  .dir-cover::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 72px;
+    height: 72px;
+    background: linear-gradient(135deg, transparent 0%, rgba(0,0,0,0.35) 100%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .dir-card:hover .dir-cover::after {
+    opacity: 1;
+  }
+
+  .overlay-btn {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 6;
+  }
+
+  .overlay-btn:hover {
+    color: #e4e4e7;
   }
 
   .grid {
