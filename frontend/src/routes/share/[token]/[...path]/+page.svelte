@@ -1,7 +1,7 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, fetchMediaFaces } from '$lib/api/media';
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
   import { invalidateAll } from '$app/navigation';
   import { page } from '$app/stores';
@@ -117,9 +117,7 @@
   $effect(() => {
     if (fallbackCoverId) {
       coverBackgroundPosition = 'center 50%'; // Default
-      const baseUrl = import.meta.env.VITE_API_URL || '';
-      fetch(`${baseUrl}/api/media/${fallbackCoverId}/faces`, { credentials: 'include' })
-        .then(r => r.json())
+      fetchMediaFaces(fallbackCoverId, data.token)
         .then(faces => {
           if (faces && faces.length > 0) {
             coverBackgroundPosition = 'center 25%'; // Good default for faces
@@ -243,7 +241,7 @@
           {#if dir.cover_id}
             <BlurhashImage 
               hash={dir.blurhash || ''} 
-              src={`${getThumbnailUrl(dir.cover_id)}${dir.blurhash ? '?cb=' + encodeURIComponent(dir.blurhash) : ''}`} 
+              src={`${getThumbnailUrl(dir.cover_id, data.token)}${dir.blurhash ? (getThumbnailUrl(dir.cover_id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(dir.blurhash) : ''}`} 
               alt={dir.name}
               objectFit="cover"
               square={true}

@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { query } from '../../config/db';
-import { requireAuth } from '../../utils/auth';
+import { requireAuth, verifyMediaAccess } from '../../utils/auth';
 
 export async function mlRoutes(fastify: FastifyInstance) {
   
@@ -35,9 +35,11 @@ export async function mlRoutes(fastify: FastifyInstance) {
   });
 
   // Get all faces in a specific media file
-  fastify.get<{ Params: { id: string } }>('/api/media/:id/faces', { preHandler: requireAuth }, async (request, reply) => {
+  fastify.get<{ Params: { id: string }, Querystring: { shareToken?: string } }>('/api/media/:id/faces', async (request, reply) => {
     const { id } = request.params;
     
+    if (!(await verifyMediaAccess(request, reply, id))) return;
+
     const result = await query(`
       SELECT person_id, bounding_box
       FROM face_embeddings

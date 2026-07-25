@@ -81,8 +81,8 @@ export async function fetchTimeline(): Promise<MediaFile[]> {
   return data.files || [];
 }
 
-export async function fetchMediaFaces(mediaId: string): Promise<{person_id: string, bounding_box: any}[]> {
-  const res = await fetch(`${API_BASE}/api/media/${mediaId}/faces`, { credentials: 'include' });
+export async function fetchMediaFaces(mediaId: string, token?: string): Promise<{person_id: string, bounding_box: any}[]> {
+  const res = await fetch(`${API_BASE}/api/media/${mediaId}/faces${token ? `?shareToken=${token}` : ''}`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch faces');
   return res.json();
 }
