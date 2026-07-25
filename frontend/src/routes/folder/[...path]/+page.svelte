@@ -267,6 +267,10 @@
     }
   }
 
+  let scrollProgress = $state(0);
+  let headerWrapper: HTMLElement | undefined = $state();
+  let pollInterval: ReturnType<typeof setInterval>;
+
   let fallbackCoverId = $derived(
     data.folderCoverId || 
     (data.files.length > 0 ? data.files[0].id : null) || 
@@ -277,13 +281,13 @@
 
   $effect(() => {
     if (fallbackCoverId) {
-      coverBackgroundPosition = 'center 50%'; // Default
+      coverBackgroundPosition = 'center 50%';
       const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
       fetch(`${baseUrl}/api/media/${fallbackCoverId}/faces`)
         .then(r => r.json())
         .then(faces => {
           if (faces && faces.length > 0) {
-            coverBackgroundPosition = 'center 25%'; // Good default for faces
+            coverBackgroundPosition = 'center 25%';
             const localFile = data.files.find(f => f.id === fallbackCoverId);
             if (localFile && localFile.exif_json) {
               const height = parseInt(localFile.exif_json.ImageHeight || localFile.exif_json.ExifImageHeight || '0');
@@ -310,11 +314,6 @@
         .catch(e => console.error(e));
     }
   });
-
-  let scrollProgress = $state(0);
-  let headerWrapper: HTMLElement | undefined = $state();
-  let pollInterval: ReturnType<typeof setInterval>;
-  let coverLoaded = $state(false);
 
   function handleScroll(e: Event) {
     if (!headerWrapper) return;
@@ -358,9 +357,9 @@
   });
 </script>
 
-<div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''} {!coverLoaded && fallbackCoverId ? 'skeleton' : ''}" bind:this={headerWrapper}>
+<div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
   {#if fallbackCoverId}
-    <img src={getPreviewUrl(fallbackCoverId, false)} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
+    <img src={getPreviewUrl(fallbackCoverId, false)} class="header-bg" fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -373,18 +372,22 @@
 ">
   <div class="header-content">
     <div class="header-left">
-      {#if data.folderPath && data.folderPath.includes('/')}
-        <div class="subheading breadcrumbs">
-          {#each data.folderPath.split('/').slice(0, -1) as part, index}
-            {#if index > 0}<span class="separator"> &gt; </span>{/if}
-            <a href="/folder/{data.folderPath.split('/').slice(0, index + 1).join('/')}">{part}</a>
-          {/each}
-        </div>
-      {/if}
-      <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
-      {#if data.folderDescription}
-        <p class="folder-description" style="margin-top: 12px; color: #a1a1aa; font-size: 1rem; max-width: 600px; line-height: 1.5;">{data.folderDescription}</p>
-      {/if}
+      <div class="header-text-container">
+        {#key data.folderPath}
+          {#if data.folderPath && data.folderPath.includes('/')}
+            <div class="subheading breadcrumbs">
+              {#each data.folderPath.split('/').slice(0, -1) as part, index}
+                {#if index > 0}<span class="separator"> &gt; </span>{/if}
+                <a href="/folder/{data.folderPath.split('/').slice(0, index + 1).join('/')}">{part}</a>
+              {/each}
+            </div>
+          {/if}
+          <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+          {#if data.folderDescription}
+            <p class="folder-description" style="margin-top: 12px; color: #a1a1aa; font-size: 1rem; max-width: 600px; line-height: 1.5;">{data.folderDescription}</p>
+          {/if}
+        {/key}
+      </div>
     </div>
     
     <div class="header-right">
@@ -459,7 +462,7 @@
 {#if data.directories.length > 0}
   <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (data.files.length > 0 ? 'list-view' : '')}">
     {#each sortedDirectories as dir, i}
-      <a href="/folder/{data.folderPath ? data.folderPath + '/' + dir.name : dir.name}" class="dir-card">
+      <a href="/folder/{data.folderPath ? data.folderPath + '/' + dir.name : dir.name}" class="dir-card" style="animation-delay: {i * 40}ms">
         {#if isFolderOnly && folderViewMode === 'list'}
           <div class="dir-info">
             <div class="dir-label">
@@ -676,6 +679,16 @@
 </Modal>
 
 <style>
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeInOnly {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
   .header-wrapper {
     position: relative;
     margin: -24px -24px 0 -24px;
@@ -687,17 +700,6 @@
     min-height: 40vh;
   }
   
-  .header-wrapper.skeleton {
-    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-  
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-  
   .header-bg {
     position: absolute;
     top: 0;
@@ -706,12 +708,6 @@
     height: 100%;
     object-fit: cover;
     z-index: 0;
-    opacity: 0;
-    transition: opacity 0.5s ease;
-  }
-  
-  .header-bg.loaded {
-    opacity: 1;
   }
   
   .header-gradient {
@@ -746,6 +742,19 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .header-left h2 {
+    animation: fadeIn 0.4s ease both;
+  }
+
+  .header-left .subheading,
+  .header-left .folder-description {
+    animation: fadeInOnly 0.4s ease both;
+  }
+
+  .header-text-container {
+    overflow: hidden;
   }
   
   .header-content h2 {
@@ -979,6 +988,7 @@
     background: transparent;
     transition: filter 0.2s ease, background-color 0.2s ease;
     position: relative;
+    animation: fadeIn 0.35s ease both;
   }
 
   .dir-card:hover {
