@@ -38,6 +38,7 @@ CREATE TABLE shared_folders (
     strip_gps_on_download BOOLEAN DEFAULT true,
     expires_at TIMESTAMP WITH TIME ZONE,
     password_hash TEXT,
+    created_by UUID REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

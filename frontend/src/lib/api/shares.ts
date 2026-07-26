@@ -8,6 +8,9 @@ export interface ShareData {
   watermark_enabled: boolean;
   expires_at: string | null;
   created_at?: string;
+  created_by_name?: string;
+  can_manage?: boolean;
+  folder_path?: string;
 }
 
 export async function createShare(folderPath: string, mediaId: string | null, allowDownloadImages: boolean, allowDownloadFolder: boolean, watermarkEnabled: boolean, expiresAt: string | null): Promise<string> {

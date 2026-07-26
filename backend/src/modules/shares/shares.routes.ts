@@ -32,9 +32,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const shareToken = crypto.randomBytes(16).toString('hex');
     
     await query(`
-      INSERT INTO shared_folders (folder_path, media_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-    `, [folderPath || null, mediaId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null]);
+      INSERT INTO shared_folders (folder_path, media_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `, [folderPath || null, mediaId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null, request.user!.id]);
     
     return reply.send({ shareToken });
   });
@@ -173,14 +173,41 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
     }
     
+    const isAdmin = request.user?.role === 'admin' || request.user?.role === 'super_admin';
+
+    // Generate all parent paths + current path
+    const parts = folderPath.split('/').filter(p => p);
+    const pathsToCheck = ['']; // root
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      pathsToCheck.push(current);
+    }
+
     const result = await query(`
-      SELECT id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at, created_at 
-      FROM shared_folders 
-      WHERE folder_path = $1
-      ORDER BY created_at DESC
-    `, [folderPath]);
+      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.expires_at, s.created_at,
+             u.name as created_by_name, s.created_by, s.folder_path
+      FROM shared_folders s
+      LEFT JOIN users u ON s.created_by = u.id
+      WHERE s.folder_path = ANY($1::text[])
+      ORDER BY (s.folder_path = $2) DESC, s.created_at DESC
+    `, [pathsToCheck, folderPath]);
+
+    const shares = result.rows.map(row => {
+      if (!isAdmin && row.created_by !== request.user!.id) {
+        return {
+          ...row,
+          share_token: row.share_token.substring(0, 8) + '***',
+          can_manage: false
+        };
+      }
+      return {
+        ...row,
+        can_manage: true
+      };
+    });
     
-    return reply.send({ shares: result.rows });
+    return reply.send({ shares });
   });
 
   fastify.delete<{ Params: { token: string } }>('/api/shares/:token', { preHandler: requireAuth }, async (request, reply) => {
@@ -191,14 +218,19 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
 
     // Must check if user owns the folder of the share
-    const shareResult = await query(`SELECT folder_path FROM shared_folders WHERE share_token = $1`, [token]);
+    const shareResult = await query(`SELECT folder_path, created_by FROM shared_folders WHERE share_token = $1`, [token]);
     if (shareResult.rows.length === 0) {
       return reply.status(404).send({ error: 'Share not found' });
     }
     
-    const folderPath = shareResult.rows[0].folder_path;
-    if (folderPath && !hasFolderAccess(request.user!, folderPath)) {
+    const share = shareResult.rows[0];
+    if (share.folder_path && !hasFolderAccess(request.user!, share.folder_path)) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+
+    const isAdmin = request.user?.role === 'admin' || request.user?.role === 'super_admin';
+    if (!isAdmin && share.created_by !== request.user!.id) {
+      return reply.status(403).send({ error: 'Forbidden: You can only delete your own share links' });
     }
     
     await query(`DELETE FROM shared_folders WHERE share_token = $1`, [token]);

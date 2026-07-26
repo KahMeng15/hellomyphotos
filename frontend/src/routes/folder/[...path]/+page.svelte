@@ -7,7 +7,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
-  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder } from '@lucide/svelte';
+  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
@@ -614,10 +614,14 @@
           <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
             <div>
               <div style="font-family: monospace; color: #e4e4e7; margin-bottom: 4px;">...{share.share_token.substring(0, 8)}</div>
-              <div style="font-size: 0.75rem; color: #888; display: flex; gap: 12px;">
+              <div style="font-size: 0.75rem; color: #888; display: flex; gap: 12px; flex-wrap: wrap;">
                 <span style="display: flex; align-items: center; gap: 4px;">
                   <Clock size={12} />
                   {share.expires_at ? new Date(share.expires_at).toLocaleDateString() : 'Never'}
+                </span>
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <User size={12} />
+                  {share.created_by_name || 'Unknown'}
                 </span>
                 <span>
                   {#if share.allow_download_images && share.allow_download_folder}
@@ -631,18 +635,28 @@
                   {/if}
                 </span>
               </div>
+              {#if share.folder_path !== data.folderPath}
+                <div style="margin-top: 6px;">
+                  <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(59,130,246,0.2); color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; border: 1px solid rgba(59,130,246,0.3);">
+                    <Folder size={10} />
+                    Inherited from: {share.folder_path || 'Root'}
+                  </span>
+                </div>
+              {/if}
             </div>
             <div style="display: flex; gap: 8px;">
-              <button class="icon-btn" title="Copy Link" onclick={() => copyShareLink(share.share_token)}>
-                {#if copiedToken === share.share_token}
-                  <Check size={16} color="#10b981" />
-                {:else}
-                  <Copy size={16} color="#a1a1aa" />
-                {/if}
-              </button>
-              <button class="icon-btn" title="Revoke Link" onclick={() => handleRevokeShare(share.share_token)}>
-                <Trash2 size={16} color="#a1a1aa" />
-              </button>
+              {#if share.can_manage !== false}
+                <button class="icon-btn" title="Copy Link" onclick={() => copyShareLink(share.share_token)}>
+                  {#if copiedToken === share.share_token}
+                    <Check size={16} color="#10b981" />
+                  {:else}
+                    <Copy size={16} color="#a1a1aa" />
+                  {/if}
+                </button>
+                <button class="icon-btn" title="Revoke Link" onclick={() => handleRevokeShare(share.share_token)}>
+                  <Trash2 size={16} color="#a1a1aa" />
+                </button>
+              {/if}
             </div>
           </div>
         {/each}
