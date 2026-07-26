@@ -40,8 +40,8 @@
   
   let aspectRatio = $state(initialAspectRatio ?? 1.5);
   
-  let objectPosition = $state('center');
-  let transformScale = $state(1);
+  let objectPosition = $state('50% 50%');
+  let transformString: string | undefined = $state();
 
   // Randomize the start of the shimmer animation so they don't all pulse in sync
   let randomDelay = Math.random() * 1.5;
@@ -54,18 +54,22 @@
       if (faceBox) {
         const cx = (faceBox.x1 + faceBox.x2) / 2;
         const cy = (faceBox.y1 + faceBox.y2) / 2;
-        const px = Math.max(0, Math.min(100, (cx / img.naturalWidth) * 100));
-        const py = Math.max(0, Math.min(100, (cy / img.naturalHeight) * 100));
-        objectPosition = `${px}% ${py}%`;
+        const imgW = img.naturalWidth;
+        const imgH = img.naturalHeight;
+        const relX = cx / imgW;
+        const relY = cy / imgH;
+        const faceW = faceBox.x2 - faceBox.x1;
+        const faceH = faceBox.y2 - faceBox.y1;
+        const maxFaceDim = Math.max(faceW, faceH, 1);
+        const minDim = Math.min(imgW, imgH);
 
-        // Calculate dynamic zoom to make the face fill ~40% of the container (reduced by 50%)
-        const faceWidth = faceBox.x2 - faceBox.x1;
-        const faceHeight = faceBox.y2 - faceBox.y1;
-        const maxFaceDim = Math.max(faceWidth, faceHeight, 1);
-        const minImgDim = Math.min(img.naturalWidth, img.naturalHeight);
-        
-        // Clamp scale between 1 and 15 to avoid extreme zooming artifacts on tiny faces
-        transformScale = Math.max(1, Math.min(15, (minImgDim / maxFaceDim) * 0.4));
+        const N = Math.max(1, Math.min(15, 0.4 * minDim / maxFaceDim));
+
+        const tx = -(relX - 0.5) * imgW / minDim * 100;
+        const ty = -(relY - 0.5) * imgH / minDim * 100;
+
+        objectPosition = '50% 50%';
+        transformString = `scale(${N}) translate(${tx}%, ${ty}%)`;
       }
     }
     imgLoaded = true;
@@ -117,7 +121,7 @@
     <div class="zoom-wrapper skeleton" style="animation-delay: -{randomDelay}s;">
       {#if visible}
         <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
-        <img {src} {alt} onload={handleLoad} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox ? `transform: scale(${transformScale});` : ''}" />
+        <img {src} {alt} onload={handleLoad} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox && transformString ? `transform: ${transformString};` : ''}" />
       {/if}
     </div>
   </div>
