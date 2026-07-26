@@ -24,10 +24,16 @@
   let isCreatingShare = $state(false);
   let newlyCreatedShareToken = $state<string | null>(null);
   let copiedToken = $state<string | null>(null);
+  let localCoverOverride: string | null = $state(null);
 
   // Initialize input state when data changes
+  let previousPath = $state(data.folderPath);
   $effect(() => {
     folderDescInput = data.folderDescription || '';
+    if (data.folderPath !== previousPath) {
+      localCoverOverride = null;
+      previousPath = data.folderPath;
+    }
   });
 
   $effect(() => {
@@ -278,8 +284,6 @@
   let scrollProgress = $state(0);
   let headerWrapper: HTMLElement | undefined = $state();
   let pollInterval: ReturnType<typeof setInterval>;
-
-  let localCoverOverride: string | null = $state(null);
 
   let fallbackCoverId = $derived(
     localCoverOverride ||
