@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { Settings, Cpu, HardDrive, ShieldCheck, Save, Clock } from '@lucide/svelte';
+  import { ChevronLeft, Settings, Cpu, HardDrive, ShieldCheck, Save, Clock } from '@lucide/svelte';
 
   let settings = $state<any>({
     throttleAuth: 0,
@@ -54,9 +54,14 @@
 
 <div class="admin-container">
   <div class="header">
-    <div>
-      <h2>Global Settings</h2>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <a href="/admin" title="Back to Admin Dashboard" style="display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s, transform 0.2s;" onmouseover={(e) => { e.currentTarget.style.color = 'white'; e.currentTarget.style.transform = 'scale(1.1)'; }} onmouseout={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; e.currentTarget.style.transform = 'scale(1)'; }}>
+        <ChevronLeft size={28} strokeWidth={2.5} />
+      </a>
+      <div>
+        <h2>Global Settings</h2>
       <p>Configure hardware constraints, ML thresholds, and bandwidth throttling.</p>
+    </div>
     </div>
     <button class="btn primary" onclick={saveSettings} disabled={saving}>
       {#if saving}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { Check, ShieldAlert } from '@lucide/svelte';
+  import { ChevronLeft, Check, ShieldAlert } from '@lucide/svelte';
 
   let settings = {
     watermarkText: 'hellomyphotos',
@@ -68,6 +68,7 @@
     <h2>Watermarking & Enforcement</h2>
     <p>Configure global watermark templates and enforcement rules for public shares.</p>
   </div>
+    </div>
 
   {#if isLoading}
     <p>Loading settings...</p>

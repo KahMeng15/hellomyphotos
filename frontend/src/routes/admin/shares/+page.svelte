@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { Trash2, Link as LinkIcon, Folder, Image } from '@lucide/svelte';
+  import { ChevronLeft, Trash2, Link as LinkIcon, Folder, Image } from '@lucide/svelte';
 
   let shares: any[] = [];
   let isLoading = true;

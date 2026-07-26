@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { Terminal, ShieldAlert, Info, AlertTriangle, AlertCircle } from '@lucide/svelte';
+  import { ChevronLeft, Terminal, ShieldAlert, Info, AlertTriangle, AlertCircle } from '@lucide/svelte';
 
   let logs = $state<any[]>([]);
   let loading = $state(true);
@@ -35,9 +35,14 @@
 
 <div class="admin-container">
   <div class="header">
-    <div>
-      <h2>System Logs & Auditing</h2>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <a href="/admin" title="Back to Admin Dashboard" style="display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s, transform 0.2s;" onmouseover={(e) => { e.currentTarget.style.color = 'white'; e.currentTarget.style.transform = 'scale(1.1)'; }} onmouseout={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; e.currentTarget.style.transform = 'scale(1)'; }}>
+        <ChevronLeft size={28} strokeWidth={2.5} />
+      </a>
+      <div>
+        <h2>System Logs & Auditing</h2>
       <p>Live event streaming and historical action records.</p>
+    </div>
     </div>
     
     <select class="filter-dropdown" bind:value={filterLevel}>

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { API_BASE, fetchFolderContent } from '$lib/api/media';
   import Modal from '$lib/components/Modal.svelte';
-  import { UserPlus, Edit2, Trash2, Shield, Folder, Check, Plus, Minus, ChevronRight, Lock, Unlock } from '@lucide/svelte';
+  import { ChevronLeft, UserPlus, Edit2, Trash2, Shield, Folder, Check, Plus, Minus, ChevronRight, Lock, Unlock } from '@lucide/svelte';
 
   let users: any[] = $state([]);
   let loading = $state(true);
@@ -244,9 +244,14 @@
 
 <div class="admin-container">
   <div class="header">
-    <div>
-      <h2>User Management</h2>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <a href="/admin" title="Back to Admin Dashboard" style="display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s, transform 0.2s;" onmouseover={(e) => { e.currentTarget.style.color = 'white'; e.currentTarget.style.transform = 'scale(1.1)'; }} onmouseout={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; e.currentTarget.style.transform = 'scale(1)'; }}>
+        <ChevronLeft size={28} strokeWidth={2.5} />
+      </a>
+      <div>
+        <h2>User Management</h2>
       <p>Manage user accounts, roles, and folder access scopes.</p>
+    </div>
     </div>
     <div style="display: flex; gap: 12px; align-items: center;">
       <button class="btn {isUnlocked ? 'secondary' : 'primary'}" onclick={handleUnlockClick} style={isUnlocked ? 'color: #10b981; border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.1);' : ''}>
