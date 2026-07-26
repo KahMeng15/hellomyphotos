@@ -5,7 +5,7 @@ import { redis } from '../../config/redis';
 import { scannerQueue } from '../../queue/scannerQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
 import { query } from '../../config/db';
-import { requireAuth } from '../../utils/auth';
+import { requireAuth, hasFolderAccess, canBrowseFolder } from '../../utils/auth';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
@@ -13,6 +13,13 @@ export async function scannerRoutes(fastify: FastifyInstance) {
   
   fastify.post<{ Body: { folder: string, mediaId: string } }>('/api/folder/cover', { preHandler: requireAuth }, async (request, reply) => {
     const { folder, mediaId } = request.body;
+    
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot modify folder settings' });
+    }
+    if (!hasFolderAccess(request.user!, folder)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
     await query(`
       INSERT INTO folder_settings (folder_path, cover_media_id, updated_at) 
       VALUES ($1, $2, NOW()) 
@@ -25,6 +32,13 @@ export async function scannerRoutes(fastify: FastifyInstance) {
 
   fastify.post<{ Body: { folder: string, description: string } }>('/api/folder/settings', { preHandler: requireAuth }, async (request, reply) => {
     const { folder, description } = request.body;
+
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot modify folder settings' });
+    }
+    if (!hasFolderAccess(request.user!, folder)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
     await query(`
       INSERT INTO folder_settings (folder_path, description, updated_at) 
       VALUES ($1, $2, NOW()) 
@@ -37,12 +51,26 @@ export async function scannerRoutes(fastify: FastifyInstance) {
 
   fastify.post<{ Body: { folder: string } }>('/api/folder/rescan', { preHandler: requireAuth }, async (request, reply) => {
     const { folder } = request.body;
+
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot trigger scans' });
+    }
+    if (!hasFolderAccess(request.user!, folder)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
     await scannerQueue.add('scan-directory', { folderPath: folder });
     return reply.send({ success: true });
   });
 
   fastify.post<{ Body: { folder: string } }>('/api/folder/rescan-ml', { preHandler: requireAuth }, async (request, reply) => {
     const { folder } = request.body;
+    
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot trigger ML scans' });
+    }
+    if (!hasFolderAccess(request.user!, folder)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
     
     // Trigger standard scan
     await scannerQueue.add('scan-directory', { folderPath: folder });
@@ -68,6 +96,10 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     // URL decode the path param and sanitize
     const folderPath = decodeURIComponent(request.params['*'] || '');
     
+    if (!canBrowseFolder(request.user!, folderPath)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+    
     // 1. Query Redis for Cooldown
     const cooldownKey = `scan_cooldown:${folderPath}`;
     const exists = await redis.exists(cooldownKey);
@@ -83,6 +115,10 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       `SELECT * FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
       [folderPath]
     );
+    let files = result.rows;
+    if (!hasFolderAccess(request.user!, folderPath)) {
+      files = []; // Cannot see files in ancestor folders
+    }
 
     // 4. Dynamically list subdirectories and find their cover images
     const fullPath = path.join(MEDIA_ROOT, folderPath);
@@ -93,7 +129,12 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         
         const dirNames = items.filter(item => item.isDirectory()).map(item => item.name);
         
-        directories = await Promise.all(dirNames.map(async (name) => {
+        let validDirNames = dirNames.filter(name => {
+          const subPath = folderPath ? `${folderPath}/${name}` : name;
+          return canBrowseFolder(request.user!, subPath);
+        });
+        
+        directories = await Promise.all(validDirNames.map(async (name) => {
           const subPath = folderPath ? `${folderPath}/${name}` : name;
           
           // Check if there is a custom cover in folder_settings
@@ -176,7 +217,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       folderCoverId,
       folderDescription,
       scanning: !exists, // Indicate if a scan was just triggered
-      files: result.rows,
+      files,
       directories
     });
   });

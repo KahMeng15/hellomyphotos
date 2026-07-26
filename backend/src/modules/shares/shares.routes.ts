@@ -6,9 +6,28 @@ import fs from 'fs';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
 
+import { requireAuth, hasFolderAccess } from '../../utils/auth';
+
 export async function sharesRoutes(fastify: FastifyInstance) {
-  fastify.post('/api/shares', async (request, reply) => {
+  fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
     const { folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt } = request.body as any;
+    
+    // Check permissions
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot create shares' });
+    }
+    
+    let targetFolder = folderPath;
+    if (!targetFolder && mediaId) {
+      const mediaRes = await query(`SELECT folder_path FROM media_files WHERE id = $1`, [mediaId]);
+      if (mediaRes.rows.length > 0) {
+        targetFolder = mediaRes.rows[0].folder_path;
+      }
+    }
+
+    if (targetFolder && !hasFolderAccess(request.user!, targetFolder)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder or media' });
+    }
     
     const shareToken = crypto.randomBytes(16).toString('hex');
     
@@ -147,8 +166,12 @@ export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { token: string } }>('/api/shares/:token', handleShareGet);
   fastify.get<{ Params: { token: string, '*': string } }>('/api/shares/:token/*', handleShareGet);
 
-  fastify.get<{ Params: { '*': string } }>('/api/shares/folder/*', async (request, reply) => {
+  fastify.get<{ Params: { '*': string } }>('/api/shares/folder/*', { preHandler: requireAuth }, async (request, reply) => {
     const folderPath = decodeURIComponent(request.params['*'] || '');
+    
+    if (!hasFolderAccess(request.user!, folderPath)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
     
     const result = await query(`
       SELECT id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at, created_at 
@@ -160,8 +183,23 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     return reply.send({ shares: result.rows });
   });
 
-  fastify.delete<{ Params: { token: string } }>('/api/shares/:token', async (request, reply) => {
+  fastify.delete<{ Params: { token: string } }>('/api/shares/:token', { preHandler: requireAuth }, async (request, reply) => {
     const { token } = request.params;
+    
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot delete shares' });
+    }
+
+    // Must check if user owns the folder of the share
+    const shareResult = await query(`SELECT folder_path FROM shared_folders WHERE share_token = $1`, [token]);
+    if (shareResult.rows.length === 0) {
+      return reply.status(404).send({ error: 'Share not found' });
+    }
+    
+    const folderPath = shareResult.rows[0].folder_path;
+    if (folderPath && !hasFolderAccess(request.user!, folderPath)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
     
     await query(`DELETE FROM shared_folders WHERE share_token = $1`, [token]);
     

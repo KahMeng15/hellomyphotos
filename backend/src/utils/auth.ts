@@ -53,6 +53,25 @@ export function hasFolderAccess(user: AuthUser, folderPath: string): boolean {
   });
 }
 
+// Check if user has access to browse this folder (including as an ancestor to an allowed folder)
+export function canBrowseFolder(user: AuthUser, folderPath: string): boolean {
+  if (user.role === 'admin' || user.role === 'super_admin' || user.folders.includes('*')) {
+    return true;
+  }
+  
+  return user.folders.some(allowedFolder => {
+    // 1. Direct match or child directory
+    if (folderPath === allowedFolder || folderPath.startsWith(allowedFolder + '/')) {
+      return true;
+    }
+    // 2. Ancestor directory
+    if (allowedFolder.startsWith(folderPath ? folderPath + '/' : '')) {
+      return true;
+    }
+    return false;
+  });
+}
+
 import { pool } from '../config/db';
 
 export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyReply, mediaId: string) {
