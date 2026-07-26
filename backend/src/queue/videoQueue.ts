@@ -10,7 +10,7 @@ export let videoWorker: Worker | undefined;
 if (process.env.IS_WORKER === 'true') {
   videoWorker = new Worker('video', async (job) => {
   const { mediaId, fullPath, mimeType } = job.data;
-  console.log(`[Video Worker] Processing video for: ${fullPath || mediaId}`);
+  console.log(`[Video Worker] Processing video for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   if (mimeType && mimeType.startsWith('video/')) {
     await VideoService.processVideo(mediaId, fullPath);
@@ -27,7 +27,7 @@ if (process.env.IS_WORKER === 'true') {
 });
 
   videoWorker.on('failed', (job, err) => {
-  console.error(`[Video Worker] Failed for ${job?.data?.fullPath || job?.data?.mediaId}:`, err);
+  console.error(`[Video Worker] Failed for ${(job?.data?.fullPath || job?.data?.mediaId).replace(/^.*\/media_ro\//, '')}:`, err);
 });
 
 }

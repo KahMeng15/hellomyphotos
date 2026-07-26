@@ -8,7 +8,7 @@ export let facialRecognitionWorker: Worker | undefined;
 if (process.env.IS_WORKER === 'true') {
   facialRecognitionWorker = new Worker('facial-recognition', async (job) => {
   const { mediaId, fullPath } = job.data;
-  console.log(`[Facial Recognition Worker] Running recognition/clustering for: ${fullPath || mediaId}`);
+  console.log(`[Facial Recognition Worker] Running recognition/clustering for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   await ClusterService.reclusterFaces();
 }, {
@@ -17,7 +17,7 @@ if (process.env.IS_WORKER === 'true') {
 });
 
   facialRecognitionWorker.on('failed', (job, err) => {
-  console.error(`[Facial Recognition Worker] Failed for ${job?.data?.fullPath || job?.data?.mediaId}:`, err);
+  console.error(`[Facial Recognition Worker] Failed for ${(job?.data?.fullPath || job?.data?.mediaId).replace(/^.*\/media_ro\//, '')}:`, err);
 });
 
 }

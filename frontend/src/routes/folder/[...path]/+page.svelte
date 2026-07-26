@@ -1,7 +1,7 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, fetchMediaFaces } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML } from '$lib/api/media';
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
   import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
@@ -292,48 +292,13 @@
     (data.directories.find(d => d.cover_id)?.cover_id || null)
   );
 
-  let coverBackgroundPosition = $state('center 50%');
   let coverRefreshKey = $state(0);
-
-  $effect(() => {
-    if (fallbackCoverId) {
-      coverBackgroundPosition = 'center 50%';
-      fetchMediaFaces(fallbackCoverId)
-        .then(faces => {
-          if (faces && faces.length > 0) {
-            coverBackgroundPosition = 'center 25%';
-            const localFile = data.files.find(f => f.id === fallbackCoverId);
-            if (localFile && localFile.exif_json) {
-              const height = parseInt(localFile.exif_json.ImageHeight || localFile.exif_json.ExifImageHeight || '0');
-              if (height > 0) {
-                let totalYCenter = 0;
-                let validCount = 0;
-                faces.forEach((f: any) => {
-                  let box = typeof f.bounding_box === 'string' ? JSON.parse(f.bounding_box) : f.bounding_box;
-                  let y = box.y || box._y || box.top || box.yMin || 0;
-                  let h = box.height || box._height || box.h || 0;
-                  if (y !== undefined && h !== undefined) {
-                    totalYCenter += (y + h/2) / height;
-                    validCount++;
-                  }
-                });
-                if (validCount > 0) {
-                  const avgYPercent = (totalYCenter / validCount) * 100;
-                  coverBackgroundPosition = `center ${Math.max(0, Math.min(100, avgYPercent))}%`;
-                }
-              }
-            }
-          }
-        })
-        .catch(e => console.error(e));
-    }
-  });
 
   function handleScroll(e: Event) {
     if (!headerWrapper) return;
     const target = e.target as HTMLElement;
-    // Sticking occurs when scrolled past the wrapper's height minus the 100px overlap and 25px top offset
-    const threshold = headerWrapper.offsetHeight - 125;
+    // Sticking occurs when scrolled past the wrapper's height minus the 25px top offset
+    const threshold = headerWrapper.offsetHeight - 25;
     if (threshold > 0) {
       scrollProgress = Math.min(1, Math.max(0, target.scrollTop / threshold));
     }
@@ -382,7 +347,7 @@
     </a>
   {/if}
   {#if fallbackCoverId}
-    <img src={getPreviewUrl(fallbackCoverId, false) + '?t=' + coverRefreshKey} class="header-bg" fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
+    <img src={getPreviewUrl(fallbackCoverId, false) + '?t=' + coverRefreshKey} class="header-bg" fetchpriority="high" alt="Cover" />
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -763,9 +728,9 @@
   
   .sticky-header {
     position: sticky;
-    top: -25px; /* Offset main-content padding */
+    top: -25px;
     z-index: 50;
-    margin: -100px -24px 24px -24px;
+    margin: 0 -24px 24px -24px;
     padding: 24px 24px;
     border-bottom: 1px solid transparent;
   }

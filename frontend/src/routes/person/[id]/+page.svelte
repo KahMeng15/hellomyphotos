@@ -115,7 +115,7 @@
   function handleScroll(e: Event) {
     if (!headerWrapper) return;
     const target = e.target as HTMLElement;
-    const threshold = headerWrapper.offsetHeight - 125;
+    const threshold = headerWrapper.offsetHeight - 25;
     if (threshold > 0) {
       scrollProgress = Math.min(1, Math.max(0, target.scrollTop / threshold));
     }
@@ -293,7 +293,7 @@
     position: sticky;
     top: -25px;
     z-index: 50;
-    margin: -100px -24px 24px -24px;
+    margin: 0 -24px 24px -24px;
     padding: 24px 24px;
     border-bottom: 1px solid transparent;
   }

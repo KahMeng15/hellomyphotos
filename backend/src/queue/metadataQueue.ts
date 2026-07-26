@@ -11,7 +11,7 @@ export let metadataWorker: Worker | undefined;
 if (process.env.IS_WORKER === 'true') {
   metadataWorker = new Worker('metadata', async (job) => {
   const { mediaId, fullPath, mimeType } = job.data;
-  console.log(`[Metadata Worker] Extracting metadata for: ${fullPath || mediaId}`);
+  console.log(`[Metadata Worker] Extracting metadata for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   await MetadataService.extractMetadata(mediaId, fullPath, mimeType);
 
@@ -30,7 +30,7 @@ if (process.env.IS_WORKER === 'true') {
 });
 
   metadataWorker.on('failed', (job, err) => {
-  console.error(`[Metadata Worker] Failed for ${job?.data?.fullPath || job?.data?.mediaId}:`, err);
+  console.error(`[Metadata Worker] Failed for ${(job?.data?.fullPath || job?.data?.mediaId).replace(/^.*\/media_ro\//, '')}:`, err);
 });
 
 }

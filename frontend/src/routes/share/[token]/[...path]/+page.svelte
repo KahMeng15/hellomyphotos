@@ -1,7 +1,7 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, fetchMediaFaces } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription } from '$lib/api/media';
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
   import { invalidateAll } from '$app/navigation';
   import { page } from '$app/stores';
@@ -73,8 +73,8 @@
   function handleScroll(e: Event) {
     if (!headerWrapper) return;
     const target = e.target as HTMLElement;
-    // Sticking occurs when scrolled past the wrapper's height minus the 100px overlap and 25px top offset
-    const threshold = headerWrapper.offsetHeight - 125;
+    // Sticking occurs when scrolled past the wrapper's height minus the 25px top offset
+    const threshold = headerWrapper.offsetHeight - 25;
     if (threshold > 0) {
       scrollProgress = Math.min(1, Math.max(0, target.scrollTop / threshold));
     }
@@ -112,41 +112,6 @@
   );
 
   let coverLoaded = $state(false);
-  let coverBackgroundPosition = $state('center 50%');
-
-  $effect(() => {
-    if (fallbackCoverId) {
-      coverBackgroundPosition = 'center 50%'; // Default
-      fetchMediaFaces(fallbackCoverId, data.token)
-        .then(faces => {
-          if (faces && faces.length > 0) {
-            coverBackgroundPosition = 'center 25%'; // Good default for faces
-            const localFile = data.files.find((f: any) => f.id === fallbackCoverId);
-            if (localFile && localFile.exif_json) {
-              const height = parseInt(localFile.exif_json.ImageHeight || localFile.exif_json.ExifImageHeight || '0');
-              if (height > 0) {
-                let totalYCenter = 0;
-                let validCount = 0;
-                faces.forEach((f: any) => {
-                  let box = typeof f.bounding_box === 'string' ? JSON.parse(f.bounding_box) : f.bounding_box;
-                  let y = box.y || box._y || box.top || box.yMin || 0;
-                  let h = box.height || box._height || box.h || 0;
-                  if (y !== undefined && h !== undefined) {
-                    totalYCenter += (y + h/2) / height;
-                    validCount++;
-                  }
-                });
-                if (validCount > 0) {
-                  const avgYPercent = (totalYCenter / validCount) * 100;
-                  coverBackgroundPosition = `center ${Math.max(0, Math.min(100, avgYPercent))}%`;
-                }
-              }
-            }
-          }
-        })
-        .catch(e => console.error(e));
-    }
-  });
 </script>
 
 {#if data.error}
@@ -154,7 +119,7 @@
     <h2>{data.error}</h2>
   </div>
 {:else}
-<div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''} {!coverLoaded && fallbackCoverId ? 'skeleton' : ''}" bind:this={headerWrapper}>
+<div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
   {#if data.folderPath && data.folderPath !== data.baseFolderPath}
     {@const parts = data.folderPath.split('/')}
     {@const parentPath = parts.slice(0, -1).join('/')}
@@ -169,7 +134,7 @@
     </a>
   {/if}
   {#if fallbackCoverId}
-    <img src={getPreviewUrl(fallbackCoverId, false, data.token)} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
+    <img src={getPreviewUrl(fallbackCoverId, false, data.token)} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" />
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -322,17 +287,6 @@
     min-height: 40vh;
   }
   
-  .header-wrapper.skeleton {
-    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-  
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-  
   .header-bg {
     position: absolute;
     top: 0;
@@ -363,7 +317,7 @@
     position: sticky;
     top: -25px; /* Offset main-content padding */
     z-index: 50;
-    margin: -100px -24px 24px -24px;
+    margin: 0 -24px 24px -24px;
     padding: 24px 24px;
     border-bottom: 1px solid transparent;
   }

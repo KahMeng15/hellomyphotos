@@ -10,7 +10,7 @@ export let smartSearchWorker: Worker | undefined;
 if (process.env.IS_WORKER === 'true') {
   smartSearchWorker = new Worker('smart-search', async (job) => {
   const { mediaId, fullPath, mimeType } = job.data;
-  console.log(`[Smart Search Worker] Generating search index for: ${fullPath || mediaId}`);
+  console.log(`[Smart Search Worker] Generating search index for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   try {
     await SmartSearchService.processAndSaveMediaEmbedding(mediaId, fullPath);
@@ -30,7 +30,7 @@ if (process.env.IS_WORKER === 'true') {
 });
 
   smartSearchWorker.on('failed', (job, err) => {
-  console.error(`[Smart Search Worker] Failed for ${job?.data?.fullPath || job?.data?.mediaId}:`, err);
+  console.error(`[Smart Search Worker] Failed for ${(job?.data?.fullPath || job?.data?.mediaId).replace(/^.*\/media_ro\//, '')}:`, err);
 });
 
 }
