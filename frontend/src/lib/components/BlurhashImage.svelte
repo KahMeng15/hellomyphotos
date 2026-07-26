@@ -30,7 +30,7 @@
   import { decode } from 'blurhash';
   import { Play } from '@lucide/svelte';
 
-  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, targetHeight = 250, priority = false, onclick }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, targetHeight?: number, priority?: boolean, onclick?: (e: MouseEvent) => void } = $props();
+  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, targetHeight = 250, priority = false, onclick, initialAspectRatio }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, targetHeight?: number, priority?: boolean, onclick?: (e: MouseEvent) => void, initialAspectRatio?: number } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
@@ -38,7 +38,7 @@
   let visible = $state(priority); // If priority, it is visible immediately during SSR
   let container: HTMLDivElement | undefined = $state();
   
-  let aspectRatio = $state(1.5);
+  let aspectRatio = $state(initialAspectRatio ?? 1.5);
   
   let objectPosition = $state('center');
   let transformScale = $state(1);

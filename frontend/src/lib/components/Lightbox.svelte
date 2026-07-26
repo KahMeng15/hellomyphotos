@@ -215,7 +215,7 @@
             {:else if faces.length > 0}
               <div class="face-list">
                 {#each faces as face}
-                    <a href={`/person/${face.person_id}`} class="face-avatar" onclick={(e) => e.stopPropagation()}>
+                    <a href={`/people/${face.person_id}`} class="face-avatar" onclick={(e) => e.stopPropagation()}>
                     <BlurhashImage 
                       hash={media.blurhash || ''} 
                       src={getThumbnailUrl(media.id)} 

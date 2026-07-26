@@ -5,6 +5,7 @@
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
   import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
+  import { navigating } from '$app/stores';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
   import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User } from '@lucide/svelte';
@@ -177,6 +178,24 @@
   let showViewMenu = $state(false);
 
   let showFolderViewMenu = $state(false);
+
+  function getAspectRatio(file: { exif_json?: any }): number | undefined {
+    const exif = file.exif_json;
+    if (exif) {
+      const w = exif.ExifImageWidth || exif.ImageWidth;
+      const h = exif.ExifImageHeight || exif.ImageHeight;
+      if (w && h && w > 0 && h > 0) return w / h;
+    }
+    return undefined;
+  }
+
+  let prevFolderPath = $state(data.folderPath);
+  $effect(() => {
+    if (data.folderPath !== prevFolderPath) {
+      prevFolderPath = data.folderPath;
+      document.querySelector('.main-content')?.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  });
 
   let isFolderOnly = $derived(data.files.length === 0 && data.directories.length > 0);
 
@@ -516,6 +535,7 @@
       square={viewMode.includes('square')}
       targetHeight={viewMode.includes('small') ? 150 : viewMode.includes('large') ? 350 : 250}
       priority={i < 8}
+      initialAspectRatio={getAspectRatio(file)}
     />
   {/each}
 </div>

@@ -2,7 +2,7 @@
   import '../app.css';
   import { slide, fly } from 'svelte/transition';
   import { onMount } from 'svelte';
-  import { page } from '$app/stores';
+  import { page, navigating } from '$app/stores';
   import { goto } from '$app/navigation';
   import { logout } from '$lib/api/auth';
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
@@ -112,7 +112,7 @@
       <nav class="sidebar-nav">
         {#if $currentUser}
           <a href="/folder">Photos</a>
-          <a href="/person">Faces</a>
+          <a href="/people">People</a>
           <a href="/timeline">Timeline</a>
           <a href="/settings">Settings</a>
           {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}
@@ -141,6 +141,19 @@
   {/if}
 
   <main class="main-content {$page.url.pathname === '/login' ? 'no-padding' : ''}">
+    {#if $navigating}
+      <div class="nav-loading-bar"></div>
+    {/if}
+    {#if $navigating && $navigating.to?.route.id?.startsWith('/folder')}
+      <div class="nav-skeleton">
+        <div class="nav-skeleton-header"></div>
+        <div class="nav-skeleton-grid">
+          {#each Array(24) as _}
+            <div class="nav-skeleton-item"><div class="nav-skeleton-shimmer"></div></div>
+          {/each}
+        </div>
+      </div>
+    {/if}
     {#if isAuthChecking && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login'}
       <div class="loading-overlay">
         <div class="spinner"></div>
@@ -191,6 +204,7 @@
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
+    position: relative;
   }
 
   .main-content.no-padding {
@@ -383,5 +397,63 @@
   .app-footer.animate-footer {
     animation: fadeInFooter 0.4s ease both;
     animation-delay: 0.2s;
+  }
+
+  .nav-loading-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, var(--accent-color, #6366f1) 50%, transparent 100%);
+    animation: navBarSlide 1s ease infinite;
+    z-index: 200;
+  }
+
+  @keyframes navBarSlide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  .nav-skeleton {
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    background: var(--bg-color, #000);
+    padding: 24px;
+  }
+
+  .nav-skeleton-header {
+    height: 40vh;
+    margin: -24px -24px 0 -24px;
+    background: #111;
+  }
+
+  .nav-skeleton-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    padding-top: 96px;
+  }
+
+  .nav-skeleton-item {
+    flex: 1 0 200px;
+    height: 200px;
+    background: #0a0a0a;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .nav-skeleton-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.04) 50%, transparent 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 </style>
