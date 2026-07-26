@@ -164,7 +164,7 @@
         </button>
       </div>
 
-      <button class="nav-btn prev-btn" onclick={(e) => { e.stopPropagation(); if (onprev) onprev(); }}>
+      <button class="nav-btn prev-btn" style:opacity={isIdle ? 0 : 1} onclick={(e) => { e.stopPropagation(); if (onprev) onprev(); }}>
         <ChevronLeft size={32} strokeWidth={2} />
       </button>
       
@@ -179,7 +179,7 @@
         {/if}
       </div>
       
-      <button class="nav-btn next-btn" onclick={(e) => { e.stopPropagation(); if (onnext) onnext(); }}>
+      <button class="nav-btn next-btn" style:opacity={isIdle ? 0 : 1} onclick={(e) => { e.stopPropagation(); if (onnext) onnext(); }}>
         <ChevronRight size={32} strokeWidth={2} />
       </button>
     </div>
