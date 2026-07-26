@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { API_BASE, fetchFolderContent } from '$lib/api/media';
   import Modal from '$lib/components/Modal.svelte';
-  import { UserPlus, Edit2, Trash2, Shield, Folder, Check, Plus, Minus, ChevronRight } from '@lucide/svelte';
+  import { UserPlus, Edit2, Trash2, Shield, Folder, Check, Plus, Minus, ChevronRight, Lock, Unlock } from '@lucide/svelte';
 
   let users: any[] = $state([]);
   let loading = $state(true);
@@ -11,7 +11,10 @@
 
   let showPasswordPrompt = $state(false);
   let adminPasswordInput = $state('');
-  let pendingAction: ((password: string) => Promise<void>) | null = $state(null);
+
+  let isUnlocked = $state(false);
+  let sessionPassword = $state<string | null>(null);
+  let lockTimeout: ReturnType<typeof setTimeout>;
 
   let showAlertModal = $state(false);
   let alertModalMessage = $state('');
@@ -28,21 +31,38 @@
     showAlertModal = false;
   }
 
-  function promptAdminPassword(action: (password: string) => Promise<void>) {
-    adminPasswordInput = '';
-    pendingAction = action;
-    showPasswordPrompt = true;
+  function resetLockTimeout() {
+    if (lockTimeout) clearTimeout(lockTimeout);
+    lockTimeout = setTimeout(() => {
+      lockSession();
+    }, 5 * 60 * 1000);
+  }
+
+  function lockSession() {
+    isUnlocked = false;
+    sessionPassword = null;
+    if (lockTimeout) clearTimeout(lockTimeout);
+  }
+
+  function handleUnlockClick() {
+    if (isUnlocked) {
+      lockSession();
+    } else {
+      adminPasswordInput = '';
+      showPasswordPrompt = true;
+    }
   }
 
   function closePasswordPrompt() {
     showPasswordPrompt = false;
   }
 
-  async function executePendingAction() {
+  async function submitUnlock() {
     if (!adminPasswordInput) return;
-    if (pendingAction) {
-      await pendingAction(adminPasswordInput);
-    }
+    sessionPassword = adminPasswordInput;
+    isUnlocked = true;
+    resetLockTimeout();
+    showPasswordPrompt = false;
   }
 
   // Form states
@@ -145,40 +165,48 @@
     showModal = true;
   }
 
-  function saveUser() {
-    promptAdminPassword(async (password) => {
-      const payload = {
-        email: formEmail,
-        name: formName,
-        role: formRole,
-        password: formPassword || undefined,
-        folders: folderPaths
-      };
+  async function saveUser() {
+    if (!isUnlocked || !sessionPassword) {
+      showError('Please unlock settings first.');
+      return;
+    }
+    resetLockTimeout();
 
-      const method = editingUser ? 'PUT' : 'POST';
-      const url = editingUser 
-        ? `${API_BASE}/api/admin/users/${editingUser.id}` 
-        : `${API_BASE}/api/admin/users`;
+    const payload = {
+      email: formEmail,
+      name: formName,
+      role: formRole,
+      password: formPassword || undefined,
+      folders: folderPaths
+    };
 
-      const res = await fetch(url, {
-        method,
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-admin-password': password
-        },
-        credentials: 'include',
-        body: JSON.stringify(payload)
-      });
+    const method = editingUser ? 'PUT' : 'POST';
+    const url = editingUser 
+      ? `${API_BASE}/api/admin/users/${editingUser.id}` 
+      : `${API_BASE}/api/admin/users`;
 
-      if (res.ok) {
-        showModal = false;
-        showPasswordPrompt = false;
-        loadUsers();
+    const res = await fetch(url, {
+      method,
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-admin-password': sessionPassword
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      showModal = false;
+      loadUsers();
+    } else {
+      const data = await res.json();
+      if (res.status === 401 || res.status === 403 || data.error?.toLowerCase().includes('password')) {
+        lockSession();
+        showError('Invalid admin password. Session locked.');
       } else {
-        const data = await res.json();
         showError(data.error || 'Failed to save user');
       }
-    });
+    }
   }
 
   function showDeleteConfirm(id: string) {
@@ -186,23 +214,30 @@
     showConfirmModal = true;
   }
 
-  function confirmDeleteUser() {
+  async function confirmDeleteUser() {
+    if (!isUnlocked || !sessionPassword) {
+      showError('Please unlock settings first.');
+      return;
+    }
     showConfirmModal = false;
     if (confirmDeleteId) {
-      promptAdminPassword(async (password) => {
-        const res = await fetch(`${API_BASE}/api/admin/users/${confirmDeleteId}`, { 
-          method: 'DELETE', 
-          headers: { 'x-admin-password': password },
-          credentials: 'include' 
-        });
-        if (res.ok) {
-          showPasswordPrompt = false;
-          loadUsers();
+      resetLockTimeout();
+      const res = await fetch(`${API_BASE}/api/admin/users/${confirmDeleteId}`, { 
+        method: 'DELETE', 
+        headers: { 'x-admin-password': sessionPassword },
+        credentials: 'include' 
+      });
+      if (res.ok) {
+        loadUsers();
+      } else {
+        const data = await res.json();
+        if (res.status === 401 || res.status === 403 || data.error?.toLowerCase().includes('password')) {
+          lockSession();
+          showError('Invalid admin password. Session locked.');
         } else {
-          const data = await res.json();
           showError(data.error || 'Failed to delete user');
         }
-      });
+      }
     }
   }
 </script>
@@ -213,9 +248,20 @@
       <h2>User Management</h2>
       <p>Manage user accounts, roles, and folder access scopes.</p>
     </div>
-    <button class="btn primary" onclick={openCreateModal}>
-      <UserPlus size={18} /> Add New User
-    </button>
+    <div style="display: flex; gap: 12px; align-items: center;">
+      <button class="btn {isUnlocked ? 'secondary' : 'primary'}" onclick={handleUnlockClick} style={isUnlocked ? 'color: #10b981; border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.1);' : ''}>
+        {#if isUnlocked}
+          <Unlock size={18} /> Unlocked
+        {:else}
+          <Lock size={18} /> Unlock to Edit
+        {/if}
+      </button>
+      {#if isUnlocked}
+        <button class="btn primary" onclick={openCreateModal}>
+          <UserPlus size={18} /> Add New User
+        </button>
+      {/if}
+    </div>
   </div>
 
   {#if loading}
@@ -259,13 +305,17 @@
                 {/if}
               </td>
               <td class="actions">
-                <button class="icon-btn edit" onclick={() => openEditModal(user)} title="Edit">
-                  <Edit2 size={16} />
-                </button>
-                {#if user.email !== 'admin@example.com'}
-                  <button class="icon-btn delete" onclick={() => showDeleteConfirm(user.id)} title="Delete">
-                    <Trash2 size={16} />
+                {#if isUnlocked}
+                  <button class="icon-btn edit" onclick={() => openEditModal(user)} title="Edit">
+                    <Edit2 size={16} />
                   </button>
+                  {#if user.email !== 'admin@example.com'}
+                    <button class="icon-btn delete" onclick={() => showDeleteConfirm(user.id)} title="Delete">
+                      <Trash2 size={16} />
+                    </button>
+                  {/if}
+                {:else}
+                  <span class="muted" style="display: flex; align-items: center; gap: 4px; font-size: 0.8rem; justify-content: center;"><Lock size={12}/> Locked</span>
                 {/if}
               </td>
             </tr>
@@ -331,12 +381,12 @@
 <Modal bind:show={showPasswordPrompt} id="password-prompt" title="Admin Verification">
   <p style="color: #cbd5e1; margin-bottom: 16px; font-size: 0.95rem;">Please enter your admin password to confirm this action.</p>
   <div class="form-group">
-    <input type="password" bind:value={adminPasswordInput} placeholder="Admin Password" onkeydown={(e) => e.key === 'Enter' && executePendingAction()} />
+    <input type="password" bind:value={adminPasswordInput} placeholder="Admin Password" onkeydown={(e) => e.key === 'Enter' && submitUnlock()} />
   </div>
   
   <div class="modal-actions" style="margin-top: 24px;">
     <button class="btn secondary" onclick={closePasswordPrompt}>Cancel</button>
-    <button class="btn primary" onclick={executePendingAction}>
+    <button class="btn primary" onclick={submitUnlock}>
       <Check size={18} /> Confirm
     </button>
   </div>
