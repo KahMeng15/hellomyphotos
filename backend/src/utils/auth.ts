@@ -18,6 +18,8 @@ declare module 'fastify' {
   }
 }
 
+import { pool } from '../config/db';
+
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
   const token = request.cookies.token;
   if (!token) {
@@ -26,7 +28,28 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
-    request.user = decoded;
+    
+    // Fetch fresh user data from DB
+    const { rows } = await pool.query('SELECT role FROM users WHERE id = $1', [decoded.id]);
+    if (rows.length === 0) {
+      return reply.status(401).send({ error: 'Unauthorized: User not found' });
+    }
+    
+    const role = rows[0].role;
+    let folders: string[] = [];
+    
+    if (role === 'admin' || role === 'super_admin') {
+      folders = ['*'];
+    } else {
+      const accessRows = await pool.query('SELECT folder_path FROM user_folder_access WHERE user_id = $1', [decoded.id]);
+      folders = accessRows.rows.map(r => r.folder_path);
+    }
+    
+    request.user = {
+      ...decoded,
+      role,
+      folders
+    };
   } catch (err) {
     return reply.status(401).send({ error: 'Unauthorized: Invalid or expired token' });
   }
@@ -96,23 +119,14 @@ export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyR
     }
   }
 
-  // 2. If no valid share token, check JWT
-  const token = request.cookies.token;
-  if (!token) {
-    reply.status(401).send({ error: 'Unauthorized: Missing token or share token' });
-    return false;
-  }
+  // 2. If no valid share token, fallback to standard user auth
+  await requireAuth(request, reply);
+  if (reply.sent) return false;
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
-    if (hasFolderAccess(decoded, mediaFolder)) {
-      return true; // Access granted via user auth
-    } else {
-      reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
-      return false;
-    }
-  } catch (err) {
-    reply.status(401).send({ error: 'Unauthorized: Invalid token' });
+  if (hasFolderAccess(request.user!, mediaFolder)) {
+    return true; // Access granted via user auth
+  } else {
+    reply.status(403).send({ error: 'Forbidden: You do not have access to this media' });
     return false;
   }
 }
@@ -140,23 +154,14 @@ export async function verifyFolderAccess(request: FastifyRequest, reply: Fastify
     }
   }
 
-  // 2. If no valid share token, check JWT
-  const token = request.cookies.token;
-  if (!token) {
-    reply.status(401).send({ error: 'Unauthorized: Missing token or share token' });
-    return false;
-  }
+  // 2. If no valid share token, fallback to standard user auth
+  await requireAuth(request, reply);
+  if (reply.sent) return false;
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
-    if (hasFolderAccess(decoded, folderPath)) {
-      return true; // Access granted via user auth
-    } else {
-      reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
-      return false;
-    }
-  } catch (err) {
-    reply.status(401).send({ error: 'Unauthorized: Invalid token' });
+  if (hasFolderAccess(request.user!, folderPath)) {
+    return true; // Access granted via user auth
+  } else {
+    reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
     return false;
   }
 }

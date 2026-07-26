@@ -79,7 +79,29 @@ export async function authRoutes(fastify: FastifyInstance) {
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
-      return { user: decoded };
+      
+      const { rows } = await pool.query('SELECT role FROM users WHERE id = $1', [decoded.id]);
+      if (rows.length === 0) {
+        return reply.status(401).send({ error: 'User not found' });
+      }
+      
+      const role = rows[0].role;
+      let folders: string[] = [];
+      
+      if (role === 'admin' || role === 'super_admin') {
+        folders = ['*'];
+      } else {
+        const accessRows = await pool.query('SELECT folder_path FROM user_folder_access WHERE user_id = $1', [decoded.id]);
+        folders = accessRows.rows.map(r => r.folder_path);
+      }
+      
+      const latestUser = {
+        ...decoded,
+        role,
+        folders
+      };
+      
+      return { user: latestUser };
     } catch (error) {
       return reply.status(401).send({ error: 'Invalid token' });
     }
