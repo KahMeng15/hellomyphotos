@@ -7,7 +7,7 @@
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
-  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
@@ -155,6 +155,19 @@
   </div>
 {:else}
 <div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''} {!coverLoaded && fallbackCoverId ? 'skeleton' : ''}" bind:this={headerWrapper}>
+  {#if data.folderPath && data.folderPath !== data.baseFolderPath}
+    {@const parts = data.folderPath.split('/')}
+    {@const parentPath = parts.slice(0, -1).join('/')}
+    {@const isParentBase = parentPath === data.baseFolderPath}
+    {@const targetUrl = isParentBase ? `/share/${$page.params.token}` : `/share/${$page.params.token}/${parentPath.substring(data.baseFolderPath.length + 1)}`}
+    <a href={targetUrl} 
+       style="position: absolute; top: 24px; left: 24px; z-index: 20; color: rgba(255,255,255,0.4); text-decoration: none; display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; transition: color 0.2s, transform 0.2s;"
+       onmouseover={(e) => { e.currentTarget.style.color = 'white'; e.currentTarget.style.transform = 'scale(1.1)'; }}
+       onmouseout={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; e.currentTarget.style.transform = 'scale(1)'; }}
+       title="Go to parent folder">
+      <ChevronLeft size={32} strokeWidth={2.5} />
+    </a>
+  {/if}
   {#if fallbackCoverId}
     <img src={getPreviewUrl(fallbackCoverId, false, data.token)} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
     <div class="header-gradient"></div>

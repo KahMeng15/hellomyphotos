@@ -7,7 +7,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
-  import { ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
@@ -372,6 +372,15 @@
 </script>
 
 <div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
+  {#if data.folderPath}
+    <a href="/folder/{data.folderPath.split('/').slice(0, -1).join('/')}" 
+       style="position: absolute; top: 24px; left: 24px; z-index: 20; color: rgba(255,255,255,0.4); text-decoration: none; display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; transition: color 0.2s, transform 0.2s;"
+       onmouseover={(e) => { e.currentTarget.style.color = 'white'; e.currentTarget.style.transform = 'scale(1.1)'; }}
+       onmouseout={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; e.currentTarget.style.transform = 'scale(1)'; }}
+       title="Go to parent folder">
+      <ChevronLeft size={32} strokeWidth={2.5} />
+    </a>
+  {/if}
   {#if fallbackCoverId}
     <img src={getPreviewUrl(fallbackCoverId, false) + '?t=' + coverRefreshKey} class="header-bg" fetchpriority="high" alt="Cover" style="object-position: {coverBackgroundPosition};" />
     <div class="header-gradient"></div>
