@@ -58,7 +58,7 @@
 
 <div class="header">
   <div style="display: flex; align-items: center; gap: 16px;">
-    <a href="/faces" class="back-btn">&larr; Back</a>
+    <a href="/person" class="back-btn">&larr; Back</a>
     
     {#if isEditingName}
       <input 

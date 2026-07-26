@@ -112,7 +112,7 @@
       <nav class="sidebar-nav">
         {#if $currentUser}
           <a href="/folder">Photos</a>
-          <a href="/faces">Faces</a>
+          <a href="/person">Faces</a>
           <a href="/timeline">Timeline</a>
           <a href="/settings">Settings</a>
           {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}

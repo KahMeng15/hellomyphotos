@@ -14,7 +14,7 @@
 <div class="grid">
   {#each data.faces as face}
     <div class="face-card">
-      <a href="/faces/{face.person_id}" class="grid-item">
+      <a href="/person/{face.person_id}" class="grid-item">
         <BlurhashImage 
           hash={face.blurhash || ''}
           src={getThumbnailUrl(face.media_id)} 
