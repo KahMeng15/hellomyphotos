@@ -1,9 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { query } from '../../config/db';
-import { mediaQueue } from '../../queue/mediaQueue';
+import { dispatchMediaFile } from '../../queue/dispatch';
 
-const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
+const defaultMediaDir = fs.existsSync('/app/media') ? '/app/media' : path.resolve(process.cwd(), 'volumes/media_ro');
+const MEDIA_ROOT = process.env.MEDIA_ROOT || defaultMediaDir;
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'video/mp4', 'video/quicktime']);
 
 export class ScannerService {
@@ -63,7 +64,7 @@ export class ScannerService {
 
             // If this was an INSERT (xmax is 0) OR it failed processing previously (blurhash is null)
             if (result.rows.length > 0 && (result.rows[0].xmax == 0 || !result.rows[0].blurhash)) {
-              await mediaQueue.add('process-media', { 
+              await dispatchMediaFile({ 
                 mediaId: result.rows[0].id, 
                 fullPath: path.join(fullPath, file.name),
                 mimeType 

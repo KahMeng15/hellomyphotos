@@ -4,19 +4,23 @@ import { ScannerService } from '../modules/scanner/scanner.service';
 
 export const scannerQueue = new Queue('scanner', { connection: redis });
 
-export const scannerWorker = new Worker('scanner', async (job) => {
+export let scannerWorker: Worker | undefined;
+if (process.env.IS_WORKER === 'true') {
+  scannerWorker = new Worker('scanner', async (job) => {
   const { folderPath } = job.data;
-  console.log(`[Worker] Scanning folder: ${folderPath}`);
-  await ScannerService.scanDirectory(folderPath);
+  console.log(`[Scanner Worker] Scanning folder: ${folderPath ?? ''}`);
+  await ScannerService.scanDirectory(folderPath ?? '');
 }, { 
   connection: redis,
-  concurrency: 1 // Can be dynamically adjusted via settings later
+  concurrency: 1 
 });
 
-scannerWorker.on('completed', (job) => {
-  console.log(`[Worker] Job completed for folder: ${job.data.folderPath}`);
+  scannerWorker.on('completed', (job) => {
+  console.log(`[Scanner Worker] Job completed for folder: ${job.data?.folderPath ?? ''}`);
 });
 
-scannerWorker.on('failed', (job, err) => {
-  console.error(`[Worker] Job failed for folder: ${job?.data?.folderPath}`, err);
+  scannerWorker.on('failed', (job, err) => {
+  console.error(`[Scanner Worker] Job failed for folder: ${job?.data?.folderPath ?? ''}`, err);
 });
+
+}

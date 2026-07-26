@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
   import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces } from '$lib/api/media';
@@ -8,17 +8,34 @@
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
 
-  let { media, allowDownload = true, isSharedView = false, token }: { media: MediaFile, allowDownload?: boolean, isSharedView?: boolean, token?: string } = $props();
-  const dispatch = createEventDispatcher();
+  let { 
+    media, 
+    allowDownload = true, 
+    isSharedView = false, 
+    token,
+    onclose,
+    onnext,
+    onprev,
+    onsetcover
+  }: { 
+    media: MediaFile, 
+    allowDownload?: boolean, 
+    isSharedView?: boolean, 
+    token?: string,
+    onclose?: () => void,
+    onnext?: () => void,
+    onprev?: () => void,
+    onsetcover?: (id: string) => void
+  } = $props();
   
   function close() {
-    dispatch('close');
+    if (onclose) onclose();
   }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') close();
-    if (e.key === 'ArrowRight') dispatch('next');
-    if (e.key === 'ArrowLeft') dispatch('prev');
+    if (e.key === 'ArrowRight' && onnext) onnext();
+    if (e.key === 'ArrowLeft' && onprev) onprev();
   }
   let showInfo = $state(false);
   let showMenu = $state(false);
@@ -93,7 +110,7 @@
 
   async function makeCoverImage() {
     showMenu = false;
-    dispatch('setcover', media.id);
+    if (onsetcover) onsetcover(media.id);
   }
 
   onMount(() => {
@@ -150,7 +167,7 @@
         </button>
       </div>
 
-      <button class="nav-btn prev-btn" on:click|stopPropagation={() => dispatch('prev')}>
+      <button class="nav-btn prev-btn" on:click|stopPropagation={() => onprev && onprev()}>
         <ChevronLeft size={32} strokeWidth={2} />
       </button>
       
@@ -165,7 +182,7 @@
         {/if}
       </div>
       
-      <button class="nav-btn next-btn" on:click|stopPropagation={() => dispatch('next')}>
+      <button class="nav-btn next-btn" on:click|stopPropagation={() => onnext && onnext()}>
         <ChevronRight size={32} strokeWidth={2} />
       </button>
     </div>

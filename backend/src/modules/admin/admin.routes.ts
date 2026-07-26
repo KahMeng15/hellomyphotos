@@ -5,6 +5,7 @@ import { redis } from '../../config/redis';
 import { ScannerService } from '../scanner/scanner.service';
 import { mlQueue } from '../../queue/mlQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
+import { faceDetectionQueue } from '../../queue/faceDetectionQueue';
 import { query } from '../../config/db';
 import path from 'path';
 import fs from 'fs';
@@ -208,9 +209,10 @@ export async function adminRoutes(fastify: FastifyInstance) {
     await query(`TRUNCATE TABLE face_embeddings`);
 
     // 2. Queue every media file for face detection again
-    const result = await query(`SELECT id FROM media_files WHERE mime_type LIKE 'image/%'`);
+    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
     for (const row of result.rows) {
-      await mlQueue.add('detect-faces', { mediaId: row.id });
+      const fullPath = path.join(process.env.MEDIA_ROOT || '/app/media', row.folder_path, row.file_name);
+      await faceDetectionQueue.add('detect-faces', { mediaId: row.id, fullPath, mimeType: row.mime_type });
     }
     
     return reply.send({ success: true, message: 'Face reset initiated in the background' });
@@ -268,9 +270,10 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.post('/api/admin/reset-faces', async (request, reply) => {
     await query(`TRUNCATE TABLE face_embeddings CASCADE`);
 
-    const result = await query(`SELECT id FROM media_files WHERE mime_type LIKE 'image/%'`);
+    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
     for (const row of result.rows) {
-      await mlQueue.add('detect-faces', { mediaId: row.id });
+      const fullPath = path.join(process.env.MEDIA_ROOT || '/app/media', row.folder_path, row.file_name);
+      await faceDetectionQueue.add('detect-faces', { mediaId: row.id, fullPath, mimeType: row.mime_type });
     }
     return reply.send({ success: true, message: 'Face reset initiated in the background' });
   });
@@ -351,8 +354,13 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post('/api/admin/faces/merge', async (request, reply) => {
-    const { targetPersonId, sourcePersonIds } = request.body as { targetPersonId: string, sourcePersonIds: string[] };
-    if (!targetPersonId || !sourcePersonIds || !sourcePersonIds.length) {
+    const body = (request.body || {}) as any;
+    const targetPersonId = body.targetPersonId;
+    const sourcePersonIds = Array.isArray(body.sourcePersonIds) 
+      ? body.sourcePersonIds 
+      : (body.sourcePersonId ? [body.sourcePersonId] : []);
+
+    if (!targetPersonId || !sourcePersonIds.length) {
       return reply.status(400).send({ error: 'Missing target or source person IDs' });
     }
     

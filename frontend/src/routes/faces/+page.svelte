@@ -13,16 +13,22 @@
 
 <div class="grid">
   {#each data.faces as face}
-    <a href="/faces/{face.person_id}" class="grid-item">
-      <BlurhashImage 
-        hash={face.blurhash || ''}
-        src={getThumbnailUrl(face.media_id)} 
-        alt="Person {face.person_id}"
-        objectFit="cover"
-        faceBox={face.bounding_box}
-        square={true}
-      />
-    </a>
+    <div class="face-card">
+      <a href="/faces/{face.person_id}" class="grid-item">
+        <BlurhashImage 
+          hash={face.blurhash || ''}
+          src={getThumbnailUrl(face.media_id)} 
+          alt={face.name || 'Unknown Person'}
+          objectFit="cover"
+          faceBox={face.bounding_box}
+          square={true}
+        />
+      </a>
+      <div class="face-info">
+        <span class="face-name">{face.name || 'Unknown Person'}</span>
+        <span class="face-count">{face.count} photos</span>
+      </div>
+    </div>
   {/each}
 </div>
 
@@ -71,5 +77,32 @@
     border-color: var(--accent-color);
   }
   
+  .face-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
 
+  .face-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .face-name {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #f1f5f9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .face-count {
+    font-size: 0.75rem;
+    color: #94a3b8;
+  }
 </style>

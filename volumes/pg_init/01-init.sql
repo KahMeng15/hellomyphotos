@@ -11,12 +11,19 @@ CREATE TABLE media_files (
     size_bytes BIGINT NOT NULL,
     blurhash TEXT,
     exif_json JSONB,
+    has_1080p BOOLEAN DEFAULT false,
+    has_480p BOOLEAN DEFAULT false,
+    is_transcoded BOOLEAN DEFAULT false,
+    transcoded_mp4_path TEXT,
+    transcoded_webm_path TEXT,
+    clip_embedding vector(512),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(folder_path, file_name)
 );
 
 CREATE INDEX idx_media_folder ON media_files(folder_path);
+CREATE INDEX IF NOT EXISTS idx_media_files_clip_embedding ON media_files USING hnsw (clip_embedding vector_cosine_ops);
 
 -- Facial Embeddings
 CREATE TABLE face_embeddings (
@@ -59,3 +66,13 @@ CREATE TABLE folder_settings (
     cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Smart Search Embeddings
+CREATE TABLE IF NOT EXISTS smart_search_embeddings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    media_id UUID REFERENCES media_files(id) ON DELETE CASCADE,
+    embedding vector(512) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(media_id)
+);
+

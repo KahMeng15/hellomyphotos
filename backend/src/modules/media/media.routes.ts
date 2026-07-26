@@ -11,8 +11,6 @@ const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 import { verifyMediaAccess } from '../../utils/auth';
 
 import { getThrottleLimit, BandwidthThrottler } from '../../utils/throttle';
-import { FastifyRequest, FastifyReply } from 'fastify';
-
 async function sendThrottled(request: FastifyRequest, reply: FastifyReply, stream: NodeJS.ReadableStream | Buffer) {
   const isAuth = (request as any).user != null;
   const limit = await getThrottleLimit(isAuth);
@@ -103,7 +101,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
 
     if (!(await verifyMediaAccess(request, reply, id))) return;
 
-    const { download } = request.query;
+    const { download, watermark } = request.query as any;
     const result = await query(`SELECT folder_path, file_name, mime_type, size_bytes FROM media_files WHERE id = $1`, [id]);
     
     if (result.rows.length === 0) return reply.status(404).send({ error: 'File not found' });

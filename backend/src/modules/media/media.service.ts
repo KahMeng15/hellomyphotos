@@ -1,39 +1,45 @@
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
-import ffmpeg from 'fluent-ffmpeg';
-import exifr from 'exifr';
 import { encode } from 'blurhash';
 import { query } from '../../config/db';
-import { mlQueue } from '../../queue/mlQueue';
+import { VideoService } from './video.service';
 
-const CACHE_ROOT = process.env.CACHE_ROOT || '/app/cache';
+const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), 'volumes/cache_rw');
+const CACHE_ROOT = process.env.CACHE_ROOT || defaultCacheDir;
 
 // Ensure cache dirs exist
 fs.mkdirSync(path.join(CACHE_ROOT, '1080p'), { recursive: true });
 fs.mkdirSync(path.join(CACHE_ROOT, '480p'), { recursive: true });
+fs.mkdirSync(path.join(CACHE_ROOT, 'transcoded', 'mp4'), { recursive: true });
+fs.mkdirSync(path.join(CACHE_ROOT, 'transcoded', 'webm'), { recursive: true });
 
 export class MediaService {
   static async processImage(mediaId: string, fullPath: string) {
     try {
-      // 1. Generate 1080p WebP (High Quality Preview, strip metadata)
-      const out1080 = path.join(CACHE_ROOT, '1080p', `${mediaId}.webp`);
+      const dir1080 = path.join(CACHE_ROOT, '1080p');
+      const dir480 = path.join(CACHE_ROOT, '480p');
+      await fs.promises.mkdir(dir1080, { recursive: true });
+      await fs.promises.mkdir(dir480, { recursive: true });
+
+      const out1080 = path.join(dir1080, `${mediaId}.webp`);
+      const out480 = path.join(dir480, `${mediaId}.webp`);
+
+      // 1. Generate 1080p WebP preview (max 1920x1080, quality 80)
       await sharp(fullPath)
         .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
-        .withMetadata(false)
         .webp({ quality: 80 })
         .toFile(out1080);
 
-      // 2. Generate 480p WebP (Low Bandwidth Mobile Preview)
-      const out480 = path.join(CACHE_ROOT, '480p', `${mediaId}.webp`);
+      // 2. Generate 480p WebP thumbnail (max 854x480, quality 65)
       const buffer480 = await sharp(fullPath)
         .resize({ width: 854, height: 480, fit: 'inside', withoutEnlargement: true })
-        .withMetadata(false)
         .webp({ quality: 65 })
         .toBuffer();
+      
       await fs.promises.writeFile(out480, buffer480);
 
-      // 3. Generate Blurhash (very small raw buffer for hashing)
+      // 3. Calculate Blurhash string using sharp and blurhash library
       const rawImage = await sharp(buffer480)
         .raw()
         .ensureAlpha()
@@ -47,56 +53,23 @@ export class MediaService {
         4, 3
       );
 
-      // Parse EXIF Data
-      let exifJson = null;
-      try {
-        const exifData = await exifr.parse(fullPath);
-        if (exifData) {
-          exifJson = {
-            make: exifData.Make,
-            model: exifData.Model,
-            dateTimeOriginal: exifData.DateTimeOriginal,
-            fNumber: exifData.FNumber,
-            iso: exifData.ISO,
-            exposureTime: exifData.ExposureTime,
-            focalLength: exifData.FocalLength,
-            lensModel: exifData.LensModel
-          };
-        }
-      } catch (exifErr) {
-        console.warn(`[EXIF] Failed to parse EXIF for ${fullPath}`, exifErr);
-      }
+      // 4. Save blurhash, has_1080p, has_480p status to media_files DB table
+      await query(
+        `UPDATE media_files 
+         SET blurhash = $1, has_1080p = true, has_480p = true, updated_at = NOW() 
+         WHERE id = $2`,
+        [bHash, mediaId]
+      );
 
-      // Save Blurhash and EXIF to DB
-      await query(`UPDATE media_files SET blurhash = $1, exif_json = $2 WHERE id = $3`, [bHash, exifJson ? JSON.stringify(exifJson) : null, mediaId]);
-
-      // Push job to Facial Recognition Queue
-      await mlQueue.add('detect-faces', { mediaId });
+      return { blurhash: bHash, has1080p: true, has480p: true };
 
     } catch (err: any) {
-      console.error(`Failed to process image ${fullPath}:`, err.message);
+      console.error(`[MediaService] Failed to process image ${fullPath}:`, err.message);
+      throw err;
     }
   }
 
   static async processVideo(mediaId: string, fullPath: string) {
-    return new Promise<void>((resolve, reject) => {
-      const out480 = path.join(CACHE_ROOT, '480p', `${mediaId}.webp`);
-      
-      ffmpeg(fullPath)
-        .screenshots({
-          timestamps: ['10%'],
-          filename: `${mediaId}.webp`,
-          folder: path.join(CACHE_ROOT, '480p'),
-          size: '?x480'
-        })
-        .on('end', async () => {
-          // You could optionally create a 1080p and Blurhash from this extracted frame
-          resolve();
-        })
-        .on('error', (err) => {
-          console.error(`Failed to process video ${fullPath}:`, err.message);
-          reject(err);
-        });
-    });
+    return VideoService.processVideo(mediaId, fullPath);
   }
 }

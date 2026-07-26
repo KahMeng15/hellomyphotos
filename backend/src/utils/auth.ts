@@ -21,7 +21,8 @@ declare module 'fastify' {
 import { pool } from '../config/db';
 
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
-  const token = request.cookies.token;
+  const authHeader = request.headers.authorization;
+  const token = request.cookies.token || (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null);
   if (!token) {
     return reply.status(401).send({ error: 'Unauthorized: Missing token' });
   }
@@ -94,8 +95,6 @@ export function canBrowseFolder(user: AuthUser, folderPath: string): boolean {
     return false;
   });
 }
-
-import { pool } from '../config/db';
 
 export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyReply, mediaId: string) {
   // 1. Check share token first

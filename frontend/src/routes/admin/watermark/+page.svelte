@@ -68,7 +68,6 @@
     <h2>Watermarking & Enforcement</h2>
     <p>Configure global watermark templates and enforcement rules for public shares.</p>
   </div>
-    </div>
 
   {#if isLoading}
     <p>Loading settings...</p>

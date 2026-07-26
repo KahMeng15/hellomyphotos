@@ -9,9 +9,7 @@ import { timelineRoutes } from './modules/timeline/timeline.routes';
 import { authRoutes } from './modules/auth/auth.routes';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
-import './queue/scannerQueue';
-import './queue/mediaQueue';
-import './queue/mlQueue';
+import './queue';
 
 export const app = Fastify({
   logger: true

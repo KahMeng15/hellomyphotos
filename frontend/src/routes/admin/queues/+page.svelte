@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Check } from '@lucide/svelte';
+  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Layers } from '@lucide/svelte';
   import Modal from '$lib/components/Modal.svelte';
 
   let queues = $state<any>({});
+  let executionMode = $state<'sequential' | 'concurrent'>('sequential');
   let settings = $state<any>({
     maxCpuCores: 2,
     scanInterval: 3600000,
@@ -51,7 +52,8 @@
       ]);
       if (qRes.ok) {
         const data = await qRes.json();
-        queues = data.queues;
+        queues = data.queues || {};
+        if (data.mode) executionMode = data.mode;
       }
       if (sRes.ok) {
         const data = await sRes.json();
@@ -68,7 +70,8 @@
     const res = await fetch(`${API_BASE}/api/admin/queues`, { credentials: 'include' });
     if (res.ok) {
       const data = await res.json();
-      queues = data.queues;
+      queues = data.queues || {};
+      if (data.mode) executionMode = data.mode;
     }
   }
 
@@ -91,9 +94,29 @@
     }
   }
 
+  async function toggleExecutionMode(newMode: 'sequential' | 'concurrent') {
+    if (executionMode === newMode) return;
+    executionMode = newMode;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ mode: newMode })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        executionMode = data.mode;
+      }
+      await loadQueuesOnly();
+    } catch (e) {
+      console.error('Failed to change queue execution mode:', e);
+    }
+  }
+
   onMount(() => {
     loadData();
-    pollInterval = setInterval(loadQueuesOnly, 2000); // Poll every 2 seconds
+    pollInterval = setInterval(loadQueuesOnly, 2000);
   });
 
   onDestroy(() => {
@@ -158,37 +181,35 @@
     });
   }
 
-  const queueNames = ['scanner', 'media', 'ml'];
+  const queueNames = [
+    'scanner',
+    'metadata',
+    'thumbnail',
+    'video',
+    'smart-search',
+    'face-detection',
+    'facial-recognition'
+  ];
+
   const queueTitles: Record<string, string> = {
-    scanner: '1. Indexing & Discovery (Scanner)',
-    media: '2. Thumbnails & Transcoding (Media)',
-    ml: '3. Facial & Object Recognition (ML)'
+    'scanner': '1. Directory Discovery (Scanner)',
+    'metadata': '2. EXIF Metadata Extraction (Metadata)',
+    'thumbnail': '3. Image Thumbnail & Blurhash (Thumbnail)',
+    'video': '4. Video Transcoding & Frames (Video)',
+    'smart-search': '5. Smart Search & Embeddings (Smart Search)',
+    'face-detection': '6. Face Detection (Face Detection)',
+    'facial-recognition': '7. Facial Recognition (Facial Recognition)'
   };
 
   async function triggerJob(name: string) {
-    await actionQueue(name, 'resume');
-    if (name === 'scanner') {
-      await fetch(`${API_BASE}/api/admin/rescan`, { method: 'POST', credentials: 'include' });
-    } else if (name === 'media') {
-      await fetch(`${API_BASE}/api/admin/rescan-exif`, { method: 'POST', credentials: 'include' });
-    } else if (name === 'ml') {
-      customConfirm('Rescan Faces', 'Are you sure you want to completely wipe and re-calculate all facial recognition data? This will take a while.', true, async () => {
-        await fetch(`${API_BASE}/api/admin/rescan-faces`, { method: 'POST', credentials: 'include' });
-      });
-    }
+    await fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' });
+    await loadQueuesOnly();
   }
 
   async function runAllJobs() {
     for (const name of queueNames) {
-      await fetch(`${API_BASE}/api/admin/queues/${name}/resume`, { method: 'POST', credentials: 'include' });
+      await fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' });
     }
-    await fetch(`${API_BASE}/api/admin/rescan`, { method: 'POST', credentials: 'include' });
-    await fetch(`${API_BASE}/api/admin/rescan-exif`, { method: 'POST', credentials: 'include' });
-    
-    customConfirm('Rescan Faces', 'Are you sure you want to completely wipe and re-calculate all facial recognition data? This will take a while.', true, async () => {
-      await fetch(`${API_BASE}/api/admin/rescan-faces`, { method: 'POST', credentials: 'include' });
-    });
-    
     await loadQueuesOnly();
   }
 
@@ -217,7 +238,7 @@
       </a>
       <div>
         <h2>Processing & Job Queues</h2>
-        <p>Configure processing constraints and monitor background workers.</p>
+        <p>Configure processing constraints and monitor background workers across all 7 pipeline queues.</p>
       </div>
     </div>
     <button class="btn primary" onclick={saveSettings} disabled={saving}>
@@ -256,9 +277,45 @@
         </div>
       </div>
     </div>
-    <div style="margin-top: 1.5rem;">
+
+    <!-- Execution Mode Toggle Bar -->
+    <div class="card mode-card" style="background: rgba(30, 30, 45, 0.7); border: 1px solid rgba(99, 102, 241, 0.3);">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h3 style="margin: 0 0 0.25rem 0; font-size: 1.15rem; display: flex; align-items: center; gap: 0.5rem; color: #fff;">
+            <Layers size={20} color="#6366f1" /> Execution Mode Controls
+          </h3>
+          <p style="margin: 0; font-size: 0.85rem; color: #a1a1aa;">
+            {#if executionMode === 'sequential'}
+              <strong style="color: #6366f1;">Sequential Mode:</strong> Jobs execute in chained sequence (Scanner → Metadata → Thumbnail/Video → Smart Search → Face Detection → Facial Recognition).
+            {:else}
+              <strong style="color: #10b981;">Concurrent Mode:</strong> Queues execute independently without awaiting predecessor queue completion.
+            {/if}
+          </p>
+        </div>
+
+        <div style="display: flex; background: rgba(0, 0, 0, 0.4); padding: 4px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
+          <button 
+            class="mode-btn {executionMode === 'sequential' ? 'active-sequential' : ''}" 
+            onclick={() => toggleExecutionMode('sequential')}
+            type="button"
+          >
+            Sequential
+          </button>
+          <button 
+            class="mode-btn {executionMode === 'concurrent' ? 'active-concurrent' : ''}" 
+            onclick={() => toggleExecutionMode('concurrent')}
+            type="button"
+          >
+            Concurrent
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: 0.5rem;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0; font-size: 1.25rem; color: #e4e4e7;">Background Jobs</h3>
+        <h3 style="margin: 0; font-size: 1.25rem; color: #e4e4e7;">7 Pipeline Queues</h3>
         <div style="display: flex; gap: 0.5rem;">
           <button class="btn success sm" onclick={runAllJobs}><Play size={14}/> Start All</button>
           <button class="btn warning sm" onclick={pauseAllJobs}><Pause size={14}/> Pause All</button>
@@ -269,19 +326,19 @@
         {#each queueNames as name}
           {#if queues[name]}
             {@const q = queues[name]}
-            {@const counts = q.counts}
+            {@const counts = q.counts || { waiting: 0, active: 0, completed: 0, failed: 0 }}
             {@const total = counts.waiting + counts.active + counts.completed + counts.failed}
             {@const pCompleted = total > 0 ? (counts.completed / total) * 100 : 0}
             {@const pActive = total > 0 ? (counts.active / total) * 100 : 0}
             {@const pWaiting = total > 0 ? (counts.waiting / total) * 100 : 0}
             {@const pFailed = total > 0 ? (counts.failed / total) * 100 : 0}
             {@const isRunning = counts.active > 0 || counts.waiting > 0}
-            
+
             <div class="card queue-card" style="margin: 0;">
               <div class="q-header">
-                <h3>{queueTitles[name]}</h3>
+                <h3>{queueTitles[name] || name}</h3>
                 <div class="q-actions">
-                  <button class="btn success sm" disabled={isRunning} style={isRunning ? 'opacity: 0.5; cursor: not-allowed;' : ''} onclick={() => triggerJob(name)} title="Force Run All"><Play size={14}/> Start</button>
+                  <button class="btn success sm" disabled={isRunning} style={isRunning ? 'opacity: 0.5; cursor: not-allowed;' : ''} onclick={() => triggerJob(name)} title="Force Run Queue"><Play size={14}/> Start</button>
                   
                   {#if !isRunning || q.isPaused}
                     <button class="btn warning sm" disabled style="opacity: 0.5; cursor: not-allowed;"><Pause size={14}/> Pause</button>
@@ -295,10 +352,10 @@
               </div>
               
               <div class="progress-container" style="display: flex;">
-                {#if pCompleted > 0}<div class="progress-bar completed" style="width: {pCompleted}%; background: #10b981;" title="Completed"></div>{/if}
-                {#if pActive > 0}<div class="progress-bar active" style="width: {pActive}%; background: #3b82f6;" title="Active"></div>{/if}
-                {#if pWaiting > 0}<div class="progress-bar waiting" style="width: {pWaiting}%; background: #f59e0b;" title="Waiting"></div>{/if}
-                {#if pFailed > 0}<div class="progress-bar failed" style="width: {pFailed}%; background: #ef4444;" title="Failed"></div>{/if}
+                {#if pCompleted > 0}<div class="progress-bar completed" style="width: {pCompleted}%; background: #10b981;" title="Completed: {counts.completed}"></div>{/if}
+                {#if pActive > 0}<div class="progress-bar active" style="width: {pActive}%; background: #3b82f6;" title="Active: {counts.active}"></div>{/if}
+                {#if pWaiting > 0}<div class="progress-bar waiting" style="width: {pWaiting}%; background: #f59e0b;" title="Waiting: {counts.waiting}"></div>{/if}
+                {#if pFailed > 0}<div class="progress-bar failed" style="width: {pFailed}%; background: #ef4444;" title="Failed: {counts.failed}"></div>{/if}
               </div>
               
               <div class="q-stats">
@@ -388,20 +445,6 @@
   h2 { font-size: 2rem; margin: 0 0 0.5rem 0; }
   p { color: #a1a1aa; margin: 0; }
 
-  .status-indicator {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.85rem;
-    color: #10b981;
-    background: rgba(16, 185, 129, 0.1);
-    padding: 0.5rem 1rem;
-    border-radius: 9999px;
-    border: 1px solid rgba(16, 185, 129, 0.2);
-  }
-  .pulse { animation: pulse 2s infinite; }
-  @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
-
   .pipeline {
     display: flex;
     flex-direction: column;
@@ -414,6 +457,28 @@
     border-radius: 12px;
     padding: 1.5rem;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  }
+
+  .mode-btn {
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    background: transparent;
+    color: #a1a1aa;
+    transition: all 0.2s ease;
+  }
+  .mode-btn.active-sequential {
+    background: #6366f1;
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+  }
+  .mode-btn.active-concurrent {
+    background: #10b981;
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
   }
 
   .q-header {
@@ -435,7 +500,6 @@
   }
   .progress-bar {
     height: 100%;
-    background: linear-gradient(90deg, #6366f1, #a855f7);
     transition: width 0.3s ease;
   }
 
@@ -468,6 +532,7 @@
     transition: all 0.2s;
   }
   .btn.sm { font-size: 0.75rem; padding: 0.4rem 0.8rem; }
+  .btn.primary { background: #6366f1; color: white; }
   .btn.success { background: rgba(16, 185, 129, 0.1); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
   .btn.warning { background: rgba(245, 158, 11, 0.1); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
   .btn.danger { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }

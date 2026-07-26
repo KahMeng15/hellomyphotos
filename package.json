@@ -1,0 +1,9 @@
+{
+  "name": "hellomyphotos2",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "npm --prefix backend run test",
+    "test:e2e": "npm --prefix backend run test:e2e"
+  }
+}

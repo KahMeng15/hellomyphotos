@@ -10,6 +10,7 @@
   
   let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login');
   let isAuthChecking = $state(true);
+  let searchQuery = $state('');
 
   $effect(() => {
     if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') {
@@ -75,6 +76,12 @@
   function goForward() {
     window.history.forward();
   }
+
+  function handleSearch(e: KeyboardEvent) {
+    if (e.key === 'Enter' && searchQuery.trim()) {
+      goto(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+    }
+  }
 </script>
 
 <svelte:head>
@@ -90,6 +97,18 @@
         </a>
       </div>
       
+      {#if $currentUser}
+        <div class="search-container">
+          <input 
+            type="text" 
+            placeholder="Smart Search..." 
+            bind:value={searchQuery}
+            onkeydown={handleSearch}
+            class="search-input"
+          />
+        </div>
+      {/if}
+
       <nav class="sidebar-nav">
         {#if $currentUser}
           <a href="/folder">Photos</a>
@@ -209,6 +228,26 @@
     margin: 0;
   }
   
+  .search-container {
+    margin-bottom: 24px;
+  }
+  
+  .search-input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--glass-border);
+    color: #e4e4e7;
+    font-size: 0.9rem;
+    box-sizing: border-box;
+  }
+  
+  .search-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+  }
+
   .sidebar-nav {
     display: flex;
     flex-direction: column;
