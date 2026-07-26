@@ -3,8 +3,8 @@ import path from 'path';
 import { query } from '../../config/db';
 import { SmartSearchService } from './smartSearch.service';
 
-const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), 'volumes/cache_rw');
-const CACHE_ROOT = process.env.CACHE_ROOT || defaultCacheDir;
+const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
+const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 const ML_URL = process.env.IMMICH_ML_URL || 'http://localhost:3003';
 
 export class MLService {

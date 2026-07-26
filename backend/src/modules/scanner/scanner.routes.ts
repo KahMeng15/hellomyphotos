@@ -163,7 +163,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
                 ELSE 0 
               END as is_landscape
             FROM media_files m 
-            WHERE m.folder_path LIKE $1 AND m.mime_type LIKE 'image/%'
+            WHERE m.folder_path LIKE $1
             ORDER BY is_landscape DESC, face_count DESC, m.id ASC
             LIMIT 1
           `, [`${subPath}%`]);
@@ -202,7 +202,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
             ELSE 0 
           END as is_landscape
         FROM media_files m 
-        WHERE m.folder_path = $1 AND m.mime_type LIKE 'image/%'
+        WHERE m.folder_path = $1
         ORDER BY is_landscape DESC, face_count DESC, m.id ASC
         LIMIT 1
       `, [folderPath]);
