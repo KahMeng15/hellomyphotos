@@ -12,15 +12,15 @@ export const load: PageLoad = async ({ params, fetch }) => {
     if (!mediaRes.ok) throw new Error('Failed to fetch person media');
     const files = await mediaRes.json();
     
-    let personName = 'Unknown Person';
+    let personName = '';
     if (personRes.ok) {
       const personData = await personRes.json();
-      personName = personData.name || 'Unknown Person';
+      personName = personData.name || '';
     }
 
     return { id, files, personName };
   } catch (error) {
     console.error(error);
-    return { id, files: [], personName: 'Unknown Person' };
+    return { id, files: [], personName: '' };
   }
 };

@@ -10,7 +10,8 @@ export let thumbnailWorker: Worker | undefined;
 if (process.env.IS_WORKER === 'true') {
   thumbnailWorker = new Worker('thumbnail', async (job) => {
   const { mediaId, fullPath, mimeType } = job.data;
-  console.log(`[Thumbnail Worker] Processing thumbnails for: ${fullPath || mediaId}`);
+  const shortPath = fullPath?.replace(/^.*\/media_ro\//, '') || fullPath || mediaId;
+  console.log(`[Thumbnail Worker] Processing thumbnails for: ${shortPath}`);
 
   if (mimeType && mimeType.startsWith('image/')) {
     await MediaService.processImage(mediaId, fullPath);

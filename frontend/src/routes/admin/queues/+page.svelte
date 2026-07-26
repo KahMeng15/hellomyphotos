@@ -172,6 +172,13 @@
     });
   }
 
+  async function triggerResetSmartSearch() {
+    customConfirm('Reset Smart Search', 'Are you sure you want to wipe all smart search embeddings? They will be re-generated in the background.', true, async () => {
+      await fetch(`${API_BASE}/api/admin/reset-smart-search`, { method: 'POST', credentials: 'include' });
+      customAlert('Success', 'Smart search reset and re-generation initiated!');
+    });
+  }
+
   async function triggerNuke() {
     customConfirm('System Reset & Full Rescan', 'Are you sure you want to completely wipe the index, EXIF data, and facial recognition data, and rescan everything from scratch? This is a destructive operation and will take a significant amount of time.', true, async () => {
       await fetch(`${API_BASE}/api/admin/reset-faces`, { method: 'POST', credentials: 'include' });
@@ -401,6 +408,9 @@
           </button>
           <button class="btn warning" style="width: 100%; justify-content: center;" onclick={triggerResetFaces}>
             <Cpu size={16}/> Reset ML Data
+          </button>
+          <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetSmartSearch}>
+            <Layers size={16}/> Reset Smart Search
           </button>
         </div>
         

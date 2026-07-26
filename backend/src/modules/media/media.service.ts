@@ -5,8 +5,8 @@ import { encode } from 'blurhash';
 import { query } from '../../config/db';
 import { VideoService } from './video.service';
 
-const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), 'volumes/cache_rw');
-const CACHE_ROOT = process.env.CACHE_ROOT || defaultCacheDir;
+const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
+const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 
 // Ensure cache dirs exist
 fs.mkdirSync(path.join(CACHE_ROOT, '1080p'), { recursive: true });

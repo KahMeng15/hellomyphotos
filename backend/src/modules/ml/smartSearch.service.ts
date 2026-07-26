@@ -10,7 +10,7 @@ import path from 'path';
 import { query } from '../../config/db';
 
 const MODEL_NAME = 'Xenova/clip-vit-base-patch32';
-const CACHE_ROOT = process.env.CACHE_ROOT || '/app/cache';
+const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
 
 let processorPromise: Promise<any> | null = null;
 let visionModelPromise: Promise<any> | null = null;

@@ -5,8 +5,8 @@ import { query } from '../../config/db';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { WatermarkService } from './watermark.service';
 
-const CACHE_ROOT = process.env.CACHE_ROOT || '/app/cache';
-const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
+const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
+const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'));
 
 import { verifyMediaAccess } from '../../utils/auth';
 

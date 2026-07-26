@@ -134,7 +134,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
       for (const row of res.rows) {
         await metadataQueue.add('extract-metadata', {
           mediaId: row.id,
-          fullPath: path.join('/app/media', row.folder_path || '', row.file_name),
+          fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path || '', row.file_name),
           mimeType: row.mime_type
         });
       }
@@ -143,7 +143,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
       for (const row of res.rows) {
         await thumbnailQueue.add('generate-thumbnail', {
           mediaId: row.id,
-          fullPath: path.join('/app/media', row.folder_path || '', row.file_name),
+          fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path || '', row.file_name),
           mimeType: row.mime_type
         });
       }
@@ -152,7 +152,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
       for (const row of res.rows) {
         await videoQueue.add('process-video', {
           mediaId: row.id,
-          fullPath: path.join('/app/media', row.folder_path || '', row.file_name),
+          fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path || '', row.file_name),
           mimeType: row.mime_type
         });
       }
@@ -161,7 +161,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
       for (const row of res.rows) {
         await smartSearchQueue.add('generate-smart-search', {
           mediaId: row.id,
-          fullPath: path.join('/app/media', row.folder_path || '', row.file_name),
+          fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path || '', row.file_name),
           mimeType: row.mime_type
         });
       }
@@ -170,7 +170,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
       for (const row of res.rows) {
         await faceDetectionQueue.add('detect-faces', {
           mediaId: row.id,
-          fullPath: path.join('/app/media', row.folder_path || '', row.file_name),
+          fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path || '', row.file_name),
           mimeType: row.mime_type
         });
       }
@@ -179,7 +179,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
       for (const row of res.rows) {
         await facialRecognitionQueue.add('recognize-faces', {
           mediaId: row.id,
-          fullPath: path.join('/app/media', row.folder_path || '', row.file_name),
+          fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path || '', row.file_name),
           mimeType: row.mime_type
         });
       }

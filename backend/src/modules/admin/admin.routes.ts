@@ -6,6 +6,7 @@ import { ScannerService } from '../scanner/scanner.service';
 import { mlQueue } from '../../queue/mlQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
 import { faceDetectionQueue } from '../../queue/faceDetectionQueue';
+import { smartSearchQueue } from '../../queue/smartSearchQueue';
 import { query } from '../../config/db';
 import path from 'path';
 import fs from 'fs';
@@ -211,7 +212,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     // 2. Queue every media file for face detection again
     const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
     for (const row of result.rows) {
-      const fullPath = path.join(process.env.MEDIA_ROOT || '/app/media', row.folder_path, row.file_name);
+      const fullPath = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name);
       await faceDetectionQueue.add('detect-faces', { mediaId: row.id, fullPath, mimeType: row.mime_type });
     }
     
@@ -224,7 +225,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     for (const row of result.rows) {
       await mediaQueue.add('process-media', { 
         mediaId: row.id,
-        fullPath: path.join('/app/media', row.folder_path, row.file_name),
+        fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name),
         mimeType: row.mime_type
       });
     }
@@ -232,12 +233,14 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post('/api/admin/reset-index', async (request, reply) => {
+    await query(`TRUNCATE TABLE smart_search_embeddings CASCADE`);
     await query(`TRUNCATE TABLE face_embeddings CASCADE`);
     await query(`TRUNCATE TABLE media_analytics CASCADE`);
     await query(`TRUNCATE TABLE media_files CASCADE`);
     await query(`TRUNCATE TABLE folders CASCADE`);
+    await query(`DELETE FROM people`);
     
-    const cacheRoot = process.env.CACHE_ROOT || '/app/cache';
+    const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
     fs.rmSync(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
     fs.rmSync(path.join(cacheRoot, '480p'), { recursive: true, force: true });
     fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
@@ -247,10 +250,22 @@ export async function adminRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, message: 'Index wiped and rescan initiated in the background' });
   });
 
+  fastify.post('/api/admin/reset-smart-search', async (request, reply) => {
+    await query(`TRUNCATE TABLE smart_search_embeddings`);
+    await query(`UPDATE media_files SET clip_embedding = NULL`);
+
+    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' OR mime_type LIKE 'video/%'`);
+    for (const row of result.rows) {
+      const fullPath = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name);
+      await smartSearchQueue.add('generate-smart-search', { mediaId: row.id, fullPath, mimeType: row.mime_type });
+    }
+    return reply.send({ success: true, message: 'Smart search reset initiated in the background' });
+  });
+
   fastify.post('/api/admin/reset-exif', async (request, reply) => {
     await query(`UPDATE media_files SET blurhash = NULL, exif_json = NULL`);
     
-    const cacheRoot = process.env.CACHE_ROOT || '/app/cache';
+    const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
     fs.rmSync(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
     fs.rmSync(path.join(cacheRoot, '480p'), { recursive: true, force: true });
     fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
@@ -260,7 +275,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     for (const row of result.rows) {
       await mediaQueue.add('process-media', { 
         mediaId: row.id,
-        fullPath: path.join('/app/media', row.folder_path, row.file_name),
+        fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name),
         mimeType: row.mime_type
       });
     }
@@ -269,10 +284,11 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post('/api/admin/reset-faces', async (request, reply) => {
     await query(`TRUNCATE TABLE face_embeddings CASCADE`);
+    await query(`DELETE FROM people`);
 
     const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
     for (const row of result.rows) {
-      const fullPath = path.join(process.env.MEDIA_ROOT || '/app/media', row.folder_path, row.file_name);
+      const fullPath = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name);
       await faceDetectionQueue.add('detect-faces', { mediaId: row.id, fullPath, mimeType: row.mime_type });
     }
     return reply.send({ success: true, message: 'Face reset initiated in the background' });

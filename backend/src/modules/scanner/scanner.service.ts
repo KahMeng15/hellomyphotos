@@ -3,8 +3,8 @@ import path from 'path';
 import { query } from '../../config/db';
 import { dispatchMediaFile } from '../../queue/dispatch';
 
-const defaultMediaDir = fs.existsSync('/app/media') ? '/app/media' : path.resolve(process.cwd(), 'volumes/media_ro');
-const MEDIA_ROOT = process.env.MEDIA_ROOT || defaultMediaDir;
+const defaultMediaDir = fs.existsSync('/app/media') ? '/app/media' : path.resolve(process.cwd(), '../volumes/media_ro');
+const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || defaultMediaDir);
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'video/mp4', 'video/quicktime']);
 
 export class ScannerService {
