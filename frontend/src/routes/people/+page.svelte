@@ -12,7 +12,7 @@
 </div>
 
 <div class="grid">
-  {#each data.faces as face}
+  {#each data.faces as face, i}
     <div class="face-card">
       <a href="/people/{face.person_id}" class="grid-item">
         <BlurhashImage 
@@ -22,6 +22,7 @@
           objectFit="cover"
           faceBox={face.bounding_box}
           square={true}
+          priority={i < 8}
         />
       </a>
       <div class="face-info">
@@ -62,7 +63,7 @@
 
   .grid-item {
     aspect-ratio: 1;
-    border-radius: 50%; /* Make face clusters circular */
+    border-radius: 50%;
     overflow: hidden;
     cursor: pointer;
     position: relative;
@@ -70,6 +71,8 @@
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     background: #1e293b;
     border: 2px solid transparent;
+    display: block;
+    width: 100%;
   }
 
   .grid-item:hover {

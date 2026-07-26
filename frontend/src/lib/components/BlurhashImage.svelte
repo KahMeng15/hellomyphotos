@@ -113,7 +113,7 @@
 </script>
 
 <div class="grid-item {square ? 'is-square' : ''}" style="{!square ? `flex-grow: ${aspectRatio}; flex-basis: ${targetHeight * aspectRatio}px;` : ''}" {onclick}>
-  <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'}; aspect-ratio: {aspectRatio};">
+  <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'}; aspect-ratio: {objectFit === 'cover' ? (square ? 1 : aspectRatio) : aspectRatio};">
     <div class="zoom-wrapper skeleton" style="animation-delay: -{randomDelay}s;">
       {#if visible}
         <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
@@ -166,7 +166,7 @@
     width: 100%;
     display: block;
     overflow: hidden;
-    background: #111;
+    background: #1a1a2e;
     border-radius: 0;
     line-height: 0;
   }
@@ -178,7 +178,7 @@
   }
 
   .skeleton {
-    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+    background: linear-gradient(90deg, rgba(255,255,255,0.08) 25%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.08) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
   }
