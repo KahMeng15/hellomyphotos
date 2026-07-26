@@ -84,9 +84,9 @@
 {#if selectedMediaIndex !== null}
   <Lightbox 
     media={data.files[selectedMediaIndex]} 
-    on:close={closeLightbox}
-    on:next={nextMedia}
-    on:prev={prevMedia}
+    onclose={closeLightbox}
+    onnext={nextMedia}
+    onprev={prevMedia}
   />
 {/if}
 

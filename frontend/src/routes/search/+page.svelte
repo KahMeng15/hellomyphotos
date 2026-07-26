@@ -76,9 +76,9 @@
 {#if selectedMediaIndex !== null}
   <Lightbox 
     media={data.results[selectedMediaIndex]} 
-    on:close={closeLightbox}
-    on:next={nextMedia}
-    on:prev={prevMedia}
+    onclose={closeLightbox}
+    onnext={nextMedia}
+    onprev={prevMedia}
   />
 {/if}
 

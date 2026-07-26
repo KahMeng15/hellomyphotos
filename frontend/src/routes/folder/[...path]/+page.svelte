@@ -266,8 +266,7 @@
     }
   }
 
-  async function handleSetCover(event: CustomEvent<string>) {
-    const mediaId = event.detail;
+  async function handleSetCover(mediaId: string) {
     localCoverOverride = mediaId;
     coverRefreshKey++;
     try {
@@ -525,10 +524,10 @@
 {#if selectedMediaIndex !== null}
   <Lightbox 
     media={sortedFiles[selectedMediaIndex]} 
-    on:close={closeLightbox}
-    on:next={nextMedia}
-    on:prev={prevMedia}
-    on:setcover={handleSetCover}
+    onclose={closeLightbox}
+    onnext={nextMedia}
+    onprev={prevMedia}
+    onsetcover={handleSetCover}
   />
 {/if}
 

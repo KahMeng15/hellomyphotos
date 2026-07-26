@@ -32,27 +32,28 @@
     if (onclose) onclose();
   }
 
+  let showInfo = $state(false);
+  let showMenu = $state(false);
+
+  // --- Idle management ---
+
+  let isIdle = $state(false);
+  let lastActivity = $state(Date.now());
+
+  function onActivity() {
+    lastActivity = Date.now();
+    isIdle = false;
+  }
+
   function handleKeydown(e: KeyboardEvent) {
+    onActivity();
     if (e.key === 'Escape') close();
     if (e.key === 'ArrowRight' && onnext) onnext();
     if (e.key === 'ArrowLeft' && onprev) onprev();
   }
-  let showInfo = $state(false);
-  let showMenu = $state(false);
   
-  let isIdle = $state(false);
-  let idleTimer: any;
+  // --- Info / faces ---
 
-  function resetIdle() {
-    isIdle = false;
-    clearTimeout(idleTimer);
-    if (!showInfo) {
-      idleTimer = setTimeout(() => {
-        isIdle = true;
-      }, 2500);
-    }
-  }
-  
   let faces: {person_id: string, bounding_box: any}[] = $state([]);
   let loadingFaces = $state(false);
 
@@ -61,12 +62,6 @@
   }
 
   $effect(() => {
-    if (showInfo) {
-      resetIdle();
-    } else {
-      resetIdle();
-    }
-    
     if (showInfo && media.id) {
       loadingFaces = true;
       fetchMediaFaces(media.id).then(res => {
@@ -78,6 +73,8 @@
       });
     }
   });
+
+  // --- Download, share, cover ---
 
   function download() {
     const url = getStreamUrl(media.id, token) + '&download=1';
@@ -92,7 +89,7 @@
     try {
       isSharing = true;
       const date = new Date();
-      date.setDate(date.getDate() + 7); // Default 7 days expiry for quick image shares
+      date.setDate(date.getDate() + 7);
       const token = await createShare(media.folder_path, media.id, allowDownload, false, false, date.toISOString());
       
       const url = `${window.location.origin}/share/${token}`;
@@ -115,31 +112,31 @@
 
   onMount(() => {
     document.addEventListener('keydown', handleKeydown);
-    document.addEventListener('mousemove', resetIdle);
-    document.addEventListener('mousedown', resetIdle);
-    document.addEventListener('touchstart', resetIdle);
-    resetIdle();
+    lastActivity = Date.now();
+    isIdle = false;
+    const interval = setInterval(() => {
+      if (!showInfo && Date.now() - lastActivity > 2500) {
+        isIdle = true;
+      }
+    }, 300);
     return () => {
       document.removeEventListener('keydown', handleKeydown);
-      document.removeEventListener('mousemove', resetIdle);
-      document.removeEventListener('mousedown', resetIdle);
-      document.removeEventListener('touchstart', resetIdle);
-      clearTimeout(idleTimer);
+      clearInterval(interval);
     };
   });
 </script>
 
-<div class="lightbox" class:idle={isIdle} transition:fade={{ duration: 150 }} on:click={close}>
+<div class="lightbox" style="opacity: 1;" onmousemove={onActivity} onmousedown={onActivity} ontouchstart={onActivity} onclick={close}>
   <div class="layout-wrapper">
     <div class="main-area">
-      <div class="top-bar" on:click|stopPropagation>
+      <div class="top-bar" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'} onclick={(e) => e.stopPropagation()}>
         {#if allowDownload}
-          <button class="icon-btn" on:click={download} title="Download">
+          <button class="icon-btn" onclick={download} title="Download">
             <Download size={20} strokeWidth={2} />
           </button>
         {/if}
         {#if !isSharedView}
-          <button class="icon-btn {justShared ? 'success' : ''}" on:click={share} title="Share">
+          <button class="icon-btn {justShared ? 'success' : ''}" onclick={share} title="Share">
             {#if justShared}
               <Check size={20} strokeWidth={2} />
             {:else}
@@ -147,31 +144,31 @@
             {/if}
           </button>
         {/if}
-        <button class="icon-btn {showInfo ? 'active' : ''}" on:click={toggleInfo} title="Info">
+        <button class="icon-btn {showInfo ? 'active' : ''}" onclick={toggleInfo} title="Info">
           <Info size={20} strokeWidth={2} />
         </button>
         {#if !isSharedView}
           <div style="position: relative;" use:clickOutside={() => showMenu = false}>
-            <button class="icon-btn" on:click={() => showMenu = !showMenu} title="More">
+            <button class="icon-btn" onclick={() => showMenu = !showMenu} title="More">
               <MoreHorizontal size={20} strokeWidth={2} />
             </button>
             {#if showMenu}
               <div class="dropdown-menu">
-                <button on:click={makeCoverImage}>Set as Cover Image</button>
+                <button onclick={makeCoverImage}>Set as Cover Image</button>
               </div>
             {/if}
           </div>
         {/if}
-        <button class="icon-btn close-btn" on:click={close} title="Close">
+        <button class="icon-btn close-btn" onclick={close} title="Close">
           <X size={24} strokeWidth={2} />
         </button>
       </div>
 
-      <button class="nav-btn prev-btn" on:click|stopPropagation={() => onprev && onprev()}>
+      <button class="nav-btn prev-btn" onclick={(e) => { e.stopPropagation(); if (onprev) onprev(); }}>
         <ChevronLeft size={32} strokeWidth={2} />
       </button>
       
-      <div class="content" on:click|stopPropagation>
+      <div class="content" onclick={(e) => e.stopPropagation()}>
         {#if media.mime_type.startsWith('video/')}
           <video controls autoplay class="media-element">
             <source src={getStreamUrl(media.id, token)} type={media.mime_type} />
@@ -182,13 +179,13 @@
         {/if}
       </div>
       
-      <button class="nav-btn next-btn" on:click|stopPropagation={() => onnext && onnext()}>
+      <button class="nav-btn next-btn" onclick={(e) => { e.stopPropagation(); if (onnext) onnext(); }}>
         <ChevronRight size={32} strokeWidth={2} />
       </button>
     </div>
 
     {#if showInfo}
-      <div class="sidebar" transition:slide={{ axis: 'x', duration: 300 }} on:click|stopPropagation>
+      <div class="sidebar" transition:slide={{ axis: 'x', duration: 300 }} onclick={(e) => e.stopPropagation()}>
         <div class="sidebar-inner">
           <h3>Info</h3>
           <div class="info-section">
@@ -218,7 +215,7 @@
             {:else if faces.length > 0}
               <div class="face-list">
                 {#each faces as face}
-                  <a href={`/person/${face.person_id}`} class="face-avatar" on:click|stopPropagation>
+                    <a href={`/person/${face.person_id}`} class="face-avatar" onclick={(e) => e.stopPropagation()}>
                     <BlurhashImage 
                       hash={media.blurhash || ''} 
                       src={getThumbnailUrl(media.id)} 
@@ -262,6 +259,7 @@
     display: flex;
     justify-content: center;
     align-items: center;
+    animation: fadeInOnly 0.15s ease both;
   }
 
   .top-bar {
@@ -273,13 +271,6 @@
     gap: 12px;
     z-index: 1010;
     transition: opacity 0.4s ease;
-    animation: fadeInOnly 0.4s ease both;
-  }
-
-  .lightbox.idle .top-bar,
-  .lightbox.idle .nav-btn {
-    opacity: 0;
-    pointer-events: none;
   }
 
   .icon-btn {
