@@ -261,7 +261,7 @@
 {/key}
 
 {#if selectedMediaIndex !== null}
-  <Lightbox media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
+  <Lightbox media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={$page.params.token} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
 {/if}
 {/if}
 
