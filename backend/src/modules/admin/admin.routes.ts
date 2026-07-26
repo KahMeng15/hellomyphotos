@@ -7,6 +7,7 @@ import { mlQueue } from '../../queue/mlQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
 import { query } from '../../config/db';
 import path from 'path';
+import fs from 'fs';
 
 export async function adminRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', requireAuth);
@@ -226,6 +227,52 @@ export async function adminRoutes(fastify: FastifyInstance) {
       });
     }
     return reply.send({ success: true, message: 'EXIF extraction initiated in the background' });
+  });
+
+  fastify.post('/api/admin/reset-index', async (request, reply) => {
+    await query(`TRUNCATE TABLE face_embeddings CASCADE`);
+    await query(`TRUNCATE TABLE media_analytics CASCADE`);
+    await query(`TRUNCATE TABLE media_files CASCADE`);
+    await query(`TRUNCATE TABLE folders CASCADE`);
+    
+    const cacheRoot = process.env.CACHE_ROOT || '/app/cache';
+    fs.rmSync(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
+    fs.rmSync(path.join(cacheRoot, '480p'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
+    fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
+
+    ScannerService.scanAllDirectories('').catch(console.error);
+    return reply.send({ success: true, message: 'Index wiped and rescan initiated in the background' });
+  });
+
+  fastify.post('/api/admin/reset-exif', async (request, reply) => {
+    await query(`UPDATE media_files SET blurhash = NULL, exif_json = NULL`);
+    
+    const cacheRoot = process.env.CACHE_ROOT || '/app/cache';
+    fs.rmSync(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
+    fs.rmSync(path.join(cacheRoot, '480p'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
+    fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
+
+    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
+    for (const row of result.rows) {
+      await mediaQueue.add('process-media', { 
+        mediaId: row.id,
+        fullPath: path.join('/app/media', row.folder_path, row.file_name),
+        mimeType: row.mime_type
+      });
+    }
+    return reply.send({ success: true, message: 'Media/EXIF reset initiated in the background' });
+  });
+
+  fastify.post('/api/admin/reset-faces', async (request, reply) => {
+    await query(`TRUNCATE TABLE face_embeddings CASCADE`);
+
+    const result = await query(`SELECT id FROM media_files WHERE mime_type LIKE 'image/%'`);
+    for (const row of result.rows) {
+      await mlQueue.add('detect-faces', { mediaId: row.id });
+    }
+    return reply.send({ success: true, message: 'Face reset initiated in the background' });
   });
 
   fastify.get('/api/admin/logs', async (request, reply) => {
