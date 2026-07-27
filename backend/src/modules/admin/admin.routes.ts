@@ -6,8 +6,10 @@ import { ScannerService } from '../scanner/scanner.service';
 import { mlQueue } from '../../queue/mlQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
 import { faceDetectionQueue } from '../../queue/faceDetectionQueue';
+import { facialRecognitionQueue } from '../../queue/facialRecognitionQueue';
 import { smartSearchQueue } from '../../queue/smartSearchQueue';
 import { query } from '../../config/db';
+import { ClusterService } from '../ml/cluster.service';
 import path from 'path';
 import fs from 'fs';
 
@@ -292,6 +294,15 @@ export async function adminRoutes(fastify: FastifyInstance) {
       await faceDetectionQueue.add('detect-faces', { mediaId: row.id, fullPath, mimeType: row.mime_type });
     }
     return reply.send({ success: true, message: 'Face reset initiated in the background' });
+  });
+
+  fastify.post('/api/admin/recluster-faces', async (request, reply) => {
+    try {
+      await ClusterService.reclusterFaces();
+      return reply.send({ success: true, message: 'Faces reclustered successfully' });
+    } catch (e: any) {
+      return reply.status(500).send({ error: e.message });
+    }
   });
 
   fastify.get('/api/admin/logs', async (request, reply) => {

@@ -104,11 +104,11 @@ export class MLService {
         const { boundingBox, embedding } = face;
         const embeddingString = typeof embedding === 'string' ? embedding : `[${embedding.join(',')}]`;
         
-        // Query face_embeddings using pgvector cosine distance (< 0.6) to match existing known identities
+        // Query face_embeddings using pgvector cosine distance (< 0.4) to match existing known identities
         const matchResult = await query(`
           SELECT person_id 
           FROM face_embeddings 
-          WHERE person_id IS NOT NULL AND embedding <=> $1::vector < 0.6 
+          WHERE person_id IS NOT NULL AND embedding <=> $1::vector < 0.4 
           ORDER BY embedding <=> $1::vector 
           LIMIT 1
         `, [embeddingString]);

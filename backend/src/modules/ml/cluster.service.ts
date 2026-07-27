@@ -16,7 +16,7 @@ export class ClusterService {
     return Math.max(0, 1 - sim);
   }
 
-  static async reclusterFaces(eps: number = 0.6, minSamples: number = 1) {
+  static async reclusterFaces(eps: number = 0.4, minSamples: number = 2) {
     console.log(`[Clustering] Fetching face embeddings for dynamic DBSCAN clustering (eps=${eps}, minSamples=${minSamples})...`);
     const result = await query(`SELECT id, person_id, embedding::text as vector FROM face_embeddings`);
     const rows = result.rows;

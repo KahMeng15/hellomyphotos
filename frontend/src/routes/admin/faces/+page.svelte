@@ -8,6 +8,29 @@
   
   let selectedFaces = $state<Set<string>>(new Set());
   let isMerging = $state(false);
+  let isReclustering = $state(false);
+  let reclusterMessage = $state('');
+
+  async function reclusterFaces() {
+    isReclustering = true;
+    reclusterMessage = '';
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/recluster-faces`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      const data = await res.json();
+      if (res.ok) {
+        reclusterMessage = 'Reclustering complete!';
+      } else {
+        reclusterMessage = `Error: ${data.error}`;
+      }
+    } catch (e: any) {
+      reclusterMessage = `Network error: ${e.message}`;
+    } finally {
+      isReclustering = false;
+    }
+  }
 
   function toggleSelection(personId: string) {
     if (selectedFaces.has(personId)) {
@@ -80,6 +103,15 @@
         </button>
       {/if}
     </div>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn secondary" onclick={reclusterFaces} disabled={isReclustering}>
+      {isReclustering ? 'Reclustering...' : 'Recluster All Faces'}
+    </button>
+    {#if reclusterMessage}
+      <span class="recluster-msg">{reclusterMessage}</span>
+    {/if}
   </div>
 
   <div class="grid">
@@ -193,6 +225,18 @@
 
   .grid-item:hover .person-id-label {
     opacity: 1;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .recluster-msg {
+    color: #6ee7b7;
+    font-size: 0.85rem;
   }
 
   .btn {

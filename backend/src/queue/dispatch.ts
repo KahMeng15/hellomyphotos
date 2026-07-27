@@ -3,7 +3,6 @@ import { videoQueue } from './videoQueue';
 import { thumbnailQueue } from './thumbnailQueue';
 import { smartSearchQueue } from './smartSearchQueue';
 import { faceDetectionQueue } from './faceDetectionQueue';
-import { facialRecognitionQueue } from './facialRecognitionQueue';
 import { faceThumbnailQueue } from './faceThumbnailQueue';
 import { getExecutionMode } from './mode';
 
@@ -28,7 +27,6 @@ export async function dispatchMediaFile(jobData: MediaJobData): Promise<void> {
     ];
     if (!isVideo) {
       promises.push(faceDetectionQueue.add('detect-faces', jobData));
-      promises.push(facialRecognitionQueue.add('recognize-faces', jobData));
       promises.push(faceThumbnailQueue.add('generate-face-thumbnails', { mediaId: jobData.mediaId }));
     }
     await Promise.all(promises);
