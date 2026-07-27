@@ -107,3 +107,13 @@ export function getFolderZipUrl(folderPath: string, token?: string): string {
 export function getFaceThumbnailUrl(personId: string): string {
   return `${API_BASE}/api/faces/${personId}/thumbnail`;
 }
+
+export async function renamePerson(personId: string, name: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/faces/${personId}/name`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error('Failed to rename person');
+}
