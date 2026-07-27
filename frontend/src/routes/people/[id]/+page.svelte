@@ -63,7 +63,7 @@
     return 0;
   }));
 
-  let fallbackCoverId = $derived(data.files.length > 0 ? data.files[0].id : null);
+  let fallbackCoverId = $derived(data.coverMediaId || (data.files.length > 0 ? data.files[0].id : null));
 
   function openLightbox(index: number) {
     selectedMediaIndex = index;

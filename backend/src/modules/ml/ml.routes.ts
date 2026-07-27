@@ -124,6 +124,29 @@ export async function mlRoutes(fastify: FastifyInstance) {
     return reply.send(result.rows);
   });
 
+  // Get the best cover image for a person (photo with fewest other faces)
+  fastify.get<{ Params: { id: string } }>('/api/faces/:id/cover', { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params;
+
+    const result = await query(`
+      SELECT m.id
+      FROM media_files m
+      JOIN face_embeddings fe ON m.id = fe.media_id AND fe.person_id = $1
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS total
+        FROM face_embeddings fe2
+        WHERE fe2.media_id = m.id
+      ) fc ON true
+      ORDER BY fc.total ASC, m.created_at DESC
+      LIMIT 1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return reply.status(404).send({ error: 'No media found for this person' });
+    }
+    return reply.send({ mediaId: result.rows[0].id });
+  });
+
   // Serve or generate a face thumbnail for a person
   fastify.get<{ Params: { id: string } }>('/api/faces/:id/thumbnail', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;

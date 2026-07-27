@@ -4,9 +4,10 @@ import type { PageLoad } from './$types';
 export const load: PageLoad = async ({ params, fetch }) => {
   const { id } = params;
   try {
-    const [mediaRes, personRes] = await Promise.all([
+    const [mediaRes, personRes, coverRes] = await Promise.all([
       fetch(`${API_BASE}/api/faces/${id}/media`),
-      fetch(`${API_BASE}/api/faces/${id}`)
+      fetch(`${API_BASE}/api/faces/${id}`),
+      fetch(`${API_BASE}/api/faces/${id}/cover`)
     ]);
     
     if (!mediaRes.ok) throw new Error('Failed to fetch person media');
@@ -18,9 +19,15 @@ export const load: PageLoad = async ({ params, fetch }) => {
       personName = personData.name || '';
     }
 
-    return { id, files, personName };
+    let coverMediaId: string | null = null;
+    if (coverRes.ok) {
+      const coverData = await coverRes.json();
+      coverMediaId = coverData.mediaId;
+    }
+
+    return { id, files, personName, coverMediaId };
   } catch (error) {
     console.error(error);
-    return { id, files: [], personName: '' };
+    return { id, files: [], personName: '', coverMediaId: null };
   }
 };

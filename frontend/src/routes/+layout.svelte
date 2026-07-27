@@ -3,7 +3,7 @@
   import { slide, fly } from 'svelte/transition';
   import { onMount } from 'svelte';
   import { page, navigating } from '$app/stores';
-  import { goto } from '$app/navigation';
+  import { goto, afterNavigate } from '$app/navigation';
   import { logout } from '$lib/api/auth';
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
   import { LogOut } from '@lucide/svelte';
@@ -61,6 +61,34 @@
       }
     }
     isAuthChecking = false;
+  });
+
+  // Scroll position restoration for back/forward navigation
+  const scrollPositions = new Map<string, number>();
+  let isPopState = false;
+
+  onMount(() => {
+    const el = document.querySelector('.main-content');
+    if (el) {
+      el.addEventListener('scroll', () => {
+        scrollPositions.set($page.url.pathname, el.scrollTop);
+      }, { passive: true });
+    }
+
+    window.addEventListener('popstate', () => {
+      isPopState = true;
+    });
+  });
+
+  afterNavigate(({ to }) => {
+    if (isPopState && to) {
+      const saved = scrollPositions.get(to.url.pathname);
+      if (saved !== undefined) {
+        const el = document.querySelector('.main-content');
+        if (el) el.scrollTop = saved;
+      }
+    }
+    isPopState = false;
   });
 
   async function handleLogout() {
