@@ -189,14 +189,6 @@
     return undefined;
   }
 
-  let prevFolderPath = $state(data.folderPath);
-  $effect(() => {
-    if (data.folderPath !== prevFolderPath) {
-      prevFolderPath = data.folderPath;
-      document.querySelector('.main-content')?.scrollTo({ top: 0, behavior: 'instant' });
-    }
-  });
-
   let isFolderOnly = $derived(data.files.length === 0 && data.directories.length > 0);
 
   let sortedDirectories = $derived([...data.directories].sort((a, b) => {
