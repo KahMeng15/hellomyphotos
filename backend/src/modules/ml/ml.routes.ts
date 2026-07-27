@@ -1,7 +1,42 @@
 import { FastifyInstance } from 'fastify';
+import fs from 'fs';
+import path from 'path';
+import sharp from 'sharp';
 import { query } from '../../config/db';
 import { requireAuth, verifyMediaAccess } from '../../utils/auth';
 import { SmartSearchService } from './smartSearch.service';
+
+const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
+const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
+const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'));
+const FACE_THUMB_SIZE = 300;
+const FACE_PADDING = 0.5;
+
+function parseBoundingBox(box: any): { left: number; top: number; width: number; height: number } {
+  if (box && box.x1 !== undefined && box.y1 !== undefined && box.x2 !== undefined && box.y2 !== undefined) {
+    const w = box.x2 - box.x1;
+    const h = box.y2 - box.y1;
+    const padW = w * FACE_PADDING;
+    const padH = h * FACE_PADDING;
+    return {
+      left: Math.max(0, Math.floor(box.x1 - padW)),
+      top: Math.max(0, Math.floor(box.y1 - padH)),
+      width: Math.ceil(w + padW * 2),
+      height: Math.ceil(h + padH * 2),
+    };
+  }
+  if (box && box.x !== undefined && box.y !== undefined && box.w !== undefined && box.h !== undefined) {
+    const padW = box.w * FACE_PADDING;
+    const padH = box.h * FACE_PADDING;
+    return {
+      left: Math.max(0, Math.floor(box.x - padW)),
+      top: Math.max(0, Math.floor(box.y - padH)),
+      width: Math.ceil(box.w + padW * 2),
+      height: Math.ceil(box.h + padH * 2),
+    };
+  }
+  return { left: 0, top: 0, width: 100, height: 100 };
+}
 
 export async function mlRoutes(fastify: FastifyInstance) {
   
@@ -87,6 +122,65 @@ export async function mlRoutes(fastify: FastifyInstance) {
       ORDER BY m.created_at DESC
     `, [id]);
     return reply.send(result.rows);
+  });
+
+  // Serve or generate a face thumbnail for a person
+  fastify.get<{ Params: { id: string } }>('/api/faces/:id/thumbnail', { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params;
+    const facesDir = path.join(CACHE_ROOT, 'faces');
+    await fs.promises.mkdir(facesDir, { recursive: true });
+    const cachedPath = path.join(facesDir, `${id}.webp`);
+
+    if (fs.existsSync(cachedPath)) {
+      reply.header('Content-Type', 'image/webp');
+      reply.header('Cache-Control', 'public, max-age=31536000');
+      return reply.send(fs.createReadStream(cachedPath));
+    }
+
+    // Look up the person's representative face
+    const repResult = await query(`
+      SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name
+      FROM face_embeddings fe
+      JOIN media_files m ON m.id = fe.media_id
+      WHERE fe.person_id = $1
+      ORDER BY fe.created_at DESC
+      LIMIT 1
+    `, [id]);
+
+    if (repResult.rows.length === 0) {
+      return reply.status(404).send({ error: 'No face found for this person' });
+    }
+
+    const face = repResult.rows[0];
+    const fullPath = path.join(MEDIA_ROOT, face.folder_path, face.file_name);
+
+    if (!fs.existsSync(fullPath)) {
+      return reply.status(404).send({ error: 'Source image not found' });
+    }
+
+    try {
+      const crop = parseBoundingBox(face.bounding_box);
+      const meta = await sharp(fullPath).metadata();
+      const imgW = meta.width || 1;
+      const imgH = meta.height || 1;
+      crop.left = Math.min(crop.left, imgW - 1);
+      crop.top = Math.min(crop.top, imgH - 1);
+      crop.width = Math.min(crop.width, imgW - crop.left);
+      crop.height = Math.min(crop.height, imgH - crop.top);
+
+      await sharp(fullPath)
+        .extract(crop)
+        .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
+        .webp({ quality: 75 })
+        .toFile(cachedPath);
+
+      reply.header('Content-Type', 'image/webp');
+      reply.header('Cache-Control', 'public, max-age=31536000');
+      return reply.send(fs.createReadStream(cachedPath));
+    } catch (err: any) {
+      console.error(`[Face Thumbnail] Failed to generate for ${id}:`, err.message);
+      return reply.status(500).send({ error: 'Failed to generate face thumbnail' });
+    }
   });
 
   // Get all faces in a specific media file

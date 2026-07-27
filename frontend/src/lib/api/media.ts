@@ -103,3 +103,7 @@ export function getStreamUrl(id: string, token?: string): string {
 export function getFolderZipUrl(folderPath: string, token?: string): string {
   return `${API_BASE}/api/zip/${encodeURIComponent(folderPath || '')}${token ? `?shareToken=${token}` : ''}`;
 }
+
+export function getFaceThumbnailUrl(personId: string): string {
+  return `${API_BASE}/api/faces/${personId}/thumbnail`;
+}

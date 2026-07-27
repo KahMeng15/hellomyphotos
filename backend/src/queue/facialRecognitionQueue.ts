@@ -1,6 +1,8 @@
 import { Queue, Worker } from 'bullmq';
 import { redis } from '../config/redis';
 import { ClusterService } from '../modules/ml/cluster.service';
+import { faceThumbnailQueue } from './faceThumbnailQueue';
+import { getExecutionMode } from './mode';
 
 export const facialRecognitionQueue = new Queue('facial-recognition', { connection: redis });
 
@@ -11,6 +13,12 @@ if (process.env.IS_WORKER === 'true') {
   console.log(`[Facial Recognition Worker] Running recognition/clustering for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   await ClusterService.reclusterFaces();
+
+  // Sequential handoff to face thumbnail generation
+  const mode = await getExecutionMode();
+  if (mode === 'sequential') {
+    await faceThumbnailQueue.add('generate-face-thumbnails', { mediaId });
+  }
 }, {
   connection: redis,
   concurrency: parseInt(process.env.FACIAL_RECOGNITION_CONCURRENCY || '1', 10)

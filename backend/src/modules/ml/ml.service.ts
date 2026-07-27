@@ -1,11 +1,41 @@
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { query } from '../../config/db';
 import { SmartSearchService } from './smartSearch.service';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 const ML_URL = process.env.IMMICH_ML_URL || 'http://localhost:3003';
+
+const FACE_THUMB_SIZE = 300;
+const FACE_PADDING = 0.5;
+
+function parseBoundingBox(box: any): { left: number; top: number; width: number; height: number } {
+  if (box && box.x1 !== undefined && box.y1 !== undefined && box.x2 !== undefined && box.y2 !== undefined) {
+    const w = box.x2 - box.x1;
+    const h = box.y2 - box.y1;
+    const padW = w * FACE_PADDING;
+    const padH = h * FACE_PADDING;
+    return {
+      left: Math.max(0, Math.floor(box.x1 - padW)),
+      top: Math.max(0, Math.floor(box.y1 - padH)),
+      width: Math.ceil(w + padW * 2),
+      height: Math.ceil(h + padH * 2),
+    };
+  }
+  if (box && box.x !== undefined && box.y !== undefined && box.w !== undefined && box.h !== undefined) {
+    const padW = box.w * FACE_PADDING;
+    const padH = box.h * FACE_PADDING;
+    return {
+      left: Math.max(0, Math.floor(box.x - padW)),
+      top: Math.max(0, Math.floor(box.y - padH)),
+      width: Math.ceil(box.w + padW * 2),
+      height: Math.ceil(box.h + padH * 2),
+    };
+  }
+  return { left: 0, top: 0, width: 100, height: 100 };
+}
 
 export class MLService {
   static async detectFaces(mediaId: string, fullPath?: string) {
@@ -95,6 +125,45 @@ export class MLService {
 
     } catch (err: any) {
       console.error(`[ML] Failed to process faces for ${mediaId}:`, err.message);
+    }
+  }
+
+  static async generateFaceThumbnails(mediaId: string) {
+    try {
+      const faces = await query(`
+        SELECT fe.id, fe.person_id, fe.bounding_box, m.folder_path, m.file_name
+        FROM face_embeddings fe
+        JOIN media_files m ON m.id = fe.media_id
+        WHERE fe.media_id = $1 AND fe.person_id IS NOT NULL
+      `, [mediaId]);
+
+      const mediaRoot = process.env.MEDIA_ROOT || '/app/media';
+
+      for (const face of faces.rows) {
+        const fullPath = path.join(mediaRoot, face.folder_path, face.file_name);
+        if (!fs.existsSync(fullPath)) continue;
+
+        const crop = parseBoundingBox(face.bounding_box);
+        const outDir = path.join(CACHE_ROOT, 'faces');
+        await fs.promises.mkdir(outDir, { recursive: true });
+        const outPath = path.join(outDir, `${face.person_id}.webp`);
+
+        const meta = await sharp(fullPath).metadata();
+        const imgW = meta.width || 1;
+        const imgH = meta.height || 1;
+        crop.left = Math.min(crop.left, imgW - 1);
+        crop.top = Math.min(crop.top, imgH - 1);
+        crop.width = Math.min(crop.width, imgW - crop.left);
+        crop.height = Math.min(crop.height, imgH - crop.top);
+
+        await sharp(fullPath)
+          .extract(crop)
+          .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
+          .webp({ quality: 75 })
+          .toFile(outPath);
+      }
+    } catch (err: any) {
+      console.error(`[ML] Failed to generate face thumbnails for ${mediaId}:`, err.message);
     }
   }
 

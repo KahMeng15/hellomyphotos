@@ -1,6 +1,6 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
-  import { getThumbnailUrl } from '$lib/api/media';
+  import { getFaceThumbnailUrl } from '$lib/api/media';
   import type { PageData } from './$types';
   
   let { data }: { data: PageData } = $props();
@@ -17,10 +17,9 @@
       <a href="/people/{face.person_id}" class="grid-item">
         <BlurhashImage 
           hash={face.blurhash || ''}
-          src={getThumbnailUrl(face.media_id)} 
+          src={getFaceThumbnailUrl(face.person_id)} 
           alt={face.name || 'Unknown Person'}
           objectFit="cover"
-          faceBox={face.bounding_box}
           square={true}
           priority={i < 8}
         />

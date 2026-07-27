@@ -6,6 +6,7 @@ import { videoQueue, videoWorker } from './videoQueue';
 import { smartSearchQueue, smartSearchWorker } from './smartSearchQueue';
 import { faceDetectionQueue, faceDetectionWorker } from './faceDetectionQueue';
 import { facialRecognitionQueue, facialRecognitionWorker } from './facialRecognitionQueue';
+import { faceThumbnailQueue, faceThumbnailWorker } from './faceThumbnailQueue';
 import { getExecutionMode, setExecutionMode, type QueueExecutionMode } from './mode';
 
 import { dispatchMediaFile, MediaJobData } from './dispatch';
@@ -18,6 +19,7 @@ export {
   smartSearchQueue, smartSearchWorker,
   faceDetectionQueue, faceDetectionWorker,
   facialRecognitionQueue, facialRecognitionWorker,
+  faceThumbnailQueue, faceThumbnailWorker,
   getExecutionMode, setExecutionMode, type QueueExecutionMode,
   dispatchMediaFile, type MediaJobData
 };
@@ -30,5 +32,6 @@ export const queues: Record<string, Queue> = {
   'smart-search': smartSearchQueue,
   'face-detection': faceDetectionQueue,
   'facial-recognition': facialRecognitionQueue,
+  'face-thumbnail': faceThumbnailQueue,
 };
 
