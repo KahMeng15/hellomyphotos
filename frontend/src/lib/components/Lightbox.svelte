@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
-  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces } from '$lib/api/media';
+  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, getFaceThumbnailUrl, fetchMediaFaces } from '$lib/api/media';
   import { createShare } from '$lib/api/shares';
   import BlurhashImage from './BlurhashImage.svelte';
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check } from '@lucide/svelte';
@@ -54,7 +54,7 @@
   
   // --- Info / faces ---
 
-  let faces: {person_id: string, bounding_box: any}[] = $state([]);
+  let faces: {person_id: string, bounding_box: any, name?: string}[] = $state([]);
   let loadingFaces = $state(false);
 
   function toggleInfo() {
@@ -194,6 +194,7 @@
             <p><strong>Size:</strong> {(media.size_bytes / 1024 / 1024).toFixed(2)} MB</p>
             <p><strong>Date Taken:</strong> {media.exif_json?.dateTimeOriginal ? new Date(media.exif_json.dateTimeOriginal).toLocaleString() : 'Unknown'}</p>
           </div>
+          {#if media.exif_json?.make || media.exif_json?.model || media.exif_json?.lensModel || media.exif_json?.iso || media.exif_json?.exposureTime || media.exif_json?.fNumber}
           <div class="info-section">
             <h4>CAMERA</h4>
             <p><strong>Device:</strong> {media.exif_json?.make || ''} {media.exif_json?.model || 'Unknown'}</p>
@@ -208,6 +209,7 @@
               {/if}
             </p>
           </div>
+          {/if}
           <div class="info-section">
             <h4>PEOPLE</h4>
             {#if loadingFaces}
@@ -215,14 +217,16 @@
             {:else if faces.length > 0}
               <div class="face-list">
                 {#each faces as face}
-                    <a href={`/people/${face.person_id}`} class="face-avatar" onclick={(e) => e.stopPropagation()}>
-                    <BlurhashImage 
-                      hash={media.blurhash || ''} 
-                      src={getThumbnailUrl(media.id)} 
-                      objectFit="cover" 
-                      faceBox={face.bounding_box} 
-                      square={true} 
-                    />
+                  <a href={`/people/${face.person_id}`} class="face-item" onclick={(e) => e.stopPropagation()}>
+                    <span class="face-avatar">
+                      <BlurhashImage 
+                        hash={''}
+                        src={getFaceThumbnailUrl(face.person_id)} 
+                        objectFit="cover" 
+                        square={true} 
+                      />
+                    </span>
+                    <span class="face-item-name">{face.name || 'Add name...'}</span>
                   </a>
                 {/each}
               </div>
@@ -413,7 +417,17 @@
   .face-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 12px;
+  }
+
+  .face-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-decoration: none;
+    color: inherit;
+    width: 64px;
   }
 
   .face-avatar {
@@ -423,11 +437,21 @@
     overflow: hidden;
     display: block;
     border: 2px solid transparent;
-    transition: border-color 0.2s;
+    transition: border-color 0.15s;
   }
 
-  .face-avatar:hover {
-    border-color: var(--text-color);
+  .face-item:hover .face-avatar {
+    border-color: var(--accent-color);
+  }
+
+  .face-item-name {
+    font-size: 0.75rem;
+    color: #e2e8f0;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
   }
 
   .content {

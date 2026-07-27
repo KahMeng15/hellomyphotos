@@ -190,9 +190,10 @@ export async function mlRoutes(fastify: FastifyInstance) {
     if (!(await verifyMediaAccess(request, reply, id))) return;
 
     const result = await query(`
-      SELECT person_id, bounding_box
-      FROM face_embeddings
-      WHERE media_id = $1
+      SELECT DISTINCT ON (fe.person_id) fe.person_id, fe.bounding_box, p.name
+      FROM face_embeddings fe
+      LEFT JOIN people p ON p.id = fe.person_id
+      WHERE fe.media_id = $1
     `, [id]);
     
     return reply.send(result.rows);
