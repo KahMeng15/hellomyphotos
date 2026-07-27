@@ -264,26 +264,65 @@
   }));
   
   let selectedMediaIndex: number | null = $state(null);
-  
+
+  function encodePath(p: string) {
+    return p.split('/').map(s => encodeURIComponent(s)).join('/');
+  }
+
+  function folderUrl() {
+    const fp = data.folderPath || '';
+    return fp ? `/folder/${encodePath(fp)}` : '/folder';
+  }
+
+  function mediaUrl(index: number) {
+    const file = sortedFiles[index];
+    if (!file) return folderUrl();
+    return `${folderUrl()}/${encodeURIComponent(file.file_name)}`;
+  }
+
+  function syncUrl(index: number | null) {
+    const url = index !== null ? mediaUrl(index) : folderUrl();
+    history.replaceState(history.state, '', url);
+  }
+
   function openLightbox(index: number) {
     selectedMediaIndex = index;
+    syncUrl(index);
   }
   
   function closeLightbox() {
     selectedMediaIndex = null;
+    syncUrl(null);
   }
   
   function nextMedia() {
     if (selectedMediaIndex !== null && selectedMediaIndex < sortedFiles.length - 1) {
-      selectedMediaIndex++;
+      const next = selectedMediaIndex + 1;
+      selectedMediaIndex = next;
+      syncUrl(next);
     }
   }
 
   function prevMedia() {
     if (selectedMediaIndex !== null && selectedMediaIndex > 0) {
-      selectedMediaIndex--;
+      const prev = selectedMediaIndex - 1;
+      selectedMediaIndex = prev;
+      syncUrl(prev);
     }
   }
+
+  // Auto-open lightbox once from URL
+  let autoOpened = false;
+  $effect(() => {
+    if (autoOpened) return;
+    if (data.selectedFile && sortedFiles.length > 0) {
+      const idx = sortedFiles.findIndex(f => f.file_name === data.selectedFile);
+      if (idx >= 0) {
+        selectedMediaIndex = idx;
+        autoOpened = true;
+      }
+    }
+  });
 
   async function handleSetCover(mediaId: string) {
     localCoverOverride = mediaId;
