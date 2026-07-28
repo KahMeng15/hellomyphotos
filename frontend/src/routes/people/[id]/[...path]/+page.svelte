@@ -3,9 +3,10 @@
   import Lightbox from '$lib/components/Lightbox.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import { getThumbnailUrl, getPreviewUrl, API_BASE } from '$lib/api/media';
+  import { createPersonShare, getActivePersonShares, revokeShare, type ShareData } from '$lib/api/shares';
   import type { PageData } from './$types';
   import { onMount, onDestroy } from 'svelte';
-  import { ArrowDownUp, ChevronLeft, LayoutGrid } from '@lucide/svelte';
+  import { ArrowDownUp, ChevronLeft, LayoutGrid, Share2, Check, Copy, Trash2, Clock, User, Folder } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
 
   let { data }: { data: PageData } = $props();
@@ -40,6 +41,67 @@
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
+  let showShareModal = $state(false);
+  let shareAllowDownloadImages = $state(true);
+  let shareAllowDownloadFolder = $state(true);
+  let shareExpiryDays = $state(7);
+  let activeShares: ShareData[] = $state([]);
+  let isCreatingShare = $state(false);
+  let newlyCreatedShareToken = $state<string | null>(null);
+  let copiedToken = $state<string | null>(null);
+
+  $effect(() => {
+    if (showShareModal) {
+      loadActiveShares();
+      newlyCreatedShareToken = null;
+    }
+  });
+
+  async function loadActiveShares() {
+    try {
+      activeShares = await getActivePersonShares(data.id);
+    } catch (e) { console.error(e); }
+  }
+
+  async function handleCreateShare() {
+    try {
+      isCreatingShare = true;
+      let expiresAt: string | null = null;
+      if (shareExpiryDays > 0) {
+        const date = new Date();
+        date.setDate(date.getDate() + shareExpiryDays);
+        expiresAt = date.toISOString();
+      }
+      const token = await createPersonShare(data.id, shareAllowDownloadImages, shareAllowDownloadFolder, false, expiresAt);
+      newlyCreatedShareToken = token;
+      await loadActiveShares();
+    } catch (e) {
+      console.error(e);
+      alert('Failed to create share');
+    } finally {
+      isCreatingShare = false;
+    }
+  }
+
+  async function handleRevokeShare(token: string) {
+    if (!confirm('Are you sure you want to revoke this share link?')) return;
+    try {
+      await revokeShare(token);
+      await loadActiveShares();
+    } catch (e) {
+      console.error(e);
+      alert('Failed to revoke share');
+    }
+  }
+
+  async function copyShareLink(token: string) {
+    const url = `${window.location.origin}/share/${token}`;
+    await navigator.clipboard.writeText(url);
+    copiedToken = token;
+    setTimeout(() => {
+      if (copiedToken === token) copiedToken = null;
+    }, 2000);
+  }
 
   function getSortDate(file: typeof data.files[number]): number {
     const exifDate = file.exif_json?.dateTimeOriginal;
@@ -292,6 +354,10 @@
             </div>
           {/if}
         </div>
+
+        <button class="icon-btn" onclick={() => showShareModal = true} title="Share">
+          <Share2 size={18} />
+        </button>
       </div>
 
       <span class="count">{data.files.length} {data.files.length === 1 ? 'item' : 'items'}</span>
@@ -324,6 +390,109 @@
     onsetcover={handleSetCover}
   />
 {/if}
+
+<Modal bind:show={showShareModal} id="person-share" title="Share Person">
+  <p style="color: #888; margin-bottom: 16px; font-size: 0.875rem;">
+    Creates a share link that only shows photos of <strong>{data.personName || 'this person'}</strong>.
+  </p>
+
+  {#if newlyCreatedShareToken}
+    <div style="background: rgba(0,255,100,0.1); border: 1px solid rgba(0,255,100,0.3); padding: 16px; border-radius: 8px; margin-bottom: 24px;">
+      <p style="color: #4ade80; margin-bottom: 8px; font-weight: 500;">Share link created successfully!</p>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" readonly value="{window.location.origin}/share/{newlyCreatedShareToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
+        <button class="icon-btn" style="display: flex; align-items: center; justify-content: center;" onclick={() => copyShareLink(newlyCreatedShareToken!)}>
+          {#if copiedToken === newlyCreatedShareToken}
+            <Check size={18} color="#10b981" />
+          {:else}
+            <Copy size={18} color="#a1a1aa" />
+          {/if}
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  <div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--glass-border);">
+    <h4 style="margin-bottom: 16px; font-weight: 500;">Create New Share Link</h4>
+    
+    <div class="form-group" style="margin-bottom: 16px;">
+      <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Expiration</label>
+      <select bind:value={shareExpiryDays} style="width: 100%; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;">
+        <option value={1}>1 Day</option>
+        <option value={7}>7 Days</option>
+        <option value={30}>30 Days</option>
+        <option value={0}>Never Expires</option>
+      </select>
+    </div>
+    
+    <div class="form-group" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
+      <input type="checkbox" id="personShareAllowDlImg" bind:checked={shareAllowDownloadImages} style="width: 18px; height: 18px;" />
+      <label for="personShareAllowDlImg" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading individual images</label>
+    </div>
+
+    <div class="form-group" style="margin-bottom: 24px; display: flex; align-items: center; gap: 12px;">
+      <input type="checkbox" id="personShareAllowDlFolder" bind:checked={shareAllowDownloadFolder} style="width: 18px; height: 18px;" />
+      <label for="personShareAllowDlFolder" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading the entire folder (ZIP)</label>
+    </div>
+    
+    <button class="btn" style="width: 100%; background: var(--text-color); color: var(--bg-color);" onclick={handleCreateShare} disabled={isCreatingShare}>
+      {isCreatingShare ? 'Generating Link...' : 'Generate Share Link'}
+    </button>
+  </div>
+
+  <div>
+    <h4 style="margin-bottom: 16px; font-weight: 500;">Active Share Links</h4>
+    {#if activeShares.length === 0}
+      <p style="color: #666; font-size: 0.875rem;">No active links for this person's folder.</p>
+    {:else}
+      <div style="display: flex; flex-direction: column; gap: 12px; max-height: 200px; overflow-y: auto;">
+        {#each activeShares as share}
+          <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-family: monospace; color: #e4e4e7; margin-bottom: 4px;">...{share.share_token.substring(0, 8)}</div>
+              <div style="font-size: 0.75rem; color: #888; display: flex; gap: 12px; flex-wrap: wrap;">
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <Clock size={12} />
+                  {share.expires_at ? new Date(share.expires_at).toLocaleDateString() : 'Never'}
+                </span>
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <User size={12} />
+                  {share.created_by_name || 'Unknown'}
+                </span>
+                <span>
+                  {#if share.allow_download_images && share.allow_download_folder}
+                    Full DLs
+                  {:else if share.allow_download_images}
+                    Images DL Only
+                  {:else if share.allow_download_folder}
+                    Folder DL Only
+                  {:else}
+                    View Only
+                  {/if}
+                </span>
+              </div>
+
+            </div>
+            <div style="display: flex; gap: 8px;">
+              {#if share.can_manage !== false}
+                <button class="icon-btn" title="Copy Link" onclick={() => copyShareLink(share.share_token)}>
+                  {#if copiedToken === share.share_token}
+                    <Check size={16} color="#10b981" />
+                  {:else}
+                    <Copy size={16} color="#a1a1aa" />
+                  {/if}
+                </button>
+                <button class="icon-btn" title="Revoke Link" onclick={() => handleRevokeShare(share.share_token)}>
+                  <Trash2 size={16} color="#a1a1aa" />
+                </button>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
+</Modal>
 
 <Modal bind:show={showAlertModal} id="person-alert" title={alertModalTitle}>
   <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">{alertModalMessage}</p>

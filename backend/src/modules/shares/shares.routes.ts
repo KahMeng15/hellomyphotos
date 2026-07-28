@@ -10,7 +10,7 @@ import { requireAuth, hasFolderAccess } from '../../utils/auth';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
-    const { folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt } = request.body as any;
+    const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt } = request.body as any;
     
     // Check permissions
     if (request.user?.role === 'viewer') {
@@ -32,9 +32,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const shareToken = crypto.randomBytes(16).toString('hex');
     
     await query(`
-      INSERT INTO shared_folders (folder_path, media_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    `, [folderPath || null, mediaId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null, request.user!.id]);
+      INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null, request.user!.id]);
     
     return reply.send({ shareToken });
   });
@@ -60,6 +60,22 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       if (subPath) return reply.status(404).send({ error: 'Not a folder share' });
       const fileRes = await query(`SELECT * FROM media_files WHERE id = $1`, [share.media_id]);
       return reply.send({ share, files: fileRes.rows, folderCoverId: null });
+    }
+
+    // Person-scoped share: return all media for this person
+    if (share.person_id) {
+      if (subPath) return reply.status(404).send({ error: 'Not a folder share' });
+      const fileRes = await query(`
+        SELECT m.*, f.bounding_box, fs.cover_media_id AS folder_cover_id
+        FROM media_files m
+        JOIN face_embeddings f ON m.id = f.media_id
+        LEFT JOIN folder_settings fs ON fs.folder_path = m.folder_path
+        WHERE f.person_id = $1
+        ORDER BY m.created_at DESC
+      `, [share.person_id]);
+      // Get person info
+      const personRes = await query(`SELECT id, name FROM people WHERE id = $1`, [share.person_id]);
+      return reply.send({ share, files: fileRes.rows, person: personRes.rows[0] || null });
     }
     
     let targetPath = share.folder_path || '';
@@ -207,6 +223,30 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       };
     });
     
+    return reply.send({ shares });
+  });
+
+  // List active shares for a person
+  fastify.get<{ Params: { id: string } }>('/api/shares/person/:id', { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params;
+    const isAdmin = request.user?.role === 'admin' || request.user?.role === 'super_admin';
+
+    const result = await query(`
+      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.expires_at, s.created_at,
+             u.name as created_by_name, s.created_by, s.person_id
+      FROM shared_folders s
+      LEFT JOIN users u ON s.created_by = u.id
+      WHERE s.person_id = $1
+      ORDER BY s.created_at DESC
+    `, [id]);
+
+    const shares = result.rows.map(row => {
+      if (!isAdmin && row.created_by !== request.user!.id) {
+        return { ...row, share_token: row.share_token.substring(0, 8) + '***', can_manage: false };
+      }
+      return { ...row, can_manage: true };
+    });
+
     return reply.send({ shares });
   });
 

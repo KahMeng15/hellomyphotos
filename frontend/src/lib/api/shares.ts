@@ -24,9 +24,27 @@ export async function createShare(folderPath: string, mediaId: string | null, al
   return data.shareToken;
 }
 
+export async function createPersonShare(personId: string, allowDownloadImages: boolean, allowDownloadFolder: boolean, watermarkEnabled: boolean, expiresAt: string | null): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/shares`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt, folderPath: null, mediaId: null })
+  });
+  if (!res.ok) throw new Error('Failed to create person share');
+  const data = await res.json();
+  return data.shareToken;
+}
+
 export async function getActiveShares(folderPath: string): Promise<ShareData[]> {
   const res = await fetch(`${API_BASE}/api/shares/folder/${encodeURIComponent(folderPath)}`);
   if (!res.ok) throw new Error('Failed to fetch active shares');
+  const data = await res.json();
+  return data.shares;
+}
+
+export async function getActivePersonShares(personId: string): Promise<ShareData[]> {
+  const res = await fetch(`${API_BASE}/api/shares/person/${personId}`);
+  if (!res.ok) throw new Error('Failed to fetch active person shares');
   const data = await res.json();
   return data.shares;
 }

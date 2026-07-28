@@ -44,6 +44,7 @@ export const ensureSchema = async (): Promise<void> => {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
           );
           ALTER TABLE people ADD COLUMN IF NOT EXISTS cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL;
+          ALTER TABLE shared_folders ADD COLUMN IF NOT EXISTS person_id UUID REFERENCES people(id) ON DELETE SET NULL;
         `);
       } catch (err: any) {
         console.warn('[DB] ensureSchema notice:', err.message);

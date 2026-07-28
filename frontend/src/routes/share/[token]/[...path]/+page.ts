@@ -37,7 +37,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
       baseFolderPath: data.baseFolderPath || '',
       folderPath,
       selectedFile,
-      token
+      token,
+      person: data.person || null
     };
   } catch (error) {
     return { error: 'Invalid or expired share link', files: [] };
