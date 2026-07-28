@@ -21,15 +21,19 @@ export const load: PageLoad = async ({ params, fetch }) => {
 
     let coverMediaId: string | null = null;
     let coverBoundingBox: any = null;
+    let coverImgWidth: number | null = null;
+    let coverImgHeight: number | null = null;
     if (coverRes.ok) {
       const coverData = await coverRes.json();
       coverMediaId = coverData.mediaId;
       coverBoundingBox = coverData.boundingBox || null;
+      coverImgWidth = coverData.imgWidth || null;
+      coverImgHeight = coverData.imgHeight || null;
     }
 
-    return { id, files, personName, coverMediaId, coverBoundingBox };
+    return { id, files, personName, coverMediaId, coverBoundingBox, coverImgWidth, coverImgHeight };
   } catch (error) {
     console.error(error);
-    return { id, files: [], personName: '', coverMediaId: null, coverBoundingBox: null };
+    return { id, files: [], personName: '', coverMediaId: null, coverBoundingBox: null, coverImgWidth: null, coverImgHeight: null };
   }
 };

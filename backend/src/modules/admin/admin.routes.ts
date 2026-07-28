@@ -3,7 +3,7 @@ import { requireAuth } from '../../utils/auth';
 import { FastifyInstance } from 'fastify';
 import { redis } from '../../config/redis';
 import { ScannerService } from '../scanner/scanner.service';
-import { queues } from '../../queue';
+import { queues as allQueues } from '../../queue';
 import { mlQueue } from '../../queue/mlQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
 import { faceDetectionQueue } from '../../queue/faceDetectionQueue';
@@ -250,7 +250,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
     fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
 
-    for (const q of Object.values(queues)) {
+    for (const q of Object.values(allQueues)) {
       await q.clean(0, 10000, 'completed');
       await q.clean(0, 10000, 'failed');
     }
@@ -263,8 +263,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
     await query(`TRUNCATE TABLE smart_search_embeddings`);
     await query(`UPDATE media_files SET clip_embedding = NULL`);
 
-    await queues['smart-search'].clean(0, 10000, 'completed');
-    await queues['smart-search'].clean(0, 10000, 'failed');
+    await allQueues['smart-search'].clean(0, 10000, 'completed');
+    await allQueues['smart-search'].clean(0, 10000, 'failed');
 
     const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' OR mime_type LIKE 'video/%'`);
     for (const row of result.rows) {
@@ -283,10 +283,10 @@ export async function adminRoutes(fastify: FastifyInstance) {
     fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
     fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
 
-    await queues['metadata'].clean(0, 10000, 'completed');
-    await queues['metadata'].clean(0, 10000, 'failed');
-    await queues['thumbnail'].clean(0, 10000, 'completed');
-    await queues['thumbnail'].clean(0, 10000, 'failed');
+    await allQueues['metadata'].clean(0, 10000, 'completed');
+    await allQueues['metadata'].clean(0, 10000, 'failed');
+    await allQueues['thumbnail'].clean(0, 10000, 'completed');
+    await allQueues['thumbnail'].clean(0, 10000, 'failed');
 
     const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
     for (const row of result.rows) {
@@ -303,12 +303,12 @@ export async function adminRoutes(fastify: FastifyInstance) {
     await query(`TRUNCATE TABLE face_embeddings CASCADE`);
     await query(`DELETE FROM people`);
 
-    await queues['face-detection'].clean(0, 10000, 'completed');
-    await queues['face-detection'].clean(0, 10000, 'failed');
-    await queues['facial-recognition'].clean(0, 10000, 'completed');
-    await queues['facial-recognition'].clean(0, 10000, 'failed');
-    await queues['face-thumbnail'].clean(0, 10000, 'completed');
-    await queues['face-thumbnail'].clean(0, 10000, 'failed');
+    await allQueues['face-detection'].clean(0, 10000, 'completed');
+    await allQueues['face-detection'].clean(0, 10000, 'failed');
+    await allQueues['facial-recognition'].clean(0, 10000, 'completed');
+    await allQueues['facial-recognition'].clean(0, 10000, 'failed');
+    await allQueues['face-thumbnail'].clean(0, 10000, 'completed');
+    await allQueues['face-thumbnail'].clean(0, 10000, 'failed');
 
     const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
     for (const row of result.rows) {

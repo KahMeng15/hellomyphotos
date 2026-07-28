@@ -134,7 +134,9 @@ export async function mlRoutes(fastify: FastifyInstance) {
         WHERE media_id = m.id AND person_id = $1
         ORDER BY created_at DESC
         LIMIT 1
-      ) AS bounding_box
+      ) AS bounding_box,
+      (m.exif_json->>'width')::int AS img_width,
+      (m.exif_json->>'height')::int AS img_height
       FROM media_files m
       WHERE EXISTS (
         SELECT 1 FROM face_embeddings
@@ -149,7 +151,8 @@ export async function mlRoutes(fastify: FastifyInstance) {
     if (result.rows.length === 0) {
       return reply.status(404).send({ error: 'No media found for this person' });
     }
-    return reply.send({ mediaId: result.rows[0].id, boundingBox: result.rows[0].bounding_box });
+    const row = result.rows[0];
+    return reply.send({ mediaId: row.id, boundingBox: row.bounding_box, imgWidth: row.img_width, imgHeight: row.img_height });
   });
 
   // Serve or generate a face thumbnail for a person
