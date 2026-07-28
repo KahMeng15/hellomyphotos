@@ -232,24 +232,19 @@
   let showShareModal = $state(false);
   let showSettingsModal = $state(false);
 
-  let sortedFiles = $derived([...data.files].sort((a, b) => {
-    function parseExifDate(dateStr: string | undefined, fallback: number): number {
-      if (!dateStr) return fallback;
-      const normalized = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+  function getSortDate(file: typeof data.files[number]): number {
+    const exifDate = file.exif_json?.dateTimeOriginal;
+    if (exifDate) {
+      const normalized = exifDate.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
       const time = new Date(normalized).getTime();
-      return isNaN(time) ? fallback : time;
+      if (!isNaN(time)) return time;
     }
+    return new Date(file.created_at).getTime() || 0;
+  }
 
-    if (sortMode === 'newest') {
-      const dateA = parseExifDate(a.exif_json?.dateTimeOriginal, 0);
-      const dateB = parseExifDate(b.exif_json?.dateTimeOriginal, 0);
-      return dateB - dateA;
-    }
-    if (sortMode === 'oldest') {
-      const dateA = parseExifDate(a.exif_json?.dateTimeOriginal, Number.MAX_SAFE_INTEGER);
-      const dateB = parseExifDate(b.exif_json?.dateTimeOriginal, Number.MAX_SAFE_INTEGER);
-      return dateA - dateB;
-    }
+  let sortedFiles = $derived([...data.files].sort((a, b) => {
+    if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);
+    if (sortMode === 'oldest') return getSortDate(a) - getSortDate(b);
     if (sortMode === 'a-z') return a.file_name.localeCompare(b.file_name);
     if (sortMode === 'z-a') return b.file_name.localeCompare(a.file_name);
     return 0;
