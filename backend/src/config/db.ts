@@ -36,6 +36,14 @@ export const ensureSchema = async (): Promise<void> => {
           );
           CREATE INDEX IF NOT EXISTS idx_face_embeddings_person ON face_embeddings(person_id);
           CREATE INDEX IF NOT EXISTS idx_face_embeddings_embedding ON face_embeddings USING hnsw (embedding vector_cosine_ops);
+
+          CREATE TABLE IF NOT EXISTS people (
+            id UUID PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+          ALTER TABLE people ADD COLUMN IF NOT EXISTS cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL;
         `);
       } catch (err: any) {
         console.warn('[DB] ensureSchema notice:', err.message);

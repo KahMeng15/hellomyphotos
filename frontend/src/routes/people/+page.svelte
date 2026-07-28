@@ -95,7 +95,7 @@
       <a href="/people/{face.person_id}" class="grid-item">
         <BlurhashImage 
           hash={face.blurhash || ''}
-          src={getFaceThumbnailUrl(face.person_id)} 
+          src={getFaceThumbnailUrl(face.person_id) + (face.cover_media_id ? '?cv=' + face.cover_media_id.substring(0,8) : '')} 
           alt={face.name || 'unnamed'}
           objectFit="cover"
           square={true}

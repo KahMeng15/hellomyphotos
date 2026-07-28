@@ -71,7 +71,8 @@ export async function mlRoutes(fastify: FastifyInstance) {
         m.blurhash,
         m.file_name,
         m.folder_path,
-        p.name
+        p.name,
+        p.cover_media_id
       FROM person_clusters pc
       JOIN rep_faces rf ON pc.person_id = rf.person_id
       JOIN media_files m ON m.id = rf.media_id
@@ -125,10 +126,31 @@ export async function mlRoutes(fastify: FastifyInstance) {
     return reply.send(result.rows);
   });
 
-  // Get the best cover image for a person (photo with fewest other faces)
+  // Set or get the cover image for a person
   fastify.get<{ Params: { id: string } }>('/api/faces/:id/cover', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
 
+    // Check if person has an explicitly set cover
+    const explicit = await query(`SELECT cover_media_id FROM people WHERE id = $1 AND cover_media_id IS NOT NULL`, [id]);
+    if (explicit.rows.length > 0 && explicit.rows[0].cover_media_id) {
+      const mediaResult = await query(`
+        SELECT m.id, (
+          SELECT bounding_box FROM face_embeddings
+          WHERE media_id = m.id AND person_id = $1
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) AS bounding_box,
+        (m.exif_json->>'width')::int AS img_width,
+        (m.exif_json->>'height')::int AS img_height
+        FROM media_files m WHERE m.id = $2
+      `, [id, explicit.rows[0].cover_media_id]);
+      if (mediaResult.rows.length > 0) {
+        const row = mediaResult.rows[0];
+        return reply.send({ mediaId: row.id, boundingBox: row.bounding_box, imgWidth: row.img_width, imgHeight: row.img_height });
+      }
+    }
+
+    // Fall back to dynamic selection (photo with fewest other faces)
     const result = await query(`
       SELECT m.id, (
         SELECT bounding_box FROM face_embeddings
@@ -156,6 +178,26 @@ export async function mlRoutes(fastify: FastifyInstance) {
     return reply.send({ mediaId: row.id, boundingBox: row.bounding_box, imgWidth: row.img_width, imgHeight: row.img_height });
   });
 
+  // Explicitly set the cover image for a person
+  fastify.post<{ Params: { id: string }, Body: { mediaId: string } }>('/api/faces/:id/cover', { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params;
+    const { mediaId } = request.body;
+
+    await query(`
+      INSERT INTO people (id, name, cover_media_id)
+      VALUES ($1, '', $2)
+      ON CONFLICT (id) DO UPDATE SET cover_media_id = EXCLUDED.cover_media_id
+    `, [id, mediaId]);
+
+    // Delete cached face thumbnail so it regenerates from the new cover photo
+    const cachedPath = path.join(CACHE_ROOT, 'faces', `${id}.webp`);
+    if (fs.existsSync(cachedPath)) {
+      await fs.promises.unlink(cachedPath);
+    }
+
+    return reply.send({ success: true, mediaId });
+  });
+
   // Serve or generate a face thumbnail for a person
   fastify.get<{ Params: { id: string } }>('/api/faces/:id/thumbnail', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
@@ -164,12 +206,59 @@ export async function mlRoutes(fastify: FastifyInstance) {
     const cachedPath = path.join(facesDir, `${id}.webp`);
 
     if (fs.existsSync(cachedPath)) {
+      const mtime = fs.statSync(cachedPath).mtimeMs;
+      const etag = `"${id}-${Math.floor(mtime)}"`;
+      reply.header('ETag', etag);
+      if (request.headers['if-none-match'] === etag) {
+        return reply.status(304).send();
+      }
       reply.header('Content-Type', 'image/webp');
-      reply.header('Cache-Control', 'public, max-age=31536000');
+      reply.header('Cache-Control', 'no-cache, must-revalidate');
       return reply.send(fs.createReadStream(cachedPath));
     }
 
-    // Look up the person's representative face (best solo photo)
+    // Check for explicitly set cover first, then fall back to best solo photo
+    const coverResult = await query(`SELECT cover_media_id FROM people WHERE id = $1 AND cover_media_id IS NOT NULL`, [id]);
+    if (coverResult.rows.length > 0 && coverResult.rows[0].cover_media_id) {
+      const mediaResult = await query(`
+        SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name
+        FROM face_embeddings fe
+        JOIN media_files m ON m.id = fe.media_id
+        WHERE fe.person_id = $1 AND fe.media_id = $2
+        ORDER BY fe.created_at DESC
+        LIMIT 1
+      `, [id, coverResult.rows[0].cover_media_id]);
+      if (mediaResult.rows.length > 0) {
+        const face = mediaResult.rows[0];
+        const fullPath = path.join(MEDIA_ROOT, face.folder_path, face.file_name);
+        if (fs.existsSync(fullPath)) {
+          try {
+            const crop = parseBoundingBox(face.bounding_box);
+            const meta = await sharp(fullPath).metadata();
+            const imgW = meta.width || 1;
+            const imgH = meta.height || 1;
+            crop.left = Math.min(crop.left, imgW - 1);
+            crop.top = Math.min(crop.top, imgH - 1);
+            crop.width = Math.min(crop.width, imgW - crop.left);
+            crop.height = Math.min(crop.height, imgH - crop.top);
+            await sharp(fullPath)
+              .extract(crop)
+              .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
+              .webp({ quality: 75 })
+              .toFile(cachedPath);
+            const mtime = fs.statSync(cachedPath).mtimeMs;
+            reply.header('ETag', `"${id}-${Math.floor(mtime)}"`);
+            reply.header('Content-Type', 'image/webp');
+            reply.header('Cache-Control', 'no-cache, must-revalidate');
+            return reply.send(fs.createReadStream(cachedPath));
+          } catch (err: any) {
+            console.error(`[Face Thumbnail] Failed to generate from cover for ${id}:`, err.message);
+          }
+        }
+      }
+    }
+
+    // Fall back to best solo photo (fewest other faces)
     const repResult = await query(`
       SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name
       FROM face_embeddings fe
@@ -208,8 +297,10 @@ export async function mlRoutes(fastify: FastifyInstance) {
         .webp({ quality: 75 })
         .toFile(cachedPath);
 
+      const mtime = fs.statSync(cachedPath).mtimeMs;
+      reply.header('ETag', `"${id}-${Math.floor(mtime)}"`);
       reply.header('Content-Type', 'image/webp');
-      reply.header('Cache-Control', 'public, max-age=31536000');
+      reply.header('Cache-Control', 'no-cache, must-revalidate');
       return reply.send(fs.createReadStream(cachedPath));
     } catch (err: any) {
       console.error(`[Face Thumbnail] Failed to generate for ${id}:`, err.message);

@@ -5,6 +5,7 @@ async function run() {
     CREATE TABLE IF NOT EXISTS people (
         id UUID PRIMARY KEY,
         name TEXT NOT NULL,
+        cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
   `);

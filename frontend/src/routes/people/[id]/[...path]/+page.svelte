@@ -1,6 +1,7 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
+  import Modal from '$lib/components/Modal.svelte';
   import { getThumbnailUrl, getPreviewUrl, API_BASE } from '$lib/api/media';
   import type { PageData } from './$types';
   import { onMount, onDestroy } from 'svelte';
@@ -63,7 +64,19 @@
     return 0;
   }));
 
-  let fallbackCoverId = $derived(data.coverMediaId || (data.files.length > 0 ? data.files[0].id : null));
+  let localCoverOverride: string | null = $state(null);
+  let coverRefreshKey = $state(0);
+  let showAlertModal = $state(false);
+  let alertModalTitle = $state('');
+  let alertModalMessage = $state('');
+
+  function showAppAlert(title: string, message: string) {
+    alertModalTitle = title;
+    alertModalMessage = message;
+    showAlertModal = true;
+  }
+
+  let fallbackCoverId = $derived(localCoverOverride || data.coverMediaId || (data.files.length > 0 ? data.files[0].id : null));
 
   let coverObjectPosition = $derived.by(() => {
     const bb = data.coverBoundingBox;
@@ -92,6 +105,24 @@
   function syncUrl(index: number | null) {
     const url = index !== null ? mediaUrl(index) : personUrl();
     history.replaceState(history.state, '', url);
+  }
+
+  async function handleSetCover(mediaId: string) {
+    try {
+      const res = await fetch(`${API_BASE}/api/faces/${data.id}/cover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ mediaId })
+      });
+      if (!res.ok) throw new Error('Failed to set cover');
+      localCoverOverride = mediaId;
+      coverRefreshKey++;
+      showAppAlert('Cover Updated', 'Person cover image has been updated.');
+    } catch (e) {
+      console.error(e);
+      showAppAlert('Error', 'Failed to set cover image.');
+    }
   }
 
   function openLightbox(index: number) {
@@ -200,7 +231,7 @@
     <ChevronLeft size={32} strokeWidth={2.5} />
   </a>
   {#if fallbackCoverId}
-    <img src={getPreviewUrl(fallbackCoverId, false)} class="header-bg" fetchpriority="high" alt="Cover" style="object-position: {coverObjectPosition};" />
+    <img src={getPreviewUrl(fallbackCoverId, false) + '?t=' + coverRefreshKey} class="header-bg" fetchpriority="high" alt="Cover" style="object-position: {coverObjectPosition};" />
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -295,8 +326,16 @@
     onclose={closeLightbox}
     onnext={nextMedia}
     onprev={prevMedia}
+    onsetcover={handleSetCover}
   />
 {/if}
+
+<Modal bind:show={showAlertModal} id="person-alert" title={alertModalTitle}>
+  <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">{alertModalMessage}</p>
+  <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
+    <button class="btn" style="background: white; color: black;" onclick={() => showAlertModal = false}>Okay</button>
+  </div>
+</Modal>
 
 <style>
   @keyframes fadeIn {

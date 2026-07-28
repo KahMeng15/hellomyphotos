@@ -142,15 +142,16 @@ export class MLService {
       await fs.promises.mkdir(outDir, { recursive: true });
 
       for (const face of faces.rows) {
-        // Only generate if this media is the best solo photo for this person
+        // Only generate if this media is the best for this person (explicit cover or fewest other faces)
         const best = await query(`
-          SELECT fe2.media_id, (
-            SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe2.media_id
-          ) AS total
-          FROM face_embeddings fe2
-          WHERE fe2.person_id = $1
-          ORDER BY total ASC, (SELECT created_at FROM media_files WHERE id = fe2.media_id) DESC
-          LIMIT 1
+          SELECT COALESCE(
+            (SELECT cover_media_id FROM people WHERE id = $1 AND cover_media_id IS NOT NULL),
+            (SELECT fe2.media_id FROM face_embeddings fe2
+              WHERE fe2.person_id = $1
+              ORDER BY (SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe2.media_id) ASC,
+                (SELECT created_at FROM media_files WHERE id = fe2.media_id) DESC
+              LIMIT 1)
+          ) AS media_id
         `, [face.person_id]);
         if (best.rows.length === 0 || best.rows[0].media_id !== mediaId) continue;
 
