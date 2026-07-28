@@ -194,6 +194,22 @@
             <p><strong>Size:</strong> {(media.size_bytes / 1024 / 1024).toFixed(2)} MB</p>
             <p><strong>Date Taken:</strong> {media.exif_json?.dateTimeOriginal ? new Date(media.exif_json.dateTimeOriginal).toLocaleString() : 'Unknown'}</p>
           </div>
+          {#if media.folder_path}
+          <div class="info-section">
+            <h4>ALBUM</h4>
+            <div class="album-info">
+              {#if media.folder_cover_id}
+                <div class="album-cover">
+                  <BlurhashImage hash={''} src={getThumbnailUrl(media.folder_cover_id)} objectFit="cover" square={true} />
+                </div>
+              {/if}
+              <div class="album-details">
+                <p class="album-name">{media.folder_path.split('/').filter(Boolean).pop()}</p>
+                <a href="/folder/{media.folder_path}" class="album-path" onclick={(e) => e.stopPropagation()}>{media.folder_path}</a>
+              </div>
+            </div>
+          </div>
+          {/if}
           {#if media.exif_json?.make || media.exif_json?.model || media.exif_json?.lensModel || media.exif_json?.iso || media.exif_json?.exposureTime || media.exif_json?.fNumber}
           <div class="info-section">
             <h4>CAMERA</h4>
@@ -414,10 +430,90 @@
     color: #e2e8f0;
   }
 
+  .album-info {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .album-cover {
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: rgba(255,255,255,0.05);
+  }
+
+  .album-details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .album-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #e2e8f0;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .album-path {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 0.2s;
+  }
+
+  .album-path:hover {
+    color: #94a3b8;
+  }
+
   .face-list {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
+  }
+
+  .face-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    text-decoration: none;
+    color: inherit;
+    width: 64px;
+  }
+
+  .face-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    overflow: hidden;
+    display: block;
+    border: 2px solid transparent;
+    transition: border-color 0.15s;
+  }
+
+  .face-item:hover .face-avatar {
+    border-color: var(--accent-color);
+  }
+
+  .face-item-name {
+    font-size: 0.75rem;
+    color: #e2e8f0;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
   }
 
   .face-item {

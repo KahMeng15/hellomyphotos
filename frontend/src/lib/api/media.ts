@@ -7,6 +7,7 @@ export interface MediaFile {
   blurhash: string | null;
   exif_json?: any;
   aspectRatio?: number;
+  folder_cover_id?: string | null;
 }
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
