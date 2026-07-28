@@ -165,13 +165,15 @@ export async function mlRoutes(fastify: FastifyInstance) {
       return reply.send(fs.createReadStream(cachedPath));
     }
 
-    // Look up the person's representative face
+    // Look up the person's representative face (best solo photo)
     const repResult = await query(`
       SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name
       FROM face_embeddings fe
       JOIN media_files m ON m.id = fe.media_id
       WHERE fe.person_id = $1
-      ORDER BY fe.created_at DESC
+      ORDER BY (
+        SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe.media_id
+      ) ASC, m.created_at DESC
       LIMIT 1
     `, [id]);
 

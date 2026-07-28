@@ -138,14 +138,26 @@ export class MLService {
       `, [mediaId]);
 
       const mediaRoot = process.env.MEDIA_ROOT || '/app/media';
+      const outDir = path.join(CACHE_ROOT, 'faces');
+      await fs.promises.mkdir(outDir, { recursive: true });
 
       for (const face of faces.rows) {
+        // Only generate if this media is the best solo photo for this person
+        const best = await query(`
+          SELECT fe2.media_id, (
+            SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe2.media_id
+          ) AS total
+          FROM face_embeddings fe2
+          WHERE fe2.person_id = $1
+          ORDER BY total ASC, (SELECT created_at FROM media_files WHERE id = fe2.media_id) DESC
+          LIMIT 1
+        `, [face.person_id]);
+        if (best.rows.length === 0 || best.rows[0].media_id !== mediaId) continue;
+
         const fullPath = path.join(mediaRoot, face.folder_path, face.file_name);
         if (!fs.existsSync(fullPath)) continue;
 
         const crop = parseBoundingBox(face.bounding_box);
-        const outDir = path.join(CACHE_ROOT, 'faces');
-        await fs.promises.mkdir(outDir, { recursive: true });
         const outPath = path.join(outDir, `${face.person_id}.webp`);
 
         const meta = await sharp(fullPath).metadata();

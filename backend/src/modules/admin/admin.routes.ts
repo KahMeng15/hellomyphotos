@@ -3,11 +3,13 @@ import { requireAuth } from '../../utils/auth';
 import { FastifyInstance } from 'fastify';
 import { redis } from '../../config/redis';
 import { ScannerService } from '../scanner/scanner.service';
+import { queues } from '../../queue';
 import { mlQueue } from '../../queue/mlQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
 import { faceDetectionQueue } from '../../queue/faceDetectionQueue';
 import { facialRecognitionQueue } from '../../queue/facialRecognitionQueue';
 import { smartSearchQueue } from '../../queue/smartSearchQueue';
+import { faceThumbnailQueue } from '../../queue/faceThumbnailQueue';
 import { query } from '../../config/db';
 import { ClusterService } from '../ml/cluster.service';
 import path from 'path';
@@ -248,6 +250,11 @@ export async function adminRoutes(fastify: FastifyInstance) {
     fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
     fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
 
+    for (const q of Object.values(queues)) {
+      await q.clean(0, 10000, 'completed');
+      await q.clean(0, 10000, 'failed');
+    }
+
     ScannerService.scanAllDirectories('').catch(console.error);
     return reply.send({ success: true, message: 'Index wiped and rescan initiated in the background' });
   });
@@ -255,6 +262,9 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.post('/api/admin/reset-smart-search', async (request, reply) => {
     await query(`TRUNCATE TABLE smart_search_embeddings`);
     await query(`UPDATE media_files SET clip_embedding = NULL`);
+
+    await queues['smart-search'].clean(0, 10000, 'completed');
+    await queues['smart-search'].clean(0, 10000, 'failed');
 
     const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' OR mime_type LIKE 'video/%'`);
     for (const row of result.rows) {
@@ -273,6 +283,11 @@ export async function adminRoutes(fastify: FastifyInstance) {
     fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
     fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
 
+    await queues['metadata'].clean(0, 10000, 'completed');
+    await queues['metadata'].clean(0, 10000, 'failed');
+    await queues['thumbnail'].clean(0, 10000, 'completed');
+    await queues['thumbnail'].clean(0, 10000, 'failed');
+
     const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
     for (const row of result.rows) {
       await mediaQueue.add('process-media', { 
@@ -287,6 +302,13 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.post('/api/admin/reset-faces', async (request, reply) => {
     await query(`TRUNCATE TABLE face_embeddings CASCADE`);
     await query(`DELETE FROM people`);
+
+    await queues['face-detection'].clean(0, 10000, 'completed');
+    await queues['face-detection'].clean(0, 10000, 'failed');
+    await queues['facial-recognition'].clean(0, 10000, 'completed');
+    await queues['facial-recognition'].clean(0, 10000, 'failed');
+    await queues['face-thumbnail'].clean(0, 10000, 'completed');
+    await queues['face-thumbnail'].clean(0, 10000, 'failed');
 
     const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
     for (const row of result.rows) {
@@ -303,6 +325,21 @@ export async function adminRoutes(fastify: FastifyInstance) {
     } catch (e: any) {
       return reply.status(500).send({ error: e.message });
     }
+  });
+
+  fastify.post('/api/admin/clear-face-thumbnails', async (request, reply) => {
+    const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
+    fs.rmSync(path.join(cacheRoot, 'faces'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(cacheRoot, 'faces'), { recursive: true });
+
+    await faceThumbnailQueue.clean(0, 10000, 'completed');
+    await faceThumbnailQueue.clean(0, 10000, 'failed');
+
+    const result = await query(`SELECT DISTINCT media_id FROM face_embeddings`);
+    for (const row of result.rows) {
+      await faceThumbnailQueue.add('generate-face-thumbnails', { mediaId: row.media_id });
+    }
+    return reply.send({ success: true, message: 'Face thumbnail cache cleared and regeneration queued' });
   });
 
   fastify.get('/api/admin/logs', async (request, reply) => {

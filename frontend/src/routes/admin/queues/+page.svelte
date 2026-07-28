@@ -179,6 +179,14 @@
     });
   }
 
+  async function triggerClearFaceThumbnails() {
+    customConfirm('Clear Face Thumbnails', 'This will delete all cached face thumbnail images and re-queue their generation in the background. Face thumbnails will be regenerated with the latest representative face for each person.', false, async () => {
+      await fetch(`${API_BASE}/api/admin/clear-face-thumbnails`, { method: 'POST', credentials: 'include' });
+      await loadQueuesOnly();
+      customAlert('Success', 'Face thumbnail cache cleared and regeneration queued!');
+    });
+  }
+
   async function triggerNuke() {
     customConfirm('System Reset & Full Rescan', 'Are you sure you want to completely wipe the index, EXIF data, and facial recognition data, and rescan everything from scratch? This is a destructive operation and will take a significant amount of time.', true, async () => {
       await fetch(`${API_BASE}/api/admin/reset-faces`, { method: 'POST', credentials: 'include' });
@@ -195,7 +203,8 @@
     'video',
     'smart-search',
     'face-detection',
-    'facial-recognition'
+    'facial-recognition',
+    'face-thumbnail'
   ];
 
   const queueTitles: Record<string, string> = {
@@ -205,7 +214,8 @@
     'video': '4. Video Transcoding & Frames (Video)',
     'smart-search': '5. Smart Search & Embeddings (Smart Search)',
     'face-detection': '6. Face Detection (Face Detection)',
-    'facial-recognition': '7. Facial Recognition (Facial Recognition)'
+    'facial-recognition': '7. Facial Recognition (Facial Recognition)',
+    'face-thumbnail': '8. Face Thumbnail Generation (Face Thumbnail)'
   };
 
   async function triggerJob(name: string) {
@@ -245,7 +255,7 @@
       </a>
       <div>
         <h2>Processing & Job Queues</h2>
-        <p>Configure processing constraints and monitor background workers across all 7 pipeline queues.</p>
+        <p>Configure processing constraints and monitor background workers across all 8 pipeline queues.</p>
       </div>
     </div>
     <button class="btn primary" onclick={saveSettings} disabled={saving}>
@@ -411,6 +421,9 @@
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetSmartSearch}>
             <Layers size={16}/> Reset Smart Search
+          </button>
+          <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerClearFaceThumbnails}>
+            <Trash2 size={16}/> Clear Face Thumbnails
           </button>
         </div>
         
