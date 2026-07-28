@@ -196,9 +196,7 @@
             </div>
           {:else}
             <h2>
-              {#if data.personName}
-                {data.personName}
-              {/if}
+              <span class="person-name {data.personName ? '' : 'placeholder'}" onclick={!data.personName ? () => isEditingName = true : undefined}>{data.personName || 'Add name...'}</span>
               <button class="icon-btn" onclick={() => isEditingName = true} title="Rename">✎</button>
             </h2>
           {/if}
@@ -344,6 +342,12 @@
 
   .header-text-container {
     overflow: hidden;
+  }
+
+  .person-name.placeholder {
+    color: rgba(255,255,255,0.35);
+    font-style: italic;
+    font-weight: 400;
   }
 
   .header-right {

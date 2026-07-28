@@ -105,7 +105,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
     const { id } = request.params;
     const result = await query(`SELECT id, name FROM people WHERE id = $1`, [id]);
     if (result.rows.length === 0) {
-      return reply.send({ id, name: 'Unknown Person' });
+      return reply.send({ id, name: '' });
     }
     return reply.send(result.rows[0]);
   });
