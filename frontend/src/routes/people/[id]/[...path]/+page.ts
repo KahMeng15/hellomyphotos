@@ -2,7 +2,8 @@ import { API_BASE } from '$lib/api/media';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ params, fetch }) => {
-  const { id } = params;
+  const { id, path } = params;
+  const selectedMediaId = path || undefined;
   try {
     const [mediaRes, personRes, coverRes] = await Promise.all([
       fetch(`${API_BASE}/api/faces/${id}/media`),
@@ -31,9 +32,9 @@ export const load: PageLoad = async ({ params, fetch }) => {
       coverImgHeight = coverData.imgHeight || null;
     }
 
-    return { id, files, personName, coverMediaId, coverBoundingBox, coverImgWidth, coverImgHeight };
+    return { id, files, personName, coverMediaId, coverBoundingBox, coverImgWidth, coverImgHeight, selectedMediaId };
   } catch (error) {
     console.error(error);
-    return { id, files: [], personName: '', coverMediaId: null, coverBoundingBox: null, coverImgWidth: null, coverImgHeight: null };
+    return { id, files: [], personName: '', coverMediaId: null, coverBoundingBox: null, coverImgWidth: null, coverImgHeight: null, selectedMediaId: undefined };
   }
 };
