@@ -65,6 +65,8 @@
 
   let fallbackCoverId = $derived(data.coverMediaId || (data.files.length > 0 ? data.files[0].id : null));
 
+
+
   function openLightbox(index: number) {
     selectedMediaIndex = index;
   }

@@ -129,22 +129,27 @@ export async function mlRoutes(fastify: FastifyInstance) {
     const { id } = request.params;
 
     const result = await query(`
-      SELECT m.id
+      SELECT m.id, (
+        SELECT bounding_box FROM face_embeddings
+        WHERE media_id = m.id AND person_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) AS bounding_box
       FROM media_files m
-      JOIN face_embeddings fe ON m.id = fe.media_id AND fe.person_id = $1
-      LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS total
-        FROM face_embeddings fe2
-        WHERE fe2.media_id = m.id
-      ) fc ON true
-      ORDER BY fc.total ASC, m.created_at DESC
+      WHERE EXISTS (
+        SELECT 1 FROM face_embeddings
+        WHERE media_id = m.id AND person_id = $1
+      )
+      ORDER BY (
+        SELECT COUNT(*) FROM face_embeddings WHERE media_id = m.id
+      ) ASC, m.created_at DESC
       LIMIT 1
     `, [id]);
 
     if (result.rows.length === 0) {
       return reply.status(404).send({ error: 'No media found for this person' });
     }
-    return reply.send({ mediaId: result.rows[0].id });
+    return reply.send({ mediaId: result.rows[0].id, boundingBox: result.rows[0].bounding_box });
   });
 
   // Serve or generate a face thumbnail for a person

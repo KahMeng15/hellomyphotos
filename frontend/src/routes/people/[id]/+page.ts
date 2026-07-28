@@ -20,14 +20,16 @@ export const load: PageLoad = async ({ params, fetch }) => {
     }
 
     let coverMediaId: string | null = null;
+    let coverBoundingBox: any = null;
     if (coverRes.ok) {
       const coverData = await coverRes.json();
       coverMediaId = coverData.mediaId;
+      coverBoundingBox = coverData.boundingBox || null;
     }
 
-    return { id, files, personName, coverMediaId };
+    return { id, files, personName, coverMediaId, coverBoundingBox };
   } catch (error) {
     console.error(error);
-    return { id, files: [], personName: '', coverMediaId: null };
+    return { id, files: [], personName: '', coverMediaId: null, coverBoundingBox: null };
   }
 };

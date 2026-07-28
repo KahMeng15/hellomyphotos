@@ -72,7 +72,9 @@
     const el = document.querySelector('.main-content');
     if (el) {
       el.addEventListener('scroll', () => {
-        scrollPositions.set($page.url.pathname, el.scrollTop);
+        const key = $page.url.pathname;
+        scrollPositions.set(key, el.scrollTop);
+        try { sessionStorage.setItem(`scroll:${key}`, String(el.scrollTop)); } catch {}
       }, { passive: true });
     }
     window.addEventListener('popstate', () => {
@@ -85,21 +87,32 @@
     const path = $page.url.pathname;
     if (prevScrollPath && path !== prevScrollPath) {
       const el = document.querySelector('.main-content');
-      if (el) scrollPositions.set(prevScrollPath, el.scrollTop);
+      if (el) {
+        scrollPositions.set(prevScrollPath, el.scrollTop);
+        try { sessionStorage.setItem(`scroll:${prevScrollPath}`, String(el.scrollTop)); } catch {}
+      }
     }
   });
 
   $effect(() => {
     const path = $page.url.pathname;
     if (prevScrollPath && path !== prevScrollPath) {
-      const el = document.querySelector('.main-content');
-      if (el) {
-        if (isPopState) {
-          const saved = scrollPositions.get(path);
-          if (saved !== undefined) el.scrollTop = saved;
-        } else {
-          el.scrollTop = 0;
+      if (isPopState) {
+        let saved = scrollPositions.get(path);
+        if (saved === undefined) {
+          try { const v = sessionStorage.getItem(`scroll:${path}`); saved = v !== null ? Number(v) : undefined; } catch {}
         }
+        if (saved !== undefined) {
+          requestAnimationFrame(() => {
+            const el = document.querySelector('.main-content');
+            if (el) el.scrollTop = saved;
+          });
+        }
+      } else {
+        requestAnimationFrame(() => {
+          const el = document.querySelector('.main-content');
+          if (el) el.scrollTop = 0;
+        });
       }
       isPopState = false;
     }
