@@ -14,6 +14,7 @@
     allowDownload = true, 
     isSharedView = false, 
     token,
+    baseFolderPath,
     onclose,
     onnext,
     onprev,
@@ -23,11 +24,26 @@
     allowDownload?: boolean, 
     isSharedView?: boolean, 
     token?: string,
+    baseFolderPath?: string,
     onclose?: () => void,
     onnext?: () => void,
     onprev?: () => void,
     onsetcover?: (id: string) => void
   } = $props();
+
+  const pathSegments = $derived(media.folder_path ? media.folder_path.split('/').filter(Boolean) : []);
+
+  function pathUrl(segments: string[]): string {
+    if (isSharedView && token) {
+      const fullPath = segments.join('/');
+      if (baseFolderPath && fullPath.startsWith(baseFolderPath)) {
+        const rest = fullPath.substring(baseFolderPath.length).replace(/^\//, '');
+        return `/share/${token}${rest ? '/' + rest : ''}`;
+      }
+      return '';
+    }
+    return `/folder/${segments.join('/')}`;
+  }
   
   function close() {
     if (onclose) onclose();
@@ -197,7 +213,7 @@
           </div>
           {#if media.folder_path}
           <div class="info-section">
-            <h4>ALBUM</h4>
+            <h4>SOURCE</h4>
             <div class="album-info">
               {#if media.folder_cover_id}
                 <div class="album-cover">
@@ -205,8 +221,20 @@
                 </div>
               {/if}
               <div class="album-details">
-                <p class="album-name">{media.folder_path.split('/').filter(Boolean).pop()}</p>
-                <a href="/folder/{media.folder_path}" class="album-path" onclick={(e) => e.stopPropagation()}>{media.folder_path}</a>
+                {#if pathSegments.length > 1}
+                  <div class="breadcrumb-path">
+                    {#each pathSegments.slice(0, -1) as segment, i}
+                      {#if i > 0}<span class="breadcrumb-sep"> &gt; </span>{/if}
+                      {@const url = pathUrl(pathSegments.slice(0, i + 1))}
+                      {#if url}
+                        <a href={url} onclick={(e) => e.stopPropagation()}>{segment}</a>
+                      {:else}
+                        <span style="color: #888; cursor: default;">{segment}</span>
+                      {/if}
+                    {/each}
+                  </div>
+                {/if}
+                <p class="album-name">{pathSegments.at(-1)}</p>
               </div>
             </div>
           </div>
@@ -453,28 +481,30 @@
     min-width: 0;
   }
 
-  .album-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-    color: #e2e8f0;
-    margin: 0;
+  .breadcrumb-path {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    font-size: 0.75rem;
+    color: #64748b;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .album-path {
-    font-size: 0.75rem;
+  .breadcrumb-path a {
     color: #64748b;
     text-decoration: none;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     transition: color 0.2s;
   }
 
-  .album-path:hover {
+  .breadcrumb-path a:hover {
     color: #94a3b8;
+  }
+
+  .breadcrumb-sep {
+    color: #475569;
+    margin: 0 2px;
   }
 
   .face-list {

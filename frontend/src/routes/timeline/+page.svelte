@@ -108,8 +108,7 @@
       const header = document.querySelector<HTMLElement>('.sticky-header');
       if (header) {
         const topOffset = parseFloat(getComputedStyle(header).top) || 0;
-        const marginBottom = parseFloat(getComputedStyle(header).marginBottom) || 0;
-        document.documentElement.style.setProperty('--sticky-header-bottom', (header.offsetHeight + topOffset + marginBottom) + 'px');
+        document.documentElement.style.setProperty('--sticky-header-bottom', (header.offsetHeight + topOffset + 4) + 'px');
       }
     }
 
@@ -237,7 +236,7 @@
     position: sticky;
     top: -25px;
     z-index: 50;
-    margin: 0 -24px 24px -24px;
+    margin: 0 -24px 0 -24px;
     padding: 24px 24px;
     border-bottom: 1px solid transparent;
   }

@@ -25,19 +25,21 @@ export async function timelineRoutes(fastify: FastifyInstance) {
 
     const result = await query(`
       SELECT 
-        id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, created_at,
+        m.id, m.folder_path, m.file_name, m.mime_type, m.size_bytes, m.blurhash, m.exif_json, m.created_at,
+        fs.cover_media_id AS folder_cover_id,
         COALESCE(
-          (exif_json->>'dateTimeOriginal')::timestamp,
-          (exif_json->>'DateTimeOriginal')::timestamp,
-          (exif_json->>'createDate')::timestamp,
-          (exif_json->>'CreateDate')::timestamp,
-          (exif_json->>'modifyDate')::timestamp,
-          (exif_json->>'ModifyDate')::timestamp,
-          (exif_json->>'timestamp')::timestamp,
-          created_at
+          (m.exif_json->>'dateTimeOriginal')::timestamp,
+          (m.exif_json->>'DateTimeOriginal')::timestamp,
+          (m.exif_json->>'createDate')::timestamp,
+          (m.exif_json->>'CreateDate')::timestamp,
+          (m.exif_json->>'modifyDate')::timestamp,
+          (m.exif_json->>'ModifyDate')::timestamp,
+          (m.exif_json->>'timestamp')::timestamp,
+          m.created_at
         ) as sort_date
-      FROM media_files
-      WHERE (mime_type LIKE 'image/%' OR mime_type LIKE 'video/%')
+      FROM media_files m
+      LEFT JOIN folder_settings fs ON fs.folder_path = m.folder_path
+      WHERE (m.mime_type LIKE 'image/%' OR m.mime_type LIKE 'video/%')
       ${folderFilterSql}
       ORDER BY sort_date DESC
     `, queryParams);
