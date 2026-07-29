@@ -73,9 +73,24 @@ export async function sharesRoutes(fastify: FastifyInstance) {
         WHERE f.person_id = $1
         ORDER BY m.created_at DESC
       `, [share.person_id]);
-      // Get person info
-      const personRes = await query(`SELECT id, name FROM people WHERE id = $1`, [share.person_id]);
-      return reply.send({ share, files: fileRes.rows, person: personRes.rows[0] || null });
+      // Get person info with cover
+      const personRes = await query(`SELECT id, name, cover_media_id FROM people WHERE id = $1`, [share.person_id]);
+      const person = personRes.rows[0] || null;
+      // Determine cover media ID (explicit cover or dynamic fallback: fewest other faces)
+      let personCoverMediaId = person?.cover_media_id || null;
+      if (!personCoverMediaId) {
+        const coverRes = await query(`
+          SELECT m.id FROM media_files m
+          WHERE EXISTS (SELECT 1 FROM face_embeddings WHERE media_id = m.id AND person_id = $1)
+          AND m.mime_type LIKE 'image/%'
+          ORDER BY (SELECT COUNT(*) FROM face_embeddings WHERE media_id = m.id) ASC, m.created_at DESC
+          LIMIT 1
+        `, [share.person_id]);
+        if (coverRes.rows.length > 0) {
+          personCoverMediaId = coverRes.rows[0].id;
+        }
+      }
+      return reply.send({ share, files: fileRes.rows, person, personCoverMediaId });
     }
     
     let targetPath = share.folder_path || '';

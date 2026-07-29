@@ -143,6 +143,7 @@
   let personName = $derived(data.person ? (data.person.name || 'Unnamed Person') : null);
 
   let fallbackCoverId = $derived(
+    data.personCoverMediaId ||
     data.folderCoverId || 
     (data.files.length > 0 ? data.files[0].id : null) || 
     (data.directories && data.directories.length > 0 ? (data.directories.find((d: any) => d.cover_id)?.cover_id || null) : null)

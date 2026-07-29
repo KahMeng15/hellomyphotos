@@ -245,6 +245,7 @@
     }
   }
 
+  let coverLoaded = $state(false);
   let scrollProgress = $state(0);
   let headerWrapper: HTMLElement | undefined = $state();
 
@@ -288,7 +289,7 @@
     <ChevronLeft size={32} strokeWidth={2.5} />
   </a>
   {#if fallbackCoverId}
-    <img src={getPreviewUrl(fallbackCoverId, false) + '?t=' + coverRefreshKey} class="header-bg" fetchpriority="high" alt="Cover" style="object-position: {coverObjectPosition};" />
+    <img src={getPreviewUrl(fallbackCoverId, false) + '?t=' + coverRefreshKey} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" style="object-position: {coverObjectPosition};" />
     <div class="header-gradient"></div>
   {/if}
 </div>
