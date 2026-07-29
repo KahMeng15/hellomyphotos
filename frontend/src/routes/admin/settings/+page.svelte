@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Settings, Cpu, HardDrive, ShieldCheck, Save, Clock } from '@lucide/svelte';
+  import { ChevronLeft, Settings, Cpu, HardDrive, ShieldCheck, Save, Clock, Eye } from '@lucide/svelte';
   import { toast } from '$lib/stores/toast';
 
   let settings = $state<any>({
@@ -42,7 +42,13 @@
           rateLimitApi: Number(settings.rateLimitApi),
           authMaxLoginTries: Number(settings.authMaxLoginTries),
           authTimeoutMinutes: Number(settings.authTimeoutMinutes),
-          authDoubleTimeout: Boolean(settings.authDoubleTimeout)
+          authDoubleTimeout: Boolean(settings.authDoubleTimeout),
+          defaultViewMode: settings.defaultViewMode,
+          defaultSortMode: settings.defaultSortMode,
+          defaultFolderViewMode: settings.defaultFolderViewMode,
+          defaultShareViewMode: settings.defaultShareViewMode,
+          defaultShareSortMode: settings.defaultShareSortMode,
+          defaultShareFolderViewMode: settings.defaultShareFolderViewMode
         })
       });
       if (res.ok) {
@@ -142,6 +148,77 @@
           </div>
         </div>
       </div>
+
+      <!-- Default View & Sort -->
+      <div class="card">
+        <div class="card-header">
+          <Eye size={20} class="text-blue" />
+          <h3>Default View & Sort</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Folder View — Image Default</label>
+            <p class="help">Default image layout when browsing folders with photos.</p>
+            <select bind:value={settings.defaultViewMode}>
+              <option value="small-fit">Small Fit</option>
+              <option value="large-fit">Large Fit</option>
+              <option value="small-square">Small Square</option>
+              <option value="large-square">Large Square</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Folder View — Sort Order</label>
+            <p class="help">Default sort order for files in folders.</p>
+            <select bind:value={settings.defaultSortMode}>
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="a-z">A–Z</option>
+              <option value="z-a">Z–A</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Folder View — Folders Only Layout</label>
+            <p class="help">Default layout when browsing a folder that contains only sub-folders.</p>
+            <select bind:value={settings.defaultFolderViewMode}>
+              <option value="small-grid">Small Grid</option>
+              <option value="medium-grid">Medium Grid</option>
+              <option value="large-grid">Large Grid</option>
+              <option value="list">List</option>
+            </select>
+          </div>
+          <hr class="card-divider">
+          <div class="form-group">
+            <label>Share View — Image Default</label>
+            <p class="help">Default image layout on shared links.</p>
+            <select bind:value={settings.defaultShareViewMode}>
+              <option value="small-fit">Small Fit</option>
+              <option value="large-fit">Large Fit</option>
+              <option value="small-square">Small Square</option>
+              <option value="large-square">Large Square</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Share View — Sort Order</label>
+            <p class="help">Default sort order for files on shared links.</p>
+            <select bind:value={settings.defaultShareSortMode}>
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="a-z">A–Z</option>
+              <option value="z-a">Z–A</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Share View — Folders Only Layout</label>
+            <p class="help">Default layout when a shared link contains only sub-folders.</p>
+            <select bind:value={settings.defaultShareFolderViewMode}>
+              <option value="small-grid">Small Grid</option>
+              <option value="medium-grid">Medium Grid</option>
+              <option value="large-grid">Large Grid</option>
+              <option value="list">List</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </div>
   {/if}
 </div>
@@ -184,6 +261,16 @@
     padding: 0.75rem; border-radius: 6px; color: white; font-family: inherit;
   }
   input[type="number"]:focus { outline: none; border-color: #a855f7; }
+
+  select {
+    width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+    padding: 0.75rem; border-radius: 6px; color: white; font-family: inherit;
+    appearance: auto;
+  }
+  select:focus { outline: none; border-color: #a855f7; }
+  select option { background: #1a1a2e; color: white; }
+
+  .card-divider { border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 0.5rem 0; }
 
   .slider-group { display: flex; align-items: center; gap: 1rem; }
   input[type="range"] { flex: 1; cursor: pointer; accent-color: #a855f7; }

@@ -61,7 +61,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     if (share.media_id) {
       if (subPath) return reply.status(404).send({ error: 'Not a folder share' });
       const fileRes = await query(`SELECT * FROM media_files WHERE id = $1`, [share.media_id]);
-      return reply.send({ share, files: fileRes.rows, folderCoverId: null });
+      return reply.send({ share, files: fileRes.rows, folderCoverId: null, defaultShareViewMode: 'small-fit', defaultShareSortMode: 'newest', defaultShareFolderViewMode: 'small-grid' });
     }
 
     // Person-scoped share: return all media for this person
@@ -138,7 +138,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
           // non-critical, fallback positioning will be used
         }
       }
-      return reply.send({ share, files: fileRes.rows, person, personCoverMediaId, personCoverBoundingBox, personCoverImgWidth, personCoverImgHeight });
+      return reply.send({ share, files: fileRes.rows, person, personCoverMediaId, personCoverBoundingBox, personCoverImgWidth, personCoverImgHeight, defaultShareViewMode: 'small-fit', defaultShareSortMode: 'newest', defaultShareFolderViewMode: 'small-grid' });
     }
     
     let targetPath = share.folder_path || '';
@@ -241,7 +241,21 @@ export async function sharesRoutes(fastify: FastifyInstance) {
 
     AnalyticsService.logView(share.media_id || '', 'view_shared_link', 0, token);
 
-    return reply.send({ share, files: filesResult.rows, directories, folderCoverId, folderDescription, folderPath: targetPath, baseFolderPath });
+    const shareDefaultsRes = await query("SELECT key, value FROM admin_settings WHERE key = ANY($1)", [
+      ['default_share_view_mode', 'default_share_sort_mode', 'default_share_folder_view_mode']
+    ]);
+    const shareDefaults: Record<string, string> = {
+      defaultShareViewMode: 'small-fit',
+      defaultShareSortMode: 'newest',
+      defaultShareFolderViewMode: 'small-grid'
+    };
+    for (const r of shareDefaultsRes.rows) {
+      if (r.key === 'default_share_view_mode') shareDefaults.defaultShareViewMode = r.value;
+      if (r.key === 'default_share_sort_mode') shareDefaults.defaultShareSortMode = r.value;
+      if (r.key === 'default_share_folder_view_mode') shareDefaults.defaultShareFolderViewMode = r.value;
+    }
+
+    return reply.send({ share, files: filesResult.rows, directories, folderCoverId, folderDescription, folderPath: targetPath, baseFolderPath, defaultShareViewMode: shareDefaults.defaultShareViewMode, defaultShareSortMode: shareDefaults.defaultShareSortMode, defaultShareFolderViewMode: shareDefaults.defaultShareFolderViewMode });
   }
 
   fastify.get<{ Params: { token: string } }>('/api/shares/:token', handleShareGet);

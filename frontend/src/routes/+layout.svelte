@@ -234,7 +234,7 @@
         <slot />
       </div>
     {/if}
-    {#if $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/admin')}
+    {#if $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/admin') && !$page.url.pathname.startsWith('/settings')}
       {#key $page.url.pathname}
         <footer class="app-footer {$page.url.pathname.startsWith('/folder') || $page.url.pathname.startsWith('/share') ? 'animate-footer' : ''}">
           <p>

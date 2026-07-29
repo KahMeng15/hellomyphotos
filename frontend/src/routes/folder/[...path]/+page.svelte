@@ -184,9 +184,9 @@
   }
 
   type FolderViewMode = 'small-grid' | 'medium-grid' | 'large-grid' | 'list';
-  let sortMode: SortMode = $state(loadPref<SortMode>('folderSortMode', 'newest'));
-  let viewMode: ViewMode = $state(loadPref<ViewMode>('folderViewMode', 'small-fit'));
-  let folderViewMode: FolderViewMode = $state(loadPref<FolderViewMode>('folderFolderViewMode', 'small-grid'));
+  let sortMode: SortMode = $state(loadPref<SortMode>('folderSortMode', data.defaultSortMode || 'newest'));
+  let viewMode: ViewMode = $state(loadPref<ViewMode>('folderViewMode', data.defaultViewMode || 'small-fit'));
+  let folderViewMode: FolderViewMode = $state(loadPref<FolderViewMode>('folderFolderViewMode', data.defaultFolderViewMode || 'small-grid'));
 
   $effect(() => savePref('folderSortMode', sortMode));
   $effect(() => savePref('folderViewMode', viewMode));

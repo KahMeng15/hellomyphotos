@@ -254,6 +254,20 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       }
     }
 
+    const defaultsRes = await query("SELECT key, value FROM admin_settings WHERE key = ANY($1)", [
+      ['default_view_mode', 'default_sort_mode', 'default_folder_view_mode']
+    ]);
+    const defaults: Record<string, string> = {
+      defaultViewMode: 'small-fit',
+      defaultSortMode: 'newest',
+      defaultFolderViewMode: 'small-grid'
+    };
+    for (const r of defaultsRes.rows) {
+      if (r.key === 'default_view_mode') defaults.defaultViewMode = r.value;
+      if (r.key === 'default_sort_mode') defaults.defaultSortMode = r.value;
+      if (r.key === 'default_folder_view_mode') defaults.defaultFolderViewMode = r.value;
+    }
+
     return reply.send({
       folderPath,
       folderCoverId,
@@ -263,7 +277,10 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       folderDescription,
       scanning: !exists, // Indicate if a scan was just triggered
       files,
-      directories
+      directories,
+      defaultViewMode: defaults.defaultViewMode,
+      defaultSortMode: defaults.defaultSortMode,
+      defaultFolderViewMode: defaults.defaultFolderViewMode
     });
   });
 }

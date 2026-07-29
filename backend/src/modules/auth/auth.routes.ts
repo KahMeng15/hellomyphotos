@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { pool } from '../../config/db';
 import { redis } from '../../config/redis';
 import { logger } from '../../utils/logger';
+import { requireAuth } from '../../utils/auth';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_please_change';
 
@@ -136,13 +137,13 @@ export async function authRoutes(fastify: FastifyInstance) {
   fastify.get('/me', async (request: FastifyRequest, reply: FastifyReply) => {
     const token = request.cookies.token;
     if (!token) {
-      return reply.status(401).send({ error: 'Not authenticated' });
+      return reply.status(401).send({ error: 'No token found' });
     }
 
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
       
-      const { rows } = await pool.query('SELECT role FROM users WHERE id = $1', [decoded.id]);
+      const { rows } = await pool.query('SELECT role, email, name FROM users WHERE id = $1', [decoded.id]);
       if (rows.length === 0) {
         return reply.status(401).send({ error: 'User not found' });
       }
@@ -159,6 +160,8 @@ export async function authRoutes(fastify: FastifyInstance) {
       
       const latestUser = {
         ...decoded,
+        name: rows[0].name,
+        email: rows[0].email,
         role,
         folders
       };
@@ -167,5 +170,52 @@ export async function authRoutes(fastify: FastifyInstance) {
     } catch (error) {
       return reply.status(401).send({ error: 'Invalid token' });
     }
+  });
+
+  fastify.put('/profile', { preHandler: requireAuth }, async (request, reply) => {
+    const { name, email, currentPassword } = request.body as any;
+    if (!name || !email || !currentPassword) {
+      return reply.status(400).send({ error: 'Name, email, and current password are required' });
+    }
+
+    const { rows: userRows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [request.user!.id]);
+    if (userRows.length === 0) return reply.status(404).send({ error: 'User not found' });
+
+    const isValid = await bcrypt.compare(currentPassword, userRows[0].password_hash);
+    if (!isValid) {
+      return reply.status(400).send({ error: 'Incorrect current password' });
+    }
+    
+    // Check email uniqueness
+    const { rows } = await pool.query('SELECT id FROM users WHERE email = $1 AND id != $2', [email, request.user!.id]);
+    if (rows.length > 0) {
+      return reply.status(400).send({ error: 'Email already exists' });
+    }
+
+    await pool.query('UPDATE users SET name = $1, email = $2 WHERE id = $3', [name, email, request.user!.id]);
+    
+    logger.info(`User ${request.user!.id} updated their profile`);
+    return { success: true };
+  });
+
+  fastify.put('/password', { preHandler: requireAuth }, async (request, reply) => {
+    const { currentPassword, newPassword } = request.body as any;
+    if (!currentPassword || !newPassword) {
+      return reply.status(400).send({ error: 'Current and new password are required' });
+    }
+
+    const { rows } = await pool.query('SELECT password_hash FROM users WHERE id = $1', [request.user!.id]);
+    if (rows.length === 0) return reply.status(404).send({ error: 'User not found' });
+
+    const isValid = await bcrypt.compare(currentPassword, rows[0].password_hash);
+    if (!isValid) {
+      return reply.status(400).send({ error: 'Incorrect current password' });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, request.user!.id]);
+
+    logger.info(`User ${request.user!.id} changed their password`);
+    return { success: true };
   });
 }

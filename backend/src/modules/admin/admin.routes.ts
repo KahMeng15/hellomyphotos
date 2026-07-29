@@ -214,7 +214,13 @@ export async function adminRoutes(fastify: FastifyInstance) {
       watermarkText: 'hellomyphotos',
       watermarkOpacity: 0.5,
       watermarkPosition: 'center',
-      watermarkEnforceGlobal: false
+      watermarkEnforceGlobal: false,
+      defaultViewMode: 'small-fit',
+      defaultSortMode: 'newest',
+      defaultFolderViewMode: 'small-grid',
+      defaultShareViewMode: 'small-fit',
+      defaultShareSortMode: 'newest',
+      defaultShareFolderViewMode: 'small-grid'
     };
     
     for (const r of rows) {
@@ -232,13 +238,19 @@ export async function adminRoutes(fastify: FastifyInstance) {
       if (r.key === 'watermark_opacity') settings.watermarkOpacity = r.value;
       if (r.key === 'watermark_position') settings.watermarkPosition = r.value;
       if (r.key === 'watermark_enforce_global') settings.watermarkEnforceGlobal = r.value;
+      if (r.key === 'default_view_mode') settings.defaultViewMode = r.value;
+      if (r.key === 'default_sort_mode') settings.defaultSortMode = r.value;
+      if (r.key === 'default_folder_view_mode') settings.defaultFolderViewMode = r.value;
+      if (r.key === 'default_share_view_mode') settings.defaultShareViewMode = r.value;
+      if (r.key === 'default_share_sort_mode') settings.defaultShareSortMode = r.value;
+      if (r.key === 'default_share_folder_view_mode') settings.defaultShareFolderViewMode = r.value;
     }
     
     return reply.send(settings);
   });
 
   fastify.put('/api/admin/settings', async (request, reply) => {
-    const { maxCpuCores, scanInterval, scanSchedule, mlConfidenceThreshold, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal } = request.body as any;
+    const { maxCpuCores, scanInterval, scanSchedule, mlConfidenceThreshold, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal, defaultViewMode, defaultSortMode, defaultFolderViewMode, defaultShareViewMode, defaultShareSortMode, defaultShareFolderViewMode } = request.body as any;
     
     const updates = [];
     // H-3 Note: maxCpuCores is persisted here but worker concurrency is set at startup from env vars.
@@ -257,6 +269,12 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (watermarkOpacity !== undefined) updates.push({ k: 'watermark_opacity', v: watermarkOpacity });
     if (watermarkPosition !== undefined) updates.push({ k: 'watermark_position', v: watermarkPosition });
     if (watermarkEnforceGlobal !== undefined) updates.push({ k: 'watermark_enforce_global', v: watermarkEnforceGlobal });
+    if (defaultViewMode !== undefined) updates.push({ k: 'default_view_mode', v: defaultViewMode });
+    if (defaultSortMode !== undefined) updates.push({ k: 'default_sort_mode', v: defaultSortMode });
+    if (defaultFolderViewMode !== undefined) updates.push({ k: 'default_folder_view_mode', v: defaultFolderViewMode });
+    if (defaultShareViewMode !== undefined) updates.push({ k: 'default_share_view_mode', v: defaultShareViewMode });
+    if (defaultShareSortMode !== undefined) updates.push({ k: 'default_share_sort_mode', v: defaultShareSortMode });
+    if (defaultShareFolderViewMode !== undefined) updates.push({ k: 'default_share_folder_view_mode', v: defaultShareFolderViewMode });
     
     for (const u of updates) {
       await query(

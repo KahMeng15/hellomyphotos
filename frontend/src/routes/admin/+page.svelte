@@ -5,7 +5,10 @@
 </script>
 
 <div class="admin-container">
-  <h2>Admin Dashboard</h2>
+  <div class="header">
+    <h2>Admin Dashboard</h2>
+    <p>Manage system configurations, user access, and background pipelines.</p>
+  </div>
   
   <a href="/admin/users" class="card link-card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1)); border-color: rgba(168, 85, 247, 0.3);">
     <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -84,7 +87,9 @@
     color: #f4f4f5;
   }
 
-  h2 { margin-bottom: 24px; }
+  .header { margin-bottom: 2rem; }
+  h2 { font-size: 2rem; margin: 0 0 0.5rem 0; }
+  p { color: #a1a1aa; margin: 0; }
 
   .card {
     background: var(--glass-bg);

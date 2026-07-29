@@ -10,19 +10,30 @@
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
   
   type SortMode = 'newest' | 'oldest' | 'a-z' | 'z-a';
   type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square';
+  type FolderViewMode = 'small-grid' | 'medium-grid' | 'large-grid' | 'list';
 
-  let sortMode: SortMode = $state('newest');
-  let viewMode: ViewMode = $state('small-fit');
+  let sortMode: SortMode = $state(data.defaultShareSortMode || 'newest');
+  let viewMode: ViewMode = $state(data.defaultShareViewMode || 'small-fit');
+  let folderViewMode: FolderViewMode = $state(data.defaultShareFolderViewMode || 'small-grid');
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
+  let showFolderViewMenu = $state(false);
+
+  let isFolderOnly = $derived(data.files.length === 0 && (data.directories?.length || 0) > 0);
+
+  let sortedDirectories = $derived((data.directories || []).slice().sort((a: any, b: any) => {
+    if (sortMode === 'a-z') return a.name.localeCompare(b.name);
+    if (sortMode === 'z-a') return b.name.localeCompare(a.name);
+    return 0;
+  }));
 
   let sortedFiles = $derived([...data.files].sort((a, b) => {
     if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);
@@ -254,8 +265,22 @@
           {/if}
         </div>
         
+        <div class="dropdown-container" use:clickOutside={() => showFolderViewMenu = false}>
+          <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; showViewMenu = false; }} title="Folder View">
+            <Folder size={18} />
+          </button>
+          {#if showFolderViewMenu}
+            <div class="dropdown-menu">
+              <button class:active={folderViewMode === 'small-grid'} onclick={() => { folderViewMode = 'small-grid'; showFolderViewMenu = false; }}>Small Grid</button>
+              <button class:active={folderViewMode === 'medium-grid'} onclick={() => { folderViewMode = 'medium-grid'; showFolderViewMenu = false; }}>Medium Grid</button>
+              <button class:active={folderViewMode === 'large-grid'} onclick={() => { folderViewMode = 'large-grid'; showFolderViewMenu = false; }}>Large Grid</button>
+              <button class:active={folderViewMode === 'list'} onclick={() => { folderViewMode = 'list'; showFolderViewMenu = false; }}>List View</button>
+            </div>
+          {/if}
+        </div>
+
         <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
-          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
+          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; showFolderViewMenu = false; }} title="View">
             <LayoutGrid size={18} />
           </button>
           {#if showViewMenu}
@@ -283,8 +308,8 @@
 
 {#key data.folderPath}
 {#if data.directories && data.directories.length > 0}
-  <div class="dir-grid {data.files.length > 0 ? 'list-view' : ''}">
-    {#each data.directories as dir, i}
+  <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (data.files.length > 0 ? 'list-view' : '')}">
+    {#each sortedDirectories as dir, i}
       <a href="{$page.url.pathname.endsWith('/') ? $page.url.pathname + encodeURIComponent(dir.name) : $page.url.pathname + '/' + encodeURIComponent(dir.name)}" class="dir-card" style="animation-delay: {i * 40}ms">
         <div class="dir-cover">
           {#if dir.cover_id}
@@ -551,6 +576,44 @@
   }
 
   .dir-grid.list-view .dir-name {
+    font-size: 1rem;
+    margin: 0;
+  }
+
+  .dir-grid.folder-mode-small-grid {
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  }
+  .dir-grid.folder-mode-medium-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+  .dir-grid.folder-mode-large-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+  .dir-grid.folder-mode-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .dir-grid.folder-mode-list .dir-card {
+    flex-direction: row;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 8px;
+    gap: 12px;
+    border: 1px solid var(--glass-border);
+  }
+  .dir-grid.folder-mode-list .dir-cover {
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .dir-grid.folder-mode-list .dir-info {
+    padding: 0;
+    padding-right: 8px;
+  }
+  .dir-grid.folder-mode-list .dir-name {
     font-size: 1rem;
     margin: 0;
   }
