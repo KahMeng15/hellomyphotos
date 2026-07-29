@@ -13,7 +13,10 @@ export class ScannerService {
     try {
       const files = await fs.promises.readdir(fullPath, { withFileTypes: true });
       const { scannerQueue } = await import('../../queue/scannerQueue');
-      await scannerQueue.add('scan-directory', { folderPath: basePath });
+      // M-1 Fix: Use folderPath as jobId so duplicate scan jobs are deduplicated in BullMQ
+      // Note: BullMQ custom job IDs cannot contain colons.
+      const safeJobId = `scan_${basePath || 'root'}`.replace(/:/g, '_');
+      await scannerQueue.add('scan-directory', { folderPath: basePath }, { jobId: safeJobId });
       
       for (const file of files) {
         if (file.isDirectory() && !file.name.startsWith('.')) {
@@ -32,8 +35,11 @@ export class ScannerService {
     try {
       const files = await fs.promises.readdir(fullPath, { withFileTypes: true });
       const currentFilesOnDisk: string[] = [];
+      // Track whether any directory entries were seen (even if all filtered out)
+      let totalEntriesSeen = 0;
 
       for (const file of files) {
+        totalEntriesSeen++;
         if (file.isSymbolicLink()) {
           console.warn(`Skipping symbolic link: ${file.name}`);
           continue;
@@ -77,14 +83,32 @@ export class ScannerService {
         }
       }
 
-      // Garbage Collection: Delete files that no longer exist on disk
+      // Garbage Collection: Delete files that no longer exist on disk.
+      // C-3 Fix: Only delete DB records when we KNOW the scan succeeded and saw
+      // media files (or confirmed the directory is genuinely empty via totalEntriesSeen).
+      // This prevents a transient I/O issue or NFS glitch (directory appears empty)
+      // from mass-deleting all records for that folder.
       if (currentFilesOnDisk.length > 0) {
+        // Normal case: delete DB records for files that are no longer on disk
         await query(`
           DELETE FROM media_files 
           WHERE folder_path = $1 AND file_name != ALL($2::text[])
         `, [folderPath, currentFilesOnDisk]);
-      } else {
+      } else if (totalEntriesSeen > 0) {
+        // Directory has entries (subdirs, hidden files, unsupported types) but no media:
+        // safe to purge media records for this folder
         await query(`DELETE FROM media_files WHERE folder_path = $1`, [folderPath]);
+      } else {
+        // Directory appears completely empty (0 entries from readdir).
+        // This could be a transient NFS/mount glitch — do NOT delete records.
+        // We only clean up if the folder itself no longer exists on disk.
+        const folderStillExists = await fs.promises.access(fullPath).then(() => true).catch(() => false);
+        if (!folderStillExists) {
+          console.log(`[Scanner] Folder ${fullPath} no longer exists, removing DB records.`);
+          await query(`DELETE FROM media_files WHERE folder_path = $1`, [folderPath]);
+        } else {
+          console.warn(`[Scanner] Folder ${fullPath} appears empty (0 entries). Skipping GC to avoid data loss on transient mount issue.`);
+        }
       }
 
     } catch (err: any) {

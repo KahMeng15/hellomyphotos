@@ -107,7 +107,9 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     
     if (!exists) {
       // 2. Set Cooldown & Push Job
-      await redis.set(cooldownKey, '1', 'EX', 5); // 5 seconds
+      // M-6 Fix: Increased cooldown from 5s to 30s to reduce background scan churn
+      // when multiple users are browsing folders concurrently.
+      await redis.set(cooldownKey, '1', 'EX', 30); // 30 seconds
       await scannerQueue.add('scan-directory', { folderPath });
     }
 

@@ -16,6 +16,45 @@ import { ClusterService } from '../ml/cluster.service';
 import path from 'path';
 import fs from 'fs';
 
+// C-2 Fix: Distributed lock for destructive admin operations.
+// Prevents concurrent reset calls (double-click, two admin tabs) from corrupting state.
+const ADMIN_RESET_LOCK_KEY = 'admin:reset_lock';
+const ADMIN_RESET_LOCK_TTL = 120; // seconds
+async function acquireResetLock(reply: any): Promise<boolean> {
+  const acquired = await redis.set(ADMIN_RESET_LOCK_KEY, '1', 'EX', ADMIN_RESET_LOCK_TTL, 'NX');
+  if (!acquired) {
+    reply.status(409).send({ error: 'Another reset operation is already in progress. Please wait and try again.' });
+    return false;
+  }
+  return true;
+}
+async function releaseResetLock(): Promise<void> {
+  await redis.del(ADMIN_RESET_LOCK_KEY);
+}
+
+// H-5 Fix: Helper to paginate full-table queries and enqueue jobs in batches.
+// Prevents loading the entire media_files table into Node.js heap (OOM risk at scale).
+async function enqueuePaginated(
+  whereClause: string,
+  params: any[],
+  enqueue: (row: any) => Promise<void>,
+  batchSize = 500
+): Promise<void> {
+  let offset = 0;
+  while (true) {
+    const res = await query(
+      `SELECT id, folder_path, file_name, mime_type FROM media_files ${whereClause} ORDER BY id LIMIT ${batchSize} OFFSET ${offset}`,
+      params
+    );
+    if (res.rows.length === 0) break;
+    for (const row of res.rows) {
+      await enqueue(row);
+    }
+    offset += batchSize;
+    if (res.rows.length < batchSize) break;
+  }
+}
+
 export async function adminRoutes(fastify: FastifyInstance) {
   fastify.addHook('onRequest', requireAuth);
   
@@ -183,6 +222,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
     const { maxCpuCores, scanInterval, mlConfidenceThreshold, throttleAuth, throttlePublic, rateLimitApi, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal } = request.body as any;
     
     const updates = [];
+    // H-3 Note: maxCpuCores is persisted here but worker concurrency is set at startup from env vars.
+    // Changing this setting takes effect only after a service restart. Consider documenting this in the UI.
     if (maxCpuCores !== undefined) updates.push({ k: 'max_cpu_cores', v: maxCpuCores });
     if (scanInterval !== undefined) updates.push({ k: 'scan_interval', v: scanInterval });
     if (mlConfidenceThreshold !== undefined) updates.push({ k: 'ml_confidence', v: mlConfidenceThreshold });
@@ -205,140 +246,217 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post('/api/admin/rescan', async (request, reply) => {
+    // M-4 Fix: Rate-limit rescan to prevent spamming I/O and queue flooding.
+    const cooldownKey = 'admin:rescan_cooldown';
+    const onCooldown = await redis.exists(cooldownKey);
+    if (onCooldown) {
+      return reply.status(429).send({ error: 'Rescan was triggered recently. Please wait before triggering again.' });
+    }
+    await redis.set(cooldownKey, '1', 'EX', 10); // 10-second cooldown
     // Run it asynchronously in the background so we don't block the HTTP request
     ScannerService.scanAllDirectories('').catch(console.error);
     return reply.send({ success: true, message: 'Rescan initiated in the background' });
   });
 
   fastify.post('/api/admin/rescan-faces', async (request, reply) => {
-    // 1. Wipe out existing face embeddings
-    await query(`TRUNCATE TABLE face_embeddings`);
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      // 1. Wipe out existing face embeddings
+      await query(`TRUNCATE TABLE face_embeddings`);
 
-    // 2. Queue every media file for face detection again
-    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
-    for (const row of result.rows) {
-      const fullPath = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name);
-      await faceDetectionQueue.add('detect-faces', { mediaId: row.id, fullPath, mimeType: row.mime_type });
+      // 2. Queue every image file for face detection again (paginated to avoid OOM)
+      const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
+      await enqueuePaginated(`WHERE mime_type LIKE 'image/%'`, [], async (row) => {
+        const fullPath = path.resolve(mediaRoot, row.folder_path, row.file_name);
+        await faceDetectionQueue.add('detect-faces', { mediaId: row.id, fullPath, mimeType: row.mime_type });
+      });
+    } finally {
+      await releaseResetLock();
     }
-    
     return reply.send({ success: true, message: 'Face reset initiated in the background' });
   });
 
   fastify.post('/api/admin/rescan-exif', async (request, reply) => {
-    // Queue every media file for EXIF reprocessing
-    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
-    for (const row of result.rows) {
-      await mediaQueue.add('process-media', { 
-        mediaId: row.id,
-        fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name),
-        mimeType: row.mime_type
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      // Queue every image file for EXIF reprocessing (paginated to avoid OOM)
+      const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
+      await enqueuePaginated(`WHERE mime_type LIKE 'image/%'`, [], async (row) => {
+        await mediaQueue.add('process-media', {
+          mediaId: row.id,
+          fullPath: path.resolve(mediaRoot, row.folder_path, row.file_name),
+          mimeType: row.mime_type
+        });
       });
+    } finally {
+      await releaseResetLock();
     }
     return reply.send({ success: true, message: 'EXIF extraction initiated in the background' });
   });
 
   fastify.post('/api/admin/reset-index', async (request, reply) => {
-    await query(`TRUNCATE TABLE smart_search_embeddings CASCADE`);
-    await query(`TRUNCATE TABLE face_embeddings CASCADE`);
-    await query(`TRUNCATE TABLE media_analytics CASCADE`);
-    await query(`TRUNCATE TABLE media_files CASCADE`);
-    await query(`TRUNCATE TABLE folders CASCADE`);
-    await query(`DELETE FROM people`);
-    
-    const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
-    fs.rmSync(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
-    fs.rmSync(path.join(cacheRoot, '480p'), { recursive: true, force: true });
-    fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
-    fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
+    // C-2 Fix: Acquire distributed lock to prevent concurrent destructive operations.
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      // M-3 Fix: All truncates in one atomic PostgreSQL statement.
+      // Using query() (not pool.connect()) so ensureSchema() runs first and all tables exist.
+      // NOTE: 'folders' table does NOT exist — the real tables are folder_settings and shared_folders.
+      // shared_folders has FKs to media_files and people, so it must be included or CASCADE handles it.
+      await query(`
+        TRUNCATE TABLE 
+          smart_search_embeddings,
+          face_embeddings,
+          media_analytics,
+          shared_folders,
+          folder_settings,
+          media_files
+        RESTART IDENTITY CASCADE
+      `);
+      // people uses UUID PKs (no sequences), so DELETE is correct here
+      await query(`DELETE FROM people`);
 
-    for (const q of Object.values(allQueues)) {
-      await q.clean(0, 10000, 'completed');
-      await q.clean(0, 10000, 'failed');
+      // Clear Redis analytics cache so the cron job doesn't try to flush stats for wiped media files (which causes a foreign key error)
+      const analyticsKeys = await redis.keys('analytics:*');
+      if (analyticsKeys.length > 0) {
+        await redis.del(...analyticsKeys);
+      }
+
+      const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
+      // M-5 Fix: Use async fs.promises.rm to avoid blocking the event loop on large cache dirs.
+      await fs.promises.rm(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
+      await fs.promises.rm(path.join(cacheRoot, '480p'), { recursive: true, force: true });
+      // Also clear the faces/ thumbnail cache — the dashboard reads completed count from disk files,
+      // so this must be wiped alongside the DB to avoid showing stale face thumbnail counts.
+      await fs.promises.rm(path.join(cacheRoot, 'faces'), { recursive: true, force: true });
+      await fs.promises.mkdir(path.join(cacheRoot, '1080p'), { recursive: true });
+      await fs.promises.mkdir(path.join(cacheRoot, '480p'), { recursive: true });
+      await fs.promises.mkdir(path.join(cacheRoot, 'faces'), { recursive: true });
+
+
+      for (const q of Object.values(allQueues)) {
+        await q.pause();
+        await q.drain(true);
+        await q.clean(0, 10000, 'completed');
+        await q.clean(0, 10000, 'failed');
+        await q.clean(0, 10000, 'active');
+        await q.clean(0, 10000, 'wait');
+        await q.clean(0, 10000, 'delayed');
+        await q.resume();
+      }
+
+      ScannerService.scanAllDirectories('').catch(console.error);
+    } finally {
+      await releaseResetLock();
     }
-
-    ScannerService.scanAllDirectories('').catch(console.error);
     return reply.send({ success: true, message: 'Index wiped and rescan initiated in the background' });
   });
 
+
   fastify.post('/api/admin/reset-smart-search', async (request, reply) => {
-    await query(`TRUNCATE TABLE smart_search_embeddings`);
-    await query(`UPDATE media_files SET clip_embedding = NULL`);
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      await query(`TRUNCATE TABLE smart_search_embeddings`);
+      await query(`UPDATE media_files SET clip_embedding = NULL`);
 
-    await allQueues['smart-search'].clean(0, 10000, 'completed');
-    await allQueues['smart-search'].clean(0, 10000, 'failed');
+      await allQueues['smart-search'].clean(0, 10000, 'completed');
+      await allQueues['smart-search'].clean(0, 10000, 'failed');
 
-    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' OR mime_type LIKE 'video/%'`);
-    for (const row of result.rows) {
-      const fullPath = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name);
-      await smartSearchQueue.add('generate-smart-search', { mediaId: row.id, fullPath, mimeType: row.mime_type });
+      // H-5 Fix: Paginated enqueue to avoid OOM
+      const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
+      await enqueuePaginated(`WHERE mime_type LIKE 'image/%' OR mime_type LIKE 'video/%'`, [], async (row) => {
+        const fullPath = path.resolve(mediaRoot, row.folder_path, row.file_name);
+        await smartSearchQueue.add('generate-smart-search', { mediaId: row.id, fullPath, mimeType: row.mime_type });
+      });
+    } finally {
+      await releaseResetLock();
     }
     return reply.send({ success: true, message: 'Smart search reset initiated in the background' });
   });
 
   fastify.post('/api/admin/reset-exif', async (request, reply) => {
-    await query(`UPDATE media_files SET blurhash = NULL, exif_json = NULL`);
-    
-    const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
-    fs.rmSync(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
-    fs.rmSync(path.join(cacheRoot, '480p'), { recursive: true, force: true });
-    fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
-    fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      await query(`UPDATE media_files SET blurhash = NULL, exif_json = NULL`);
 
-    await allQueues['metadata'].clean(0, 10000, 'completed');
-    await allQueues['metadata'].clean(0, 10000, 'failed');
-    await allQueues['thumbnail'].clean(0, 10000, 'completed');
-    await allQueues['thumbnail'].clean(0, 10000, 'failed');
+      const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
+      // M-5 Fix: async rm to avoid blocking the event loop
+      await fs.promises.rm(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
+      await fs.promises.rm(path.join(cacheRoot, '480p'), { recursive: true, force: true });
+      await fs.promises.mkdir(path.join(cacheRoot, '1080p'), { recursive: true });
+      await fs.promises.mkdir(path.join(cacheRoot, '480p'), { recursive: true });
 
-    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
-    for (const row of result.rows) {
-      await mediaQueue.add('process-media', { 
-        mediaId: row.id,
-        fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name),
-        mimeType: row.mime_type
+      await allQueues['metadata'].clean(0, 10000, 'completed');
+      await allQueues['metadata'].clean(0, 10000, 'failed');
+      await allQueues['thumbnail'].clean(0, 10000, 'completed');
+      await allQueues['thumbnail'].clean(0, 10000, 'failed');
+
+      // H-5 Fix: Paginated enqueue to avoid OOM
+      const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
+      await enqueuePaginated(`WHERE mime_type LIKE 'image/%'`, [], async (row) => {
+        await mediaQueue.add('process-media', {
+          mediaId: row.id,
+          fullPath: path.resolve(mediaRoot, row.folder_path, row.file_name),
+          mimeType: row.mime_type
+        });
       });
+    } finally {
+      await releaseResetLock();
     }
     return reply.send({ success: true, message: 'Media/EXIF reset initiated in the background' });
   });
 
   fastify.post('/api/admin/reset-thumbnails', async (request, reply) => {
-    await query(`UPDATE media_files SET blurhash = NULL WHERE mime_type LIKE 'image/%'`);
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      await query(`UPDATE media_files SET blurhash = NULL WHERE mime_type LIKE 'image/%'`);
 
-    const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
-    fs.rmSync(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
-    fs.rmSync(path.join(cacheRoot, '480p'), { recursive: true, force: true });
-    fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
-    fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
+      const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
+      // M-5 Fix: async rm
+      await fs.promises.rm(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
+      await fs.promises.rm(path.join(cacheRoot, '480p'), { recursive: true, force: true });
+      await fs.promises.mkdir(path.join(cacheRoot, '1080p'), { recursive: true });
+      await fs.promises.mkdir(path.join(cacheRoot, '480p'), { recursive: true });
 
-    await allQueues['thumbnail'].clean(0, 10000, 'completed');
-    await allQueues['thumbnail'].clean(0, 10000, 'failed');
+      await allQueues['thumbnail'].clean(0, 10000, 'completed');
+      await allQueues['thumbnail'].clean(0, 10000, 'failed');
 
-    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
-    for (const row of result.rows) {
-      await thumbnailQueue.add('generate-thumbnail', {
-        mediaId: row.id,
-        fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name),
-        mimeType: row.mime_type,
-        skipCascade: true
+      // H-5 Fix: Paginated enqueue
+      const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
+      await enqueuePaginated(`WHERE mime_type LIKE 'image/%'`, [], async (row) => {
+        await thumbnailQueue.add('generate-thumbnail', {
+          mediaId: row.id,
+          fullPath: path.resolve(mediaRoot, row.folder_path, row.file_name),
+          mimeType: row.mime_type,
+          skipCascade: true
+        });
       });
+    } finally {
+      await releaseResetLock();
     }
     return reply.send({ success: true, message: 'Thumbnail reset initiated in the background' });
   });
 
   fastify.post('/api/admin/reset-faces', async (request, reply) => {
-    await query(`TRUNCATE TABLE face_embeddings CASCADE`);
-    await query(`DELETE FROM people`);
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      await query(`TRUNCATE TABLE face_embeddings CASCADE`);
+      await query(`DELETE FROM people`);
 
-    await allQueues['face-detection'].clean(0, 10000, 'completed');
-    await allQueues['face-detection'].clean(0, 10000, 'failed');
-    await allQueues['facial-recognition'].clean(0, 10000, 'completed');
-    await allQueues['facial-recognition'].clean(0, 10000, 'failed');
-    await allQueues['face-thumbnail'].clean(0, 10000, 'completed');
-    await allQueues['face-thumbnail'].clean(0, 10000, 'failed');
+      await allQueues['face-detection'].clean(0, 10000, 'completed');
+      await allQueues['face-detection'].clean(0, 10000, 'failed');
+      await allQueues['facial-recognition'].clean(0, 10000, 'completed');
+      await allQueues['facial-recognition'].clean(0, 10000, 'failed');
+      await allQueues['face-thumbnail'].clean(0, 10000, 'completed');
+      await allQueues['face-thumbnail'].clean(0, 10000, 'failed');
 
-    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
-    for (const row of result.rows) {
-      const fullPath = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name);
-      await faceDetectionQueue.add('detect-faces', { mediaId: row.id, fullPath, mimeType: row.mime_type });
+      // H-5 Fix: Paginated enqueue
+      const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
+      await enqueuePaginated(`WHERE mime_type LIKE 'image/%'`, [], async (row) => {
+        const fullPath = path.resolve(mediaRoot, row.folder_path, row.file_name);
+        await faceDetectionQueue.add('detect-faces', { mediaId: row.id, fullPath, mimeType: row.mime_type });
+      });
+    } finally {
+      await releaseResetLock();
     }
     return reply.send({ success: true, message: 'Face reset initiated in the background' });
   });
@@ -353,16 +471,22 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post('/api/admin/clear-face-thumbnails', async (request, reply) => {
-    const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
-    fs.rmSync(path.join(cacheRoot, 'faces'), { recursive: true, force: true });
-    fs.mkdirSync(path.join(cacheRoot, 'faces'), { recursive: true });
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
+      // M-5 Fix: async rm
+      await fs.promises.rm(path.join(cacheRoot, 'faces'), { recursive: true, force: true });
+      await fs.promises.mkdir(path.join(cacheRoot, 'faces'), { recursive: true });
 
-    await faceThumbnailQueue.clean(0, 10000, 'completed');
-    await faceThumbnailQueue.clean(0, 10000, 'failed');
+      await faceThumbnailQueue.clean(0, 10000, 'completed');
+      await faceThumbnailQueue.clean(0, 10000, 'failed');
 
-    const result = await query(`SELECT DISTINCT media_id FROM face_embeddings`);
-    for (const row of result.rows) {
-      await faceThumbnailQueue.add('generate-face-thumbnails', { mediaId: row.media_id });
+      const result = await query(`SELECT DISTINCT media_id FROM face_embeddings`);
+      for (const row of result.rows) {
+        await faceThumbnailQueue.add('generate-face-thumbnails', { mediaId: row.media_id });
+      }
+    } finally {
+      await releaseResetLock();
     }
     return reply.send({ success: true, message: 'Face thumbnail cache cleared and regeneration queued' });
   });

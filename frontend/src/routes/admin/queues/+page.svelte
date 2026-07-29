@@ -78,7 +78,7 @@
   async function saveSettings() {
     saving = true;
     try {
-      await fetch(`${API_BASE}/api/admin/settings`, {
+      const res = await fetch(`${API_BASE}/api/admin/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -88,7 +88,16 @@
           mlConfidenceThreshold: Number(settings.mlConfidenceThreshold)
         })
       });
-      customAlert('Success', 'Processing settings saved!');
+      // D-4 Fix: check response.ok before declaring success — previously showed
+      // 'Settings saved!' even when the API returned an error.
+      if (res.ok) {
+        customAlert('Success', 'Processing settings saved!');
+      } else {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        customAlert('Error', `Failed to save settings: ${err.error || res.statusText}`);
+      }
+    } catch (e: any) {
+      customAlert('Error', `Failed to save settings: ${e.message}`);
     } finally {
       saving = false;
     }
@@ -116,7 +125,10 @@
 
   onMount(() => {
     loadData();
-    pollInterval = setInterval(loadQueuesOnly, 2000);
+    // D-2 Fix: Increased poll interval from 2s to 5s.
+    // Each poll fires 8+ DB queries; at 2s with multiple admin tabs this causes
+    // significant DB query rate. 5s is a reasonable balance for real-time feedback.
+    pollInterval = setInterval(loadQueuesOnly, 5000);
   });
 
   onDestroy(() => {
@@ -151,11 +163,21 @@
     if (res.ok) await loadQueuesOnly();
   }
 
-  async function triggerResetIndex() {
-    customConfirm('Reset Index', 'Are you sure you want to wipe the database index and all caches? This will rescan all files from scratch.', true, async () => {
-      await fetch(`${API_BASE}/api/admin/reset-index`, { method: 'POST', credentials: 'include' });
-      customAlert('Success', 'Index reset and background rescan initiated!');
-    });
+  async function triggerResetEverything() {
+    customConfirm(
+      'Reset Everything',
+      'This will permanently wipe ALL indexed data: every photo record, EXIF tag, thumbnail, face detection result, and smart search embedding. Your actual photo files on disk are NOT deleted. Everything will be re-processed from scratch. This cannot be undone.',
+      true,
+      async () => {
+        const res = await fetch(`${API_BASE}/api/admin/reset-index`, { method: 'POST', credentials: 'include' });
+        if (res.ok) {
+          customAlert('Reset Started', 'All data wiped. A full rescan has been triggered in the background.');
+        } else {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          customAlert('Error', `Reset failed: ${err.error}`);
+        }
+      }
+    );
   }
 
   async function triggerResetExif() {
@@ -196,10 +218,7 @@
   }
 
   async function triggerNuke() {
-    customConfirm('System Reset & Full Rescan', 'Are you sure you want to completely wipe the index, EXIF data, and facial recognition data, and rescan everything from scratch? This is a destructive operation and will take a significant amount of time.', true, async () => {
-      await fetch(`${API_BASE}/api/admin/reset-index`, { method: 'POST', credentials: 'include' });
-      customAlert('Success', 'Full system reset and background rescan initiated!');
-    });
+    triggerResetEverything();
   }
 
   const queueNames = [
@@ -225,13 +244,38 @@
   };
 
   async function triggerJob(name: string) {
-    await fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' });
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        customAlert('Error', `Failed to start ${name}: ${err.error || res.statusText}`);
+      }
+    } catch (e: any) {
+      customAlert('Error', `Network error starting ${name}: ${e.message}`);
+    }
     await loadQueuesOnly();
   }
 
   async function runAllJobs() {
-    for (const name of queueNames) {
-      await fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' });
+    // D-5 Fix: Fire all trigger requests concurrently instead of sequentially.
+    // Previously 8 sequential awaits could block the UI for several seconds.
+    try {
+      const results = await Promise.all(
+        queueNames.map(name =>
+          fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' })
+        )
+      );
+      
+      const failures = [];
+      for (let i = 0; i < results.length; i++) {
+        if (!results[i].ok) failures.push(queueNames[i]);
+      }
+      
+      if (failures.length > 0) {
+        customAlert('Warning', `Failed to start some queues: ${failures.join(', ')}`);
+      }
+    } catch (e: any) {
+      customAlert('Error', `Network error starting queues: ${e.message}`);
     }
     await loadQueuesOnly();
   }
@@ -285,6 +329,8 @@
         <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;"><Cpu size={18} color="#3b82f6"/> Hardware & Scans</h3>
         <div class="form-group" style="margin-bottom: 1rem;">
           <label style="display: block; font-size: 0.9rem; margin-bottom: 0.25rem;">Max CPU Cores (Concurrency)</label>
+          <!-- H-3 Note: This setting is read at startup from env vars. Changes take effect after a service restart. -->
+          <p style="font-size: 0.75rem; color: #a1a1aa; margin: 0 0 0.4rem 0;">⚠️ Requires service restart to take effect.</p>
           <input type="number" bind:value={settings.maxCpuCores} min="1" max="32" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
         </div>
         <div class="form-group">
@@ -343,7 +389,8 @@
 
     <div style="margin-top: 0.5rem;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="margin: 0; font-size: 1.25rem; color: #e4e4e7;">7 Pipeline Queues</h3>
+        <!-- D-1 Fix: was incorrectly labelled "7 Pipeline Queues" when there are 8 -->
+        <h3 style="margin: 0; font-size: 1.25rem; color: #e4e4e7;">8 Pipeline Queues</h3>
         <div style="display: flex; gap: 0.5rem;">
           <button class="btn success sm" onclick={runAllJobs}><Play size={14}/> Start All</button>
           <button class="btn warning sm" onclick={pauseAllJobs}><Pause size={14}/> Pause All</button>
@@ -359,7 +406,7 @@
             {@const pCompleted = total > 0 ? (counts.completed / total) * 100 : 0}
             {@const pActive = total > 0 ? (counts.active / total) * 100 : 0}
             {@const pWaiting = total > 0 ? (counts.waiting / total) * 100 : 0}
-            {@const isRunning = (q.bullmq?.active || 0) > 0 || (q.bullmq?.waiting || 0) > 0}
+            {@const isRunning = (q.bullmq?.active || 0) > 0}
 
             <div class="card queue-card" style="margin: 0;">
               <div class="q-header">
@@ -429,8 +476,8 @@
           It will then trigger a full background rescan of your media directory from scratch. This operation is destructive and cannot be undone.
         </p>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(239, 68, 68, 0.2);">
-          <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetIndex}>
-            <Activity size={16}/> Reset Index
+          <button class="btn danger" style="width: 100%; justify-content: center;" onclick={triggerResetEverything}>
+            <Activity size={16}/> Reset Everything
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetExif}>
             <Save size={16}/> Reset EXIF & Thumbnails
@@ -449,9 +496,14 @@
           </button>
         </div>
         
-        <button class="btn danger" style="width: 100%; justify-content: center; padding: 0.75rem; font-size: 1rem;" onclick={triggerNuke}>
-          <Trash2 size={18}/> Reset & Rescan Everything
-        </button>
+        <!-- D-3 Fix: The original 'Reset & Rescan Everything' nuke button called the same
+             /api/admin/reset-index endpoint as 'Reset Index' above — making it a duplicate.
+             Replaced with a clear explanation and pointer to the existing buttons. -->
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px dashed rgba(239, 68, 68, 0.4); border-radius: 8px; padding: 1rem; text-align: center;">
+          <p style="font-size: 0.85rem; color: #fca5a5; margin: 0;">
+            💡 To wipe everything and start fresh, use <strong>Reset Index</strong> above — it truncates all tables, clears all caches, and triggers a full rescan in one operation.
+          </p>
+        </div>
       </div>
     </div>
   </div>

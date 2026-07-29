@@ -1,24 +1,35 @@
-import { scannerQueue } from '../queue/scannerQueue';
-import { redis } from '../config/redis';
+import { query } from '../config/db';
 
-// Simple interval-based cron using setInterval (can be replaced with 'node-cron' or BullMQ repeatable jobs)
+// H-4 Fix: Read scan interval from the admin_settings DB table (where the admin panel writes it),
+// not from a Redis key ('settings:scan_interval') that was never populated by the settings save logic.
+const DEFAULT_SCAN_INTERVAL_MS = 3_600_000; // 1 hour
+
+async function getScanIntervalMs(): Promise<number> {
+  try {
+    const res = await query(`SELECT value FROM admin_settings WHERE key = 'scan_interval'`);
+    if (res.rows.length > 0) {
+      const val = JSON.parse(res.rows[0].value);
+      const ms = parseInt(String(val), 10);
+      if (!isNaN(ms) && ms > 0) return ms;
+    }
+  } catch (err) {
+    console.error('[Cron] Failed to read scan_interval from DB, using default:', err);
+  }
+  return DEFAULT_SCAN_INTERVAL_MS;
+}
+
 const checkInterval = async () => {
   try {
-    const scanIntervalStr = await redis.get('settings:scan_interval');
-    // Default to 1 hour (3600000 ms) if not set
-    const intervalMs = scanIntervalStr ? parseInt(scanIntervalStr, 10) : 3600000;
-    
-    // Add job to scan all folders periodically
+    const intervalMs = await getScanIntervalMs();
     console.log(`[Cron] Adding periodic full scan job. Next run in ${intervalMs}ms`);
     const { ScannerService } = await import('../modules/scanner/scanner.service');
     await ScannerService.scanAllDirectories('');
-
     setTimeout(checkInterval, intervalMs);
   } catch (error) {
-    console.error(`[Cron] Error scheduling periodic scan`, error);
-    setTimeout(checkInterval, 3600000); // Retry in 1 hour
+    console.error('[Cron] Error scheduling periodic scan', error);
+    setTimeout(checkInterval, DEFAULT_SCAN_INTERVAL_MS); // Retry at default interval
   }
-}
+};
 
-// Start cron
-setTimeout(checkInterval, 10000); // Start first run after 10s of boot
+// Start cron — first run 10s after boot to allow DB/Redis to stabilise
+setTimeout(checkInterval, 10_000);

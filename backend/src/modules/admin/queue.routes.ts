@@ -101,11 +101,24 @@ export async function queueRoutes(fastify: FastifyInstance) {
             break;
           }
           case 'face-thumbnail': {
+            // H-1 Fix: total = people with face embeddings, completed = people with a face thumbnail on disk.
+            // Previously both columns used the same expression, always giving 100%.
+            const cacheRoot = process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw');
+            const facesDir = path.join(cacheRoot, 'faces');
             const r = await query(`
-              SELECT COALESCE((SELECT COUNT(*)::int FROM people p WHERE EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.person_id = p.id)), 0) as total,
-                     COALESCE((SELECT COUNT(*)::int FROM people p WHERE EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.person_id = p.id)), 0) as completed
+              SELECT COALESCE(
+                (SELECT COUNT(DISTINCT fe.person_id)::int FROM face_embeddings fe WHERE fe.person_id IS NOT NULL), 0
+              ) AS total
             `);
-            total = r.rows[0].total; completed = r.rows[0].completed;
+            total = r.rows[0].total;
+            // Count completed by checking how many face thumbnail files actually exist on disk
+            try {
+              const { readdir } = await import('fs/promises');
+              const files = await readdir(facesDir);
+              completed = files.filter(f => f.endsWith('.webp')).length;
+            } catch {
+              completed = 0;
+            }
             break;
           }
         }
@@ -177,10 +190,13 @@ export async function queueRoutes(fastify: FastifyInstance) {
     const { name } = request.params as any;
     const q = queues[name];
     if (!q) return reply.status(404).send({ error: `Queue '${name}' not found` });
+    // M-2 Fix: Pause the queue and drain pending jobs without resuming immediately.
+    // Previously the queue was paused, drained, then immediately resumed — which meant
+    // 'Stop' had no lasting effect. Now the queue stays paused until explicitly resumed.
     await q.pause();
     await q.drain(true);
     await q.clean(0, 10000, 'active');
-    await q.resume(); // Unpause after stopping so it doesn't stay paused
+    // Do NOT call q.resume() here — admin must explicitly click Resume to restart.
     return reply.send({ success: true });
   });
 
@@ -205,9 +221,10 @@ export async function queueRoutes(fastify: FastifyInstance) {
 
     if (name === 'scanner') {
       const { ScannerService } = await import('../scanner/scanner.service');
-      await ScannerService.scanAllDirectories('');
+      ScannerService.scanAllDirectories('').catch(console.error);
     } else if (name === 'metadata') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files`);
+      // H-6 Fix: Only enqueue files that haven't been processed yet (exif_json IS NULL)
+      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE exif_json IS NULL`);
       for (const row of res.rows) {
         await metadataQueue.add('extract-metadata', {
           mediaId: row.id,
@@ -216,7 +233,8 @@ export async function queueRoutes(fastify: FastifyInstance) {
         });
       }
     } else if (name === 'thumbnail') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
+      // H-6 Fix: Only enqueue images that are missing either thumbnail size
+      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' AND (NOT has_1080p OR NOT has_480p)`);
       for (const row of res.rows) {
         await thumbnailQueue.add('generate-thumbnail', {
           mediaId: row.id,
@@ -225,7 +243,8 @@ export async function queueRoutes(fastify: FastifyInstance) {
         });
       }
     } else if (name === 'video') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'video/%'`);
+      // H-6 Fix: Only enqueue videos that haven't been transcoded yet
+      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL`);
       for (const row of res.rows) {
         await videoQueue.add('process-video', {
           mediaId: row.id,
@@ -234,7 +253,8 @@ export async function queueRoutes(fastify: FastifyInstance) {
         });
       }
     } else if (name === 'smart-search') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files`);
+      // H-6 Fix: Only enqueue files missing a CLIP embedding
+      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE clip_embedding IS NULL`);
       for (const row of res.rows) {
         await smartSearchQueue.add('generate-smart-search', {
           mediaId: row.id,
@@ -243,7 +263,10 @@ export async function queueRoutes(fastify: FastifyInstance) {
         });
       }
     } else if (name === 'face-detection') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
+      // H-6 Fix: Only enqueue images that have no face embedding records yet
+      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files
+        WHERE mime_type LIKE 'image/%'
+        AND NOT EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.media_id = media_files.id)`);
       for (const row of res.rows) {
         await faceDetectionQueue.add('detect-faces', {
           mediaId: row.id,
@@ -252,7 +275,11 @@ export async function queueRoutes(fastify: FastifyInstance) {
         });
       }
     } else if (name === 'facial-recognition') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
+      // H-6 Fix: Only enqueue images that have unclustered faces
+      const res = await query(`SELECT DISTINCT m.id, m.folder_path, m.file_name, m.mime_type
+        FROM media_files m
+        JOIN face_embeddings fe ON fe.media_id = m.id
+        WHERE fe.person_id IS NULL`);
       for (const row of res.rows) {
         await facialRecognitionQueue.add('recognize-faces', {
           mediaId: row.id,

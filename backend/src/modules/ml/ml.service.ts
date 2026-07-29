@@ -8,6 +8,24 @@ const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolv
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 const ML_URL = process.env.IMMICH_ML_URL || 'http://localhost:3003';
 
+// H-2 Fix: Read confidence threshold dynamically from admin_settings instead of hardcoding.
+const DEFAULT_CONFIDENCE_THRESHOLD = 0.4; // cosine distance (lower = more similar)
+async function getFaceMatchThreshold(): Promise<number> {
+  try {
+    const res = await query(`SELECT value FROM admin_settings WHERE key = 'ml_confidence'`);
+    if (res.rows.length > 0) {
+      const val = JSON.parse(res.rows[0].value);
+      const num = parseFloat(String(val));
+      // admin UI stores similarity score (0-1 where higher = stricter);
+      // convert to cosine distance: distance = 1 - similarity
+      if (!isNaN(num) && num > 0 && num < 1) return 1 - num;
+    }
+  } catch (e) {
+    // non-critical, fall through to default
+  }
+  return DEFAULT_CONFIDENCE_THRESHOLD;
+}
+
 const FACE_THUMB_SIZE = 300;
 const FACE_PADDING = 0.5;
 
@@ -114,14 +132,16 @@ export class MLService {
         const { boundingBox, embedding } = face;
         const embeddingString = typeof embedding === 'string' ? embedding : `[${embedding.join(',')}]`;
         
-        // Query face_embeddings using pgvector cosine distance (< 0.4) to match existing known identities
+        // Query face_embeddings using pgvector cosine distance to match existing known identities.
+        // H-2 Fix: threshold is now read from admin_settings instead of being hardcoded.
+        const matchThreshold = await getFaceMatchThreshold();
         const matchResult = await query(`
           SELECT person_id 
           FROM face_embeddings 
-          WHERE person_id IS NOT NULL AND embedding <=> $1::vector < 0.4 
+          WHERE person_id IS NOT NULL AND embedding <=> $1::vector < $2 
           ORDER BY embedding <=> $1::vector 
           LIMIT 1
-        `, [embeddingString]);
+        `, [embeddingString, matchThreshold]);
 
         // If matched to an existing person cluster, assign that person_id; otherwise set person_id = NULL for unclustered faces
         const personId = matchResult.rows.length > 0 ? matchResult.rows[0].person_id : null;

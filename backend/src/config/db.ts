@@ -26,6 +26,10 @@ export const ensureSchema = async (): Promise<void> => {
           ALTER TABLE media_files ADD COLUMN IF NOT EXISTS clip_embedding vector(512);
           CREATE INDEX IF NOT EXISTS idx_media_files_clip_embedding ON media_files USING hnsw (clip_embedding vector_cosine_ops);
 
+          -- M-7 Fix: text_pattern_ops index enables efficient LIKE 'prefix%' queries on folder_path.
+          -- Without this, every folder browse cover-image lookup degrades to a full sequential scan.
+          CREATE INDEX IF NOT EXISTS idx_media_files_folder_path_tpo ON media_files (folder_path text_pattern_ops);
+
           ALTER TABLE media_files ADD COLUMN IF NOT EXISTS img_width INTEGER;
           ALTER TABLE media_files ADD COLUMN IF NOT EXISTS img_height INTEGER;
 

@@ -3,7 +3,6 @@ import { videoQueue } from './videoQueue';
 import { thumbnailQueue } from './thumbnailQueue';
 import { smartSearchQueue } from './smartSearchQueue';
 import { faceDetectionQueue } from './faceDetectionQueue';
-import { faceThumbnailQueue } from './faceThumbnailQueue';
 import { getExecutionMode } from './mode';
 
 export interface MediaJobData {
@@ -25,9 +24,12 @@ export async function dispatchMediaFile(jobData: MediaJobData): Promise<void> {
         : thumbnailQueue.add('generate-thumbnail', jobData),
       smartSearchQueue.add('generate-smart-search', jobData),
     ];
+    // NOTE: face-thumbnail is NOT dispatched here.
+    // In concurrent mode, face-detection runs independently and chains:
+    //   face-detection → facial-recognition → face-thumbnail
+    // Dispatching face-thumbnail here would race face-detection and generate empty thumbnails.
     if (!isVideo) {
       promises.push(faceDetectionQueue.add('detect-faces', jobData));
-      promises.push(faceThumbnailQueue.add('generate-face-thumbnails', { mediaId: jobData.mediaId }));
     }
     await Promise.all(promises);
   }
