@@ -9,6 +9,7 @@
   let settings = $state<any>({
     maxCpuCores: 2,
     scanInterval: 3600000,
+    scanSchedule: { type: 'off' },
     mlConfidenceThreshold: 0.6
   });
   let saving = $state(false);
@@ -59,6 +60,7 @@
         const data = await sRes.json();
         settings.maxCpuCores = data.maxCpuCores;
         settings.scanInterval = data.scanInterval;
+        settings.scanSchedule = data.scanSchedule || { type: 'off' };
         settings.mlConfidenceThreshold = data.mlConfidenceThreshold;
       }
     } finally {
@@ -85,6 +87,7 @@
         body: JSON.stringify({
           maxCpuCores: Number(settings.maxCpuCores),
           scanInterval: Number(settings.scanInterval),
+          scanSchedule: settings.scanSchedule,
           mlConfidenceThreshold: Number(settings.mlConfidenceThreshold)
         })
       });
@@ -133,6 +136,22 @@
 
   onDestroy(() => {
     if (pollInterval) clearInterval(pollInterval);
+  });
+
+  $effect(() => {
+    const type = settings.scanSchedule.type;
+    if (type === 'daily') {
+      if (settings.scanSchedule.hour === undefined) settings.scanSchedule.hour = 2;
+      if (settings.scanSchedule.minute === undefined) settings.scanSchedule.minute = 0;
+    } else if (type === 'weekly') {
+      if (settings.scanSchedule.dayOfWeek === undefined) settings.scanSchedule.dayOfWeek = 0;
+      if (settings.scanSchedule.hour === undefined) settings.scanSchedule.hour = 2;
+      if (settings.scanSchedule.minute === undefined) settings.scanSchedule.minute = 0;
+    } else if (type === 'monthly') {
+      if (settings.scanSchedule.dayOfMonth === undefined) settings.scanSchedule.dayOfMonth = 1;
+      if (settings.scanSchedule.hour === undefined) settings.scanSchedule.hour = 2;
+      if (settings.scanSchedule.minute === undefined) settings.scanSchedule.minute = 0;
+    }
   });
 
   async function actionQueue(name: string, action: string) {
@@ -334,8 +353,64 @@
           <input type="number" bind:value={settings.maxCpuCores} min="1" max="32" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
         </div>
         <div class="form-group">
-          <label style="display: block; font-size: 0.9rem; margin-bottom: 0.25rem;">Auto-Scan Interval (ms)</label>
-          <input type="number" bind:value={settings.scanInterval} step="1000" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
+          <label style="display: block; font-size: 0.9rem; margin-bottom: 0.25rem;">Auto-Scan Schedule</label>
+          <select bind:value={settings.scanSchedule.type} style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; margin-bottom: 0.5rem;">
+            <option value="off">Off</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+          {#if settings.scanSchedule.type === 'daily'}
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="color: #a1a1aa; font-size: 0.85rem;">at</span>
+              <input type="number" bind:value={settings.scanSchedule.hour} min="0" max="23" style="width: 60px; padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
+              <span style="color: #a1a1aa;">:</span>
+              <input type="number" bind:value={settings.scanSchedule.minute} min="0" max="59" style="width: 60px; padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
+            </div>
+          {:else if settings.scanSchedule.type === 'weekly'}
+            <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="color: #a1a1aa; font-size: 0.85rem;">on</span>
+                <select bind:value={settings.scanSchedule.dayOfWeek} style="flex: 1; padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;">
+                  <option value={0}>Sunday</option>
+                  <option value={1}>Monday</option>
+                  <option value={2}>Tuesday</option>
+                  <option value={3}>Wednesday</option>
+                  <option value={4}>Thursday</option>
+                  <option value={5}>Friday</option>
+                  <option value={6}>Saturday</option>
+                </select>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="color: #a1a1aa; font-size: 0.85rem;">at</span>
+                <input type="number" bind:value={settings.scanSchedule.hour} min="0" max="23" style="width: 60px; padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
+                <span style="color: #a1a1aa;">:</span>
+                <input type="number" bind:value={settings.scanSchedule.minute} min="0" max="59" style="width: 60px; padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
+              </div>
+            </div>
+          {:else if settings.scanSchedule.type === 'monthly'}
+            <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="color: #a1a1aa; font-size: 0.85rem;">on day</span>
+                <input type="number" bind:value={settings.scanSchedule.dayOfMonth} min="1" max="28" style="width: 60px; padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="color: #a1a1aa; font-size: 0.85rem;">at</span>
+                <input type="number" bind:value={settings.scanSchedule.hour} min="0" max="23" style="width: 60px; padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
+                <span style="color: #a1a1aa;">:</span>
+                <input type="number" bind:value={settings.scanSchedule.minute} min="0" max="59" style="width: 60px; padding: 0.4rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
+              </div>
+            </div>
+          {/if}
+          {#if settings.scanSchedule.type !== 'off'}
+            <p style="font-size: 0.75rem; color: #a1a1aa; margin: 0.4rem 0 0 0;">
+              Next scan runs {
+                settings.scanSchedule.type === 'daily' ? 'daily' :
+                settings.scanSchedule.type === 'weekly' ? `weekly on ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][settings.scanSchedule.dayOfWeek ?? 0]}` :
+                `monthly on day ${settings.scanSchedule.dayOfMonth ?? 1}`
+              } at {String(settings.scanSchedule.hour ?? 2).padStart(2,'0')}:{String(settings.scanSchedule.minute ?? 0).padStart(2,'0')}
+            </p>
+          {/if}
         </div>
       </div>
 
@@ -498,7 +573,7 @@
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetThumbnails}>
             <Image size={16}/> Reset Thumbnails Only
           </button>
-          <button class="btn warning" style="width: 100%; justify-content: center;" onclick={triggerResetFaces}>
+          <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetFaces}>
             <Cpu size={16}/> Reset ML Data
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetSmartSearch}>
@@ -509,14 +584,7 @@
           </button>
         </div>
         
-        <!-- D-3 Fix: The original 'Reset & Rescan Everything' nuke button called the same
-             /api/admin/reset-index endpoint as 'Reset Index' above — making it a duplicate.
-             Replaced with a clear explanation and pointer to the existing buttons. -->
-        <div style="background: rgba(239, 68, 68, 0.08); border: 1px dashed rgba(239, 68, 68, 0.4); border-radius: 8px; padding: 1rem; text-align: center;">
-          <p style="font-size: 0.85rem; color: #fca5a5; margin: 0;">
-            💡 To wipe everything and start fresh, use <strong>Reset Index</strong> above — it truncates all tables, clears all caches, and triggers a full rescan in one operation.
-          </p>
-        </div>
+
       </div>
     </div>
   </div>
