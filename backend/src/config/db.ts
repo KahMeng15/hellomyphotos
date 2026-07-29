@@ -52,6 +52,7 @@ export const ensureSchema = async (): Promise<void> => {
           );
           ALTER TABLE people ADD COLUMN IF NOT EXISTS cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL;
           ALTER TABLE shared_folders ADD COLUMN IF NOT EXISTS person_id UUID REFERENCES people(id) ON DELETE SET NULL;
+          ALTER TABLE shared_folders ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
 
           CREATE TABLE IF NOT EXISTS system_logs (
             id SERIAL PRIMARY KEY,

@@ -79,6 +79,16 @@
       <ChevronRight color="#a1a1aa" size={24} />
     </div>
   </a>
+
+  <a href="/admin/shares" class="card link-card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(244, 114, 182, 0.1)); border-color: rgba(236, 72, 153, 0.3);">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h3 style="margin: 0 0 0.5rem 0; color: #f4f4f5;">Global Shares Management</h3>
+        <p style="margin: 0; color: #a1a1aa; font-size: 0.9rem;">View, edit, disable, and delete shares generated globally across the app.</p>
+      </div>
+      <ChevronRight color="#a1a1aa" size={24} />
+    </div>
+  </a>
 </div>
 
 <style>

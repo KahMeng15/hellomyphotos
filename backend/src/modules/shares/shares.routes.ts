@@ -49,7 +49,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     
     const result = await query(`
       SELECT * FROM shared_folders 
-      WHERE share_token = $1 AND (expires_at IS NULL OR expires_at > NOW())
+      WHERE share_token = $1 AND (expires_at IS NULL OR expires_at > NOW()) AND is_active = true
     `, [token]);
     
     if (result.rows.length === 0) {

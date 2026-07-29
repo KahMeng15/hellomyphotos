@@ -633,12 +633,34 @@ export async function adminRoutes(fastify: FastifyInstance) {
     try {
       const { rows } = await query(`
         SELECT s.*, 
+               u.email as creator_email,
                (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.action_type = 'view_shared_link') as views,
                (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.action_type = 'download_shared_link') as downloads
         FROM shared_folders s
+        LEFT JOIN users u ON s.created_by = u.id
         ORDER BY s.created_at DESC
       `);
       return reply.send({ shares: rows });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  fastify.put('/api/admin/shares/:token', async (request, reply) => {
+    const { token } = request.params as any;
+    const { is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled } = request.body as any;
+    try {
+      await query(`
+        UPDATE shared_folders 
+        SET is_active = COALESCE($1, is_active),
+            expires_at = $2,
+            allow_download_images = COALESCE($3, allow_download_images),
+            allow_download_folder = COALESCE($4, allow_download_folder),
+            watermark_enabled = COALESCE($5, watermark_enabled)
+        WHERE share_token = $6
+      `, [is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, token]);
+      return reply.send({ success: true });
     } catch (e: any) {
       request.log.error(e);
       return reply.status(500).send({ error: e.message });

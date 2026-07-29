@@ -1,13 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Trash2, Link as LinkIcon, Folder, Image } from '@lucide/svelte';
+  import { ChevronLeft, Trash2, Link as LinkIcon, Folder, Image, User, Copy, Check, Edit, Power, PowerOff } from '@lucide/svelte';
   import Modal from '$lib/components/Modal.svelte';
 
-  let shares: any[] = [];
-  let isLoading = true;
-  let showRevokeConfirm = false;
-  let revokeTargetToken = '';
+  let shares: any[] = $state([]);
+  let isLoading = $state(true);
+  let showRevokeConfirm = $state(false);
+  let revokeTargetToken = $state('');
+  
+  let showEditModal = $state(false);
+  let editTargetToken = $state('');
+  let editForm = $state({
+    is_active: true,
+    expires_at: '',
+    allow_download_images: false,
+    allow_download_folder: false,
+    watermark_enabled: false
+  });
+  let copiedToken = $state('');
 
   async function fetchShares() {
     try {
@@ -23,6 +34,72 @@
       console.error(e);
     } finally {
       isLoading = false;
+    }
+  }
+
+  function copyLink(token: string) {
+    const url = `${window.location.origin}/share/${token}`;
+    navigator.clipboard.writeText(url);
+    copiedToken = token;
+    setTimeout(() => { copiedToken = ''; }, 2000);
+  }
+
+  function openEditShare(share: any) {
+    editTargetToken = share.share_token;
+    editForm = {
+      is_active: share.is_active !== false,
+      expires_at: share.expires_at ? new Date(share.expires_at).toISOString().slice(0, 16) : '',
+      allow_download_images: share.allow_download_images || false,
+      allow_download_folder: share.allow_download_folder || false,
+      watermark_enabled: share.watermark_enabled || false
+    };
+    showEditModal = true;
+  }
+
+  async function saveShare() {
+    try {
+      const jwt = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE}/api/admin/shares/${editTargetToken}`, {
+        method: 'PUT',
+        headers: { 
+          'Authorization': `Bearer ${jwt}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          is_active: editForm.is_active,
+          expires_at: editForm.expires_at ? new Date(editForm.expires_at).toISOString() : null,
+          allow_download_images: editForm.allow_download_images,
+          allow_download_folder: editForm.allow_download_folder,
+          watermark_enabled: editForm.watermark_enabled
+        })
+      });
+      if (res.ok) {
+        showEditModal = false;
+        fetchShares();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function toggleDisable(share: any) {
+    try {
+      const jwt = localStorage.getItem('token');
+      const res = await fetch(`${API_BASE}/api/admin/shares/${share.share_token}`, {
+        method: 'PUT',
+        headers: { 
+          'Authorization': `Bearer ${jwt}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          is_active: share.is_active === false ? true : false
+        })
+      });
+      if (res.ok) {
+        fetchShares();
+      }
+    } catch (e) {
+      console.error(e);
     }
   }
 
@@ -75,8 +152,10 @@
           <tr>
             <th>Target</th>
             <th>Type</th>
+            <th>Creator</th>
             <th>Permissions</th>
             <th>Views / DLs</th>
+            <th>Status</th>
             <th>Created</th>
             <th>Expires</th>
             <th style="text-align: right;">Actions</th>
@@ -105,6 +184,12 @@
                 </span>
               </td>
               <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <User size={14} color="#94a3b8" />
+                  <span style="color: #cbd5e1; font-size: 0.85rem;">{share.creator_email || 'System'}</span>
+                </div>
+              </td>
+              <td>
                 <div style="display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem;">
                   {#if share.allow_download_images}
                     <span style="color: #34d399;">✓ Img DL</span>
@@ -125,24 +210,50 @@
                   <span style="color: #94a3b8;">DLs: <strong style="color: #f8fafc;">{share.downloads || 0}</strong></span>
                 </div>
               </td>
+              <td>
+                {#if share.is_active === false}
+                  <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border-color: rgba(239, 68, 68, 0.3);">Disabled</span>
+                {:else if share.expires_at && new Date(share.expires_at) < new Date()}
+                  <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fcd34d; border-color: rgba(245, 158, 11, 0.3);">Expired</span>
+                {:else}
+                  <span class="badge" style="background: rgba(52, 211, 153, 0.2); color: #86efac; border-color: rgba(52, 211, 153, 0.3);">Active</span>
+                {/if}
+              </td>
               <td style="color: #94a3b8; font-size: 0.85rem;">
                 {new Date(share.created_at).toLocaleDateString()}
               </td>
               <td style="color: #94a3b8; font-size: 0.85rem;">
                 {#if share.expires_at}
-                  {#if new Date(share.expires_at) < new Date()}
-                    <span style="color: #ef4444;">Expired</span>
-                  {:else}
+                  <span class:expired={new Date(share.expires_at) < new Date()}>
                     {new Date(share.expires_at).toLocaleDateString()}
-                  {/if}
+                  </span>
                 {:else}
                   Never
                 {/if}
               </td>
               <td style="text-align: right;">
-                <button class="icon-btn danger" onclick={() => revokeShare(share.share_token)} title="Revoke Share">
-                  <Trash2 size={18} />
-                </button>
+                <div style="display: flex; justify-content: flex-end; gap: 4px;">
+                  <button class="icon-btn" onclick={() => copyLink(share.share_token)} title="Copy Link">
+                    {#if copiedToken === share.share_token}
+                      <Check size={16} color="#34d399" />
+                    {:else}
+                      <Copy size={16} />
+                    {/if}
+                  </button>
+                  <button class="icon-btn" onclick={() => openEditShare(share)} title="Edit Share">
+                    <Edit size={16} />
+                  </button>
+                  <button class="icon-btn" class:danger={share.is_active !== false} onclick={() => toggleDisable(share)} title={share.is_active === false ? 'Enable Share' : 'Disable Share'}>
+                    {#if share.is_active === false}
+                      <Power size={16} color="#34d399" />
+                    {:else}
+                      <PowerOff size={16} />
+                    {/if}
+                  </button>
+                  <button class="icon-btn danger" onclick={() => revokeShare(share.share_token)} title="Delete Share">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </td>
             </tr>
           {/each}
@@ -157,6 +268,46 @@
   <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
     <button class="btn" style="background: transparent; border: 1px solid var(--glass-border); color: #ccc;" onclick={() => { showRevokeConfirm = false; revokeTargetToken = ''; }}>Cancel</button>
     <button class="btn" style="background: #ef4444; color: white; border: none;" onclick={confirmRevokeShare}>Revoke</button>
+  </div>
+</Modal>
+
+<Modal bind:show={showEditModal} id="admin-edit-share" title="Edit Share Link">
+  <div class="form-group">
+    <label>
+      <input type="checkbox" bind:checked={editForm.is_active} />
+      <span>Link is Active</span>
+    </label>
+  </div>
+  
+  <div class="form-group" style="margin-top: 1rem;">
+    <label style="display: block; margin-bottom: 8px; color: #a1a1aa; font-size: 0.85rem;">Expires At (Optional)</label>
+    <input type="datetime-local" bind:value={editForm.expires_at} style="width: 100%; padding: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white;" />
+  </div>
+
+  <div class="form-group" style="margin-top: 1rem;">
+    <label>
+      <input type="checkbox" bind:checked={editForm.allow_download_images} />
+      <span>Allow Image Downloads</span>
+    </label>
+  </div>
+
+  <div class="form-group" style="margin-top: 0.5rem;">
+    <label>
+      <input type="checkbox" bind:checked={editForm.allow_download_folder} />
+      <span>Allow Folder ZIP Download</span>
+    </label>
+  </div>
+
+  <div class="form-group" style="margin-top: 0.5rem;">
+    <label>
+      <input type="checkbox" bind:checked={editForm.watermark_enabled} />
+      <span>Enable Watermark</span>
+    </label>
+  </div>
+  
+  <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 2rem;">
+    <button class="btn" style="background: transparent; border: 1px solid var(--glass-border); color: #ccc;" onclick={() => { showEditModal = false; }}>Cancel</button>
+    <button class="btn" style="background: #3b82f6; color: white; border: none;" onclick={saveShare}>Save Changes</button>
   </div>
 </Modal>
 
@@ -237,5 +388,23 @@
   .icon-btn.danger:hover {
     background: rgba(239, 68, 68, 0.2);
     color: #ef4444;
+  }
+  
+  .expired {
+    color: #ef4444;
+  }
+  
+  .form-group label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    color: #f4f4f5;
+  }
+  
+  .form-group input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #3b82f6;
   }
 </style>

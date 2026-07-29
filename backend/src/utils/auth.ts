@@ -109,7 +109,7 @@ export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyR
   mediaFolder = mediaResult.rows[0].folder_path;
 
   if (shareToken) {
-    const shareResult = await pool.query('SELECT folder_path FROM shared_folders WHERE share_token = $1', [shareToken]);
+    const shareResult = await pool.query('SELECT folder_path FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())', [shareToken]);
     if (shareResult.rows.length > 0) {
       const shareRoot = shareResult.rows[0].folder_path;
       if (mediaFolder === shareRoot || mediaFolder.startsWith(shareRoot + '/')) {
@@ -135,7 +135,7 @@ export async function verifyFolderAccess(request: FastifyRequest, reply: Fastify
   const { shareToken } = request.query as { shareToken?: string };
   
   if (shareToken) {
-    const shareResult = await pool.query('SELECT folder_path, allow_download_folder FROM shared_folders WHERE share_token = $1', [shareToken]);
+    const shareResult = await pool.query('SELECT folder_path, allow_download_folder FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())', [shareToken]);
     if (shareResult.rows.length > 0) {
       const shareRoot = shareResult.rows[0].folder_path || '';
       
