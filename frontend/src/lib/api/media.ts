@@ -16,6 +16,9 @@ export interface DirectoryInfo {
   name: string;
   cover_id: string | null;
   blurhash: string | null;
+  cover_bounding_box?: any;
+  cover_img_width?: number | null;
+  cover_img_height?: number | null;
 }
 
 export async function fetchFolderContent(folderPath: string, fetchFn: typeof fetch = fetch): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean, folderCoverId: string | null, folderCoverBoundingBox: any, folderCoverImgWidth: number | null, folderCoverImgHeight: number | null, folderDescription: string }> {

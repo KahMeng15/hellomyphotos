@@ -142,7 +142,10 @@ export async function scannerRoutes(fastify: FastifyInstance) {
           
           // Check if there is a custom cover in folder_settings
           const customCoverRes = await query(`
-            SELECT m.id, m.blurhash 
+            SELECT m.id, m.blurhash,
+              COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+              COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+              (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
             FROM folder_settings fs
             JOIN media_files m ON m.id = fs.cover_media_id
             WHERE fs.folder_path = $1
@@ -152,14 +155,20 @@ export async function scannerRoutes(fastify: FastifyInstance) {
             return {
               name,
               cover_id: customCoverRes.rows[0].id,
-              blurhash: customCoverRes.rows[0].blurhash
+              blurhash: customCoverRes.rows[0].blurhash,
+              cover_bounding_box: customCoverRes.rows[0].bounding_box,
+              cover_img_width: customCoverRes.rows[0].img_width,
+              cover_img_height: customCoverRes.rows[0].img_height
             };
           }
 
           // Fallback: Find a media file inside this directory or its subdirectories, preferring landscape and more faces
           const coverResult = await query(`
             SELECT m.id, m.blurhash,
+              COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+              COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
               (SELECT COUNT(*) FROM face_embeddings f WHERE f.media_id = m.id) as face_count,
+              (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box,
               CASE 
                 WHEN CAST(m.exif_json->>'ImageWidth' AS INTEGER) > CAST(m.exif_json->>'ImageHeight' AS INTEGER) THEN 1 
                 WHEN CAST(m.exif_json->>'ExifImageWidth' AS INTEGER) > CAST(m.exif_json->>'ExifImageHeight' AS INTEGER) THEN 1 
@@ -174,7 +183,10 @@ export async function scannerRoutes(fastify: FastifyInstance) {
           return {
             name,
             cover_id: coverResult.rows[0]?.id || null,
-            blurhash: coverResult.rows[0]?.blurhash || null
+            blurhash: coverResult.rows[0]?.blurhash || null,
+            cover_bounding_box: coverResult.rows[0]?.bounding_box || null,
+            cover_img_width: coverResult.rows[0]?.img_width || null,
+            cover_img_height: coverResult.rows[0]?.img_height || null
           };
         }));
         

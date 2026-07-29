@@ -345,33 +345,33 @@
   );
 
   let effectiveCoverBoundingBox = $derived.by(() => {
-    if (fallbackCoverId === data.folderCoverId) {
-      return data.folderCoverBoundingBox;
-    }
+    if (fallbackCoverId === data.folderCoverId) return data.folderCoverBoundingBox;
     const file = data.files.find(f => f.id === fallbackCoverId);
     if (file) return file.bounding_box || null;
+    const dir = data.directories.find(d => d.cover_id === fallbackCoverId);
+    if (dir) return dir.cover_bounding_box;
     return null;
   });
 
   let effectiveCoverImgWidth = $derived.by(() => {
-    if (fallbackCoverId === data.folderCoverId) {
-      return data.folderCoverImgWidth;
-    }
+    if (fallbackCoverId === data.folderCoverId) return data.folderCoverImgWidth;
     const file = data.files.find(f => f.id === fallbackCoverId);
     if (file) {
       return file.img_width || file.exif_json?.width || file.exif_json?.ImageWidth || file.exif_json?.ExifImageWidth || null;
     }
+    const dir = data.directories.find(d => d.cover_id === fallbackCoverId);
+    if (dir) return dir.cover_img_width;
     return null;
   });
 
   let effectiveCoverImgHeight = $derived.by(() => {
-    if (fallbackCoverId === data.folderCoverId) {
-      return data.folderCoverImgHeight;
-    }
+    if (fallbackCoverId === data.folderCoverId) return data.folderCoverImgHeight;
     const file = data.files.find(f => f.id === fallbackCoverId);
     if (file) {
       return file.img_height || file.exif_json?.height || file.exif_json?.ImageHeight || file.exif_json?.ExifImageHeight || null;
     }
+    const dir = data.directories.find(d => d.cover_id === fallbackCoverId);
+    if (dir) return dir.cover_img_height;
     return null;
   });
 
