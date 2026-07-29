@@ -130,52 +130,69 @@ export async function mlRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { id: string } }>('/api/faces/:id/cover', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
 
+    let coverMediaId: string | null = null;
+
     // Check if person has an explicitly set cover
     const explicit = await query(`SELECT cover_media_id FROM people WHERE id = $1 AND cover_media_id IS NOT NULL`, [id]);
     if (explicit.rows.length > 0 && explicit.rows[0].cover_media_id) {
-      const mediaResult = await query(`
-        SELECT m.id, (
-          SELECT bounding_box FROM face_embeddings
+      coverMediaId = explicit.rows[0].cover_media_id;
+    }
+
+    if (!coverMediaId) {
+      // Fall back to dynamic selection (photo with fewest other faces, prefer with EXIF dimensions)
+      const result = await query(`
+        SELECT m.id
+        FROM media_files m
+        WHERE EXISTS (
+          SELECT 1 FROM face_embeddings
           WHERE media_id = m.id AND person_id = $1
-          ORDER BY created_at DESC
-          LIMIT 1
-        ) AS bounding_box,
-        (m.exif_json->>'width')::int AS img_width,
-        (m.exif_json->>'height')::int AS img_height
-        FROM media_files m WHERE m.id = $2
-      `, [id, explicit.rows[0].cover_media_id]);
-      if (mediaResult.rows.length > 0) {
-        const row = mediaResult.rows[0];
-        return reply.send({ mediaId: row.id, boundingBox: row.bounding_box, imgWidth: row.img_width, imgHeight: row.img_height });
+        )
+        ORDER BY CASE WHEN m.exif_json IS NOT NULL AND m.exif_json->>'width' IS NOT NULL THEN 0 ELSE 1 END,
+          (SELECT COUNT(*) FROM face_embeddings WHERE media_id = m.id) ASC,
+          m.created_at DESC
+        LIMIT 1
+      `, [id]);
+
+      if (result.rows.length === 0) {
+        return reply.status(404).send({ error: 'No media found for this person' });
+      }
+      coverMediaId = result.rows[0].id;
+    }
+
+    // Fetch bounding box + dims for the selected cover
+    const mediaResult = await query(`
+      SELECT (
+        SELECT bounding_box FROM face_embeddings
+        WHERE media_id = m.id AND person_id = $1
+        ORDER BY created_at DESC LIMIT 1
+      ) AS bounding_box,
+      (m.exif_json->>'width')::int AS img_width,
+      (m.exif_json->>'height')::int AS img_height,
+      m.folder_path, m.file_name
+      FROM media_files m WHERE m.id = $2
+    `, [id, coverMediaId]);
+
+    if (mediaResult.rows.length === 0) {
+      return reply.status(404).send({ error: 'No media found for this person' });
+    }
+
+    const row = mediaResult.rows[0];
+    let imgWidth = row.img_width;
+    let imgHeight = row.img_height;
+
+    // Fallback: read dimensions from file if EXIF is null
+    if (!imgWidth || !imgHeight) {
+      try {
+        const filePath = path.join(MEDIA_ROOT, row.folder_path || '', row.file_name);
+        const meta = await sharp(filePath).metadata();
+        if (meta.width) imgWidth = meta.width;
+        if (meta.height) imgHeight = meta.height;
+      } catch (e) {
+        // non-critical
       }
     }
 
-    // Fall back to dynamic selection (photo with fewest other faces)
-    const result = await query(`
-      SELECT m.id, (
-        SELECT bounding_box FROM face_embeddings
-        WHERE media_id = m.id AND person_id = $1
-        ORDER BY created_at DESC
-        LIMIT 1
-      ) AS bounding_box,
-      (m.exif_json->>'width')::int AS img_width,
-      (m.exif_json->>'height')::int AS img_height
-      FROM media_files m
-      WHERE EXISTS (
-        SELECT 1 FROM face_embeddings
-        WHERE media_id = m.id AND person_id = $1
-      )
-      ORDER BY (
-        SELECT COUNT(*) FROM face_embeddings WHERE media_id = m.id
-      ) ASC, m.created_at DESC
-      LIMIT 1
-    `, [id]);
-
-    if (result.rows.length === 0) {
-      return reply.status(404).send({ error: 'No media found for this person' });
-    }
-    const row = result.rows[0];
-    return reply.send({ mediaId: row.id, boundingBox: row.bounding_box, imgWidth: row.img_width, imgHeight: row.img_height });
+    return reply.send({ mediaId: coverMediaId, boundingBox: row.bounding_box, imgWidth, imgHeight });
   });
 
   // Explicitly set the cover image for a person

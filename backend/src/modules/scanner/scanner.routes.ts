@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { redis } from '../../config/redis';
 import { scannerQueue } from '../../queue/scannerQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
@@ -231,6 +232,20 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         folderCoverBoundingBox = bbRes.rows[0].bounding_box;
         folderCoverImgWidth = bbRes.rows[0].img_width;
         folderCoverImgHeight = bbRes.rows[0].img_height;
+      }
+      // Fallback: read dimensions from file if EXIF is null
+      if (!folderCoverImgWidth || !folderCoverImgHeight) {
+        try {
+          const fileRow = await query('SELECT folder_path, file_name FROM media_files WHERE id = $1', [folderCoverId]);
+          if (fileRow.rows.length > 0) {
+            const fPath = path.join(MEDIA_ROOT, fileRow.rows[0].folder_path || '', fileRow.rows[0].file_name);
+            const meta = await sharp(fPath).metadata();
+            if (meta.width) folderCoverImgWidth = meta.width;
+            if (meta.height) folderCoverImgHeight = meta.height;
+          }
+        } catch (e) {
+          // non-critical
+        }
       }
     }
 

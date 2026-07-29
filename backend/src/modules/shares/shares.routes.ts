@@ -3,6 +3,7 @@ import { query } from '../../config/db';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
+import sharp from 'sharp';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
 
@@ -93,7 +94,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
           FROM media_files m
           WHERE EXISTS (SELECT 1 FROM face_embeddings WHERE media_id = m.id AND person_id = $1)
           AND m.mime_type LIKE 'image/%'
-          ORDER BY (SELECT COUNT(*) FROM face_embeddings WHERE media_id = m.id) ASC, m.created_at DESC
+          ORDER BY CASE WHEN m.exif_json IS NOT NULL AND m.exif_json->>'width' IS NOT NULL THEN 0 ELSE 1 END,
+            (SELECT COUNT(*) FROM face_embeddings WHERE media_id = m.id) ASC,
+            m.created_at DESC
           LIMIT 1
         `, [share.person_id]);
         if (coverRes.rows.length > 0) {
@@ -118,6 +121,20 @@ export async function sharesRoutes(fastify: FastifyInstance) {
           personCoverBoundingBox = explicitRes.rows[0].bounding_box;
           personCoverImgWidth = explicitRes.rows[0].img_width;
           personCoverImgHeight = explicitRes.rows[0].img_height;
+        }
+      }
+      // Fallback: read dimensions from file if EXIF is null
+      if (personCoverMediaId && (!personCoverImgWidth || !personCoverImgHeight)) {
+        try {
+          const fileRow = await query('SELECT folder_path, file_name FROM media_files WHERE id = $1', [personCoverMediaId]);
+          if (fileRow.rows.length > 0) {
+            const filePath = path.join(MEDIA_ROOT, fileRow.rows[0].folder_path || '', fileRow.rows[0].file_name);
+            const meta = await sharp(filePath).metadata();
+            if (meta.width) personCoverImgWidth = meta.width;
+            if (meta.height) personCoverImgHeight = meta.height;
+          }
+        } catch (e) {
+          // non-critical, fallback positioning will be used
         }
       }
       return reply.send({ share, files: fileRes.rows, person, personCoverMediaId, personCoverBoundingBox, personCoverImgWidth, personCoverImgHeight });

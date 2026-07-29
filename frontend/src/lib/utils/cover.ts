@@ -8,5 +8,6 @@ export function computeCoverObjectPosition(
   const y1 = bb.y1 ?? bb.y ?? 0;
   const x2 = bb.x2 ?? (x1 + (bb.w || 200));
   const y2 = bb.y2 ?? (y1 + (bb.h || 200));
-  return `${((x1 + x2) / 2 / imgWidth) * 100}% ${((y1 + y2) / 2 / imgHeight) * 100}%`;
+  const yPct = Math.max(15, Math.min(((y1 + y2) / 2 / imgHeight) * 100, 35));
+  return `${((x1 + x2) / 2 / imgWidth) * 100}% ${yPct}%`;
 }
