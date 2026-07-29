@@ -166,8 +166,8 @@ export async function mlRoutes(fastify: FastifyInstance) {
         WHERE media_id = m.id AND person_id = $1
         ORDER BY created_at DESC LIMIT 1
       ) AS bounding_box,
-      (m.exif_json->>'width')::int AS img_width,
-      (m.exif_json->>'height')::int AS img_height,
+      COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+      COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
       m.folder_path, m.file_name
       FROM media_files m WHERE m.id = $2
     `, [id, coverMediaId]);

@@ -224,8 +224,8 @@ export async function scannerRoutes(fastify: FastifyInstance) {
           WHERE media_id = $1
           ORDER BY created_at DESC LIMIT 1
         ) AS bounding_box,
-        (exif_json->>'width')::int AS img_width,
-        (exif_json->>'height')::int AS img_height
+        COALESCE(img_width, (exif_json->>'width')::int) AS img_width,
+        COALESCE(img_height, (exif_json->>'height')::int) AS img_height
         FROM media_files WHERE id = $1
       `, [folderCoverId]);
       if (bbRes.rows.length > 0) {

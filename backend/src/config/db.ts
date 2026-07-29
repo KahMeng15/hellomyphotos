@@ -26,6 +26,9 @@ export const ensureSchema = async (): Promise<void> => {
           ALTER TABLE media_files ADD COLUMN IF NOT EXISTS clip_embedding vector(512);
           CREATE INDEX IF NOT EXISTS idx_media_files_clip_embedding ON media_files USING hnsw (clip_embedding vector_cosine_ops);
 
+          ALTER TABLE media_files ADD COLUMN IF NOT EXISTS img_width INTEGER;
+          ALTER TABLE media_files ADD COLUMN IF NOT EXISTS img_height INTEGER;
+
           CREATE TABLE IF NOT EXISTS face_embeddings (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             media_id UUID REFERENCES media_files(id) ON DELETE CASCADE,

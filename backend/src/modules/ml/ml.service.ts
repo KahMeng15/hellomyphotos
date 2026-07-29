@@ -68,6 +68,16 @@ export class MLService {
 
       const imageBuffer = await fs.promises.readFile(imagePath);
       
+      // Get image dimensions and store on media_files
+      try {
+        const meta = await sharp(imagePath).metadata();
+        if (meta.width && meta.height) {
+          await query(`UPDATE media_files SET img_width = $1, img_height = $2 WHERE id = $3`, [meta.width, meta.height, mediaId]);
+        }
+      } catch (e) {
+        // non-critical
+      }
+      
       // Constructing multipart form data manually for native fetch simplicity
       const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
       const entriesJson = JSON.stringify({
