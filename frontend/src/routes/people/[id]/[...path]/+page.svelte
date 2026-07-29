@@ -1,8 +1,10 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
+  import CoverImage from '$lib/components/CoverImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
   import Modal from '$lib/components/Modal.svelte';
   import { getThumbnailUrl, getPreviewUrl, API_BASE } from '$lib/api/media';
+  import { computeCoverObjectPosition } from '$lib/utils/cover';
   import { createPersonShare, getActivePersonShares, revokeShare, type ShareData } from '$lib/api/shares';
   import type { PageData } from './$types';
   import { onMount, onDestroy } from 'svelte';
@@ -135,17 +137,7 @@
 
   let fallbackCoverId = $derived(localCoverOverride || data.coverMediaId || (data.files.length > 0 ? data.files[0].id : null));
 
-  let coverObjectPosition = $derived.by(() => {
-    const bb = data.coverBoundingBox;
-    const iw = data.coverImgWidth;
-    const ih = data.coverImgHeight;
-    if (!bb || !iw || !ih) return 'center 30%';
-    const x1 = bb.x1 ?? bb.x ?? 0;
-    const y1 = bb.y1 ?? bb.y ?? 0;
-    const x2 = bb.x2 ?? (x1 + (bb.w || 200));
-    const y2 = bb.y2 ?? (y1 + (bb.h || 200));
-    return `${((x1 + x2) / 2 / iw) * 100}% ${((y1 + y2) / 2 / ih) * 100}%`;
-  });
+  let coverObjectPosition = $derived(computeCoverObjectPosition(data.coverBoundingBox, data.coverImgWidth, data.coverImgHeight));
 
 
 
@@ -245,7 +237,6 @@
     }
   }
 
-  let coverLoaded = $state(false);
   let scrollProgress = $state(0);
   let headerWrapper: HTMLElement | undefined = $state();
 
@@ -289,7 +280,7 @@
     <ChevronLeft size={32} strokeWidth={2.5} />
   </a>
   {#if fallbackCoverId}
-    <img src={getPreviewUrl(fallbackCoverId, false) + '?t=' + coverRefreshKey} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" style="object-position: {coverObjectPosition};" />
+    <CoverImage src={getPreviewUrl(fallbackCoverId, false) + '?t=' + coverRefreshKey} objectPosition={coverObjectPosition} />
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -517,16 +508,6 @@
 
   .header-wrapper.has-cover {
     min-height: 40vh;
-  }
-
-  .header-bg {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    z-index: 0;
   }
 
   .header-gradient {
