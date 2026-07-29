@@ -14,6 +14,8 @@ const __dirname = path.dirname(__filename);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
+import { query } from './config/db';
+
 const start = async () => {
   try {
     if (process.env.IS_WORKER === 'true') {
@@ -24,9 +26,28 @@ const start = async () => {
       await app.listen({ port: PORT, host: '0.0.0.0' });
       app.log.info(`Server listening on port ${PORT}`);
       
-      console.log('Forking background worker process...');
+      let maxCpuCores = '2';
+      try {
+        const res = await query("SELECT value FROM admin_settings WHERE key = 'max_cpu_cores'");
+        if (res.rows.length > 0) maxCpuCores = String(res.rows[0].value);
+      } catch (err) {
+        console.error('Failed to load max_cpu_cores from DB:', err);
+      }
+
+      console.log(`Forking background worker process with concurrency ${maxCpuCores}...`);
       const workerProc = fork(__filename, [], {
-        env: { ...process.env, IS_WORKER: 'true' },
+        env: { 
+          ...process.env, 
+          IS_WORKER: 'true',
+          SCANNER_CONCURRENCY: '1', // Always 1 for IO safety
+          METADATA_CONCURRENCY: maxCpuCores,
+          THUMBNAIL_CONCURRENCY: maxCpuCores,
+          VIDEO_CONCURRENCY: maxCpuCores,
+          SMART_SEARCH_CONCURRENCY: maxCpuCores,
+          FACE_DETECTION_CONCURRENCY: maxCpuCores,
+          FACIAL_RECOGNITION_CONCURRENCY: '1', // Clustering must always be 1
+          FACE_THUMBNAIL_CONCURRENCY: maxCpuCores
+        },
         execArgv: process.execArgv // preserve tsx loader in dev
       });
 

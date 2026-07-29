@@ -14,7 +14,7 @@ async function getScanIntervalMs(): Promise<number | null> {
   try {
     const res = await query(`SELECT value FROM admin_settings WHERE key = 'scan_interval'`);
     if (res.rows.length > 0) {
-      const val = JSON.parse(res.rows[0].value);
+      const val = res.rows[0].value;
       const ms = parseInt(String(val), 10);
       if (!isNaN(ms) && ms > 0) return ms;
     }
@@ -28,7 +28,7 @@ async function getScanSchedule(): Promise<ScanSchedule | null> {
   try {
     const res = await query(`SELECT value FROM admin_settings WHERE key = 'scan_schedule'`);
     if (res.rows.length > 0) {
-      const val = JSON.parse(res.rows[0].value);
+      const val = res.rows[0].value;
       if (val && val.type && val.type !== 'off') {
         return val as ScanSchedule;
       }
