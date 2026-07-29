@@ -15,8 +15,6 @@
   $effect(() => {
     if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') {
       isSidebarOpen = false;
-    } else {
-      isSidebarOpen = true;
     }
   });
 
