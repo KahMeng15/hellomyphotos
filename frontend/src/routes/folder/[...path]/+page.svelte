@@ -372,14 +372,18 @@
   let coverObjectPosition = $derived(computeCoverObjectPosition(effectiveCoverBoundingBox, effectiveCoverImgWidth, effectiveCoverImgHeight));
 
   $effect(() => {
-    console.log('[folder cover]', {
+    console.log('[folder cover] STATE', {
       fallbackCoverId,
-      folderCoverId: data.folderCoverId,
-      folderCoverBoundingBox: data.folderCoverBoundingBox,
-      effectiveCoverBoundingBox,
-      effectiveCoverImgWidth,
-      effectiveCoverImgHeight,
-      coverObjectPosition
+      source: fallbackCoverId === data.folderCoverId ? 'folder_settings' :
+              fallbackCoverId === (localCoverOverride || data.folderCoverId) ? 'local override' :
+              data.files.find(f => f.id === fallbackCoverId) ? 'files[0]' :
+              'directory',
+      folderSettingsCoverId: data.folderCoverId,
+      folderSettingsBoundingBox: data.folderCoverBoundingBox,
+      effectiveBoundingBox: effectiveCoverBoundingBox,
+      effectiveImgWidth: effectiveCoverImgWidth,
+      effectiveImgHeight: effectiveCoverImgHeight,
+      objectPosition: coverObjectPosition
     });
   });
 

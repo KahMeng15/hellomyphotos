@@ -232,6 +232,9 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         folderCoverBoundingBox = bbRes.rows[0].bounding_box;
         folderCoverImgWidth = bbRes.rows[0].img_width;
         folderCoverImgHeight = bbRes.rows[0].img_height;
+        console.log('[folder] cover lookup for', folderCoverId, JSON.stringify(bbRes.rows[0]));
+      } else {
+        console.log('[folder] cover query returned 0 rows for', folderCoverId);
       }
       // Fallback: read dimensions from file if EXIF is null
       if (!folderCoverImgWidth || !folderCoverImgHeight) {
