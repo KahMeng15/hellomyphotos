@@ -11,8 +11,15 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import './queue';
 
+import { logger } from './utils/logger';
+
 export const app = Fastify({
   logger: true
+});
+
+app.addHook('onRequest', async (request) => {
+  if (request.url === '/api/log') return;
+  logger.info(`${request.method} ${request.url}`, { ip: request.ip });
 });
 
 // Enable CORS for frontend client-side requests
@@ -39,6 +46,18 @@ app.register(sharesRoutes);
 app.register(adminRoutes);
 app.register(queueRoutes);
 app.register(timelineRoutes);
+
+// Frontend log ingest (used by frontendLogger utility)
+app.post('/api/log', async (request, reply) => {
+  const { level, message, route } = request.body as any;
+  if (!message) return reply.status(400).send({ error: 'message required' });
+  const lvl = (level || 'info').toLowerCase();
+  const msg = `[Frontend${route ? ' ' + route : ''}] ${message}`;
+  if (lvl === 'warn') logger.warn(msg);
+  else if (lvl === 'error') logger.error(msg);
+  else logger.info(msg);
+  return reply.send({ ok: true });
+});
 
 // Health check
 app.get('/health', async () => {

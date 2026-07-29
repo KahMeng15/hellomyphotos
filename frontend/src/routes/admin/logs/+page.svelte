@@ -1,19 +1,81 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Terminal, ShieldAlert, Info, AlertTriangle, AlertCircle } from '@lucide/svelte';
+  import { ChevronLeft, Terminal, Server, Globe, KeyRound, Settings, Cpu } from '@lucide/svelte';
 
-  let logs = $state<any[]>([]);
+  let logs = $state<string[]>([]);
+  let archives = $state<string[]>([]);
+  let currentArchive = $state('');
   let loading = $state(true);
   let error = $state('');
-  let filterLevel = $state('all');
 
-  async function fetchLogs() {
+  const categories = [
+    { id: 'all', label: 'All', icon: Terminal },
+    { id: 'api', label: 'API', icon: Globe },
+    { id: 'task', label: 'Tasks', icon: Cpu },
+    { id: 'frontend', label: 'Frontend', icon: Server },
+    { id: 'auth', label: 'Auth', icon: KeyRound },
+    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'server', label: 'Server', icon: Terminal },
+  ];
+
+  let activeCategories = $state<string[]>(['all']);
+
+  function toggleCategory(id: string) {
+    if (id === 'all') {
+      activeCategories = ['all'];
+      return;
+    }
+    let next = activeCategories.filter(c => c !== 'all');
+    if (next.includes(id)) {
+      next = next.filter(c => c !== id);
+      if (next.length === 0) next = ['all'];
+    } else {
+      next.push(id);
+    }
+    activeCategories = next;
+  }
+
+  function matchCategory(line: string): string {
+    if (/Task (completed|failed):/.test(line)) return 'task';
+    if (/^\[Frontend/.test(line)) return 'frontend';
+    if (/User logged in|Failed login|logout/i.test(line)) return 'auth';
+    if (/Settings updated/.test(line)) return 'settings';
+    if (/Server (starting|started)/.test(line)) return 'server';
+    if (/ (GET|POST|PUT|DELETE) \/api\//.test(line)) return 'api';
+    return 'api';
+  }
+
+  function highlightLine(line: string): string {
+    let html = line
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    html = html.replace(
+      /(\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\])/,
+      '<span class="timestamp">$1</span>'
+    );
+    html = html.replace(
+      /\[(INFO|WARN|ERROR|SECURITY)\]/,
+      (_m, lvl) => `<span class="level ${lvl.toLowerCase()}">[${lvl}]</span>`
+    );
+    html = html.replace(
+      /\{"userId":"([^"]+)"\}/,
+      (_m, uid) => `<span class="user">(user: ${uid})</span>`
+    );
+    return html;
+  }
+
+  async function fetchLogs(archive?: string) {
+    loading = true;
+    error = '';
     try {
-      const res = await fetch(`${API_BASE}/api/admin/logs`, { credentials: 'include' });
+      const params = archive ? `?archive=${encodeURIComponent(archive)}` : '';
+      const res = await fetch(`${API_BASE}/api/admin/logs${params}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         logs = data.logs || [];
+        archives = data.archives || [];
+        currentArchive = archive || '';
       } else {
         const err = await res.json().catch(() => ({ error: res.statusText }));
         error = err.error || 'Failed to fetch logs';
@@ -29,14 +91,11 @@
     fetchLogs();
   });
 
-  function getLevelIcon(level: string) {
-    switch (level.toLowerCase()) {
-      case 'error': return AlertCircle;
-      case 'warn': return AlertTriangle;
-      case 'security': return ShieldAlert;
-      default: return Info;
-    }
-  }
+  let filteredLogs = $derived(
+    activeCategories.includes('all')
+      ? logs
+      : logs.filter(l => activeCategories.includes(matchCategory(l)))
+  );
 </script>
 
 <div class="admin-container">
@@ -47,44 +106,49 @@
       </a>
       <div>
         <h2>System Logs & Auditing</h2>
-      <p>Live event streaming and historical action records.</p>
-    </div>
+        <p>Live event streaming and historical action records.</p>
+      </div>
     </div>
     
-    <select class="filter-dropdown" bind:value={filterLevel}>
-      <option value="all">All Levels</option>
-      <option value="info">Info</option>
-      <option value="warn">Warning</option>
-      <option value="error">Error</option>
-      <option value="security">Security Audit</option>
-    </select>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <div class="category-filters">
+        {#each categories as cat}
+          <button
+            class="cat-btn"
+            class:active={activeCategories.includes(cat.id)}
+            onclick={() => toggleCategory(cat.id)}
+          >
+            <cat.icon size={14} strokeWidth={2.5} />
+            {cat.label}
+          </button>
+        {/each}
+      </div>
+      {#if archives.length > 0}
+        <select class="filter-dropdown" bind:value={currentArchive} onchange={(e) => fetchLogs((e.target as HTMLSelectElement).value)}>
+          <option value="">latest.log</option>
+          {#each archives as arch}
+            <option value={arch}>{arch}</option>
+          {/each}
+        </select>
+      {/if}
+    </div>
   </div>
 
   <div class="terminal-window">
     <div class="terminal-header">
       <div class="dots"><span></span><span></span><span></span></div>
-      <div class="title"><Terminal size={14} /> stdout/postgres</div>
+      <div class="title"><Terminal size={14} /> {currentArchive || 'latest.log'}</div>
     </div>
     <div class="terminal-body">
       {#if loading}
-        <div class="line muted">Loading logs from database...</div>
-      {:else if logs.length === 0}
-        <div class="line muted">No system logs recorded yet.</div>
+        <div class="line muted">Loading logs...</div>
       {:else if error}
-        <div class="line error">{error}</div>
+        <div class="line muted" style="color: #ef4444;">Error: {error}</div>
+      {:else if filteredLogs.length === 0}
+        <div class="line muted">No logs match the current filter.</div>
       {:else}
-        {#each logs.filter(l => filterLevel === 'all' || l.level.toLowerCase() === filterLevel) as log}
-          <div class="line">
-            <span class="timestamp">[{new Date(log.created_at).toLocaleString()}]</span>
-            <span class="level {log.level.toLowerCase()}">{log.level.toUpperCase()}</span>
-            {#if log.user_email}
-              <span class="user">({log.user_email})</span>
-            {/if}
-            {#if log.ip_address}
-              <span class="ip">[{log.ip_address}]</span>
-            {/if}
-            <span class="message">{log.message}</span>
-          </div>
+        {#each filteredLogs as line}
+          <div class="line">{@html highlightLine(line)}</div>
         {/each}
       {/if}
     </div>
@@ -103,6 +167,30 @@
   h2 { font-size: 2rem; margin: 0 0 0.5rem 0; }
   p { color: #a1a1aa; margin: 0; }
 
+  .category-filters {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .cat-btn {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.5);
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s;
+  }
+  .cat-btn:hover { border-color: rgba(255,255,255,0.25); color: white; }
+  .cat-btn.active {
+    background: rgba(168,85,247,0.15);
+    border-color: #a855f7;
+    color: #c084fc;
+  }
   .filter-dropdown {
     background: rgba(255,255,255,0.05);
     border: 1px solid rgba(255,255,255,0.1);
@@ -160,15 +248,13 @@
   }
   .line:hover { background: rgba(255,255,255,0.02); }
   
-  .timestamp { color: #52525b; margin-right: 0.5rem; }
-  .level { font-weight: bold; margin-right: 0.5rem; }
-  .level.info { color: #3b82f6; }
-  .level.warn { color: #f59e0b; }
-  .level.error { color: #ef4444; }
-  .level.security { color: #a855f7; }
-  .user { color: #10b981; margin-right: 0.5rem; }
-  .ip { color: #8b5cf6; margin-right: 0.5rem; }
-  .message { color: #e4e4e7; }
+  :global(.timestamp) { color: #52525b; margin-right: 0.5rem; }
+  :global(.level) { font-weight: bold; margin-right: 0.5rem; }
+  :global(.level.info) { color: #3b82f6; }
+  :global(.level.warn) { color: #f59e0b; }
+  :global(.level.error) { color: #ef4444; }
+  :global(.level.security) { color: #a855f7; }
+  :global(.user) { color: #10b981; margin-right: 0.5rem; }
   
   .muted { color: #71717a; font-style: italic; }
 </style>

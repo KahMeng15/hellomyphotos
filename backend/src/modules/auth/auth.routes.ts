@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { pool } from '../../config/db';
 import { redis } from '../../config/redis';
+import { logger } from '../../utils/logger';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_please_change';
 
@@ -64,14 +65,16 @@ export async function authRoutes(fastify: FastifyInstance) {
         if (doubleTimeout) {
           newPenalty = newPenalty * 2;
         }
-        attempts = 0; // Reset attempts to 0 so the next fail triggers the new penalty
+        attempts = 0;
       }
+
+      logger.warn(`Failed login attempt for ${email}`, { ip: request.ip });
 
       await redis.set(redisKey, JSON.stringify({
         attempts,
         currentPenalty: newPenalty,
         blockedUntil: newBlockedUntil
-      }), 'EX', 86400 * 7); // keep state for 7 days
+      }), 'EX', 86400 * 7);
 
       if (newBlockedUntil > 0) {
         const remainingMinutes = Math.ceil((newBlockedUntil - Date.now()) / 60000);
@@ -82,6 +85,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
     // Login successful, clear penalties
     await redis.del(redisKey);
+    logger.info(`User logged in: ${user.email}`, { userId: user.id, ip: request.ip });
 
     // Determine folder access for non-admins
     let folders: string[] = [];

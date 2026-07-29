@@ -1,9 +1,12 @@
 import { app } from './app';
+import { logger } from './utils/logger';
 // Ensure worker is imported so it starts processing
 import './queue';
 // Ensure cron starts
 import './cron/periodicScanner';
 import './cron/analyticsCron';
+
+logger.info('Server starting up');
 
 import { fork } from 'child_process';
 import path from 'path';
@@ -25,6 +28,7 @@ const start = async () => {
     } else {
       await app.listen({ port: PORT, host: '0.0.0.0' });
       app.log.info(`Server listening on port ${PORT}`);
+      logger.info(`Server started on port ${PORT}`);
       
       let maxCpuCores = '2';
       try {

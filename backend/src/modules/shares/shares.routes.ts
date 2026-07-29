@@ -1,8 +1,9 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { query } from '../../config/db';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
+import { AnalyticsService } from '../analytics/analytics.service';
 import sharp from 'sharp';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
@@ -237,6 +238,8 @@ export async function sharesRoutes(fastify: FastifyInstance) {
         folderCoverId = fallbackResult.rows[0].id;
       }
     }
+
+    AnalyticsService.logView(share.media_id || '', 'view_shared_link', 0, token);
 
     return reply.send({ share, files: filesResult.rows, directories, folderCoverId, folderDescription, folderPath: targetPath, baseFolderPath });
   }

@@ -3,10 +3,19 @@
   import { slide, fly } from 'svelte/transition';
   import { onMount } from 'svelte';
   import { page, navigating } from '$app/stores';
-  import { goto } from '$app/navigation';
+  import { goto, afterNavigate } from '$app/navigation';
   import { logout } from '$lib/api/auth';
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
   import { LogOut } from '@lucide/svelte';
+  import { frontendLogger } from '$lib/utils/frontendLogger';
+
+  let prevRoute = $state('');
+  afterNavigate((nav) => {
+    if (nav.to?.url.pathname !== prevRoute) {
+      prevRoute = nav.to?.url.pathname || '';
+      frontendLogger.info(`Navigated to ${prevRoute}`, prevRoute);
+    }
+  });
   import Toast from '$lib/components/Toast.svelte';
   
   let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login');
@@ -23,6 +32,13 @@
   let canGoBack = $state(true);
 
   onMount(() => {
+    window.addEventListener('error', (e) => {
+      frontendLogger.error(`Uncaught error: ${e.message}`, $page.url.pathname);
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      frontendLogger.error(`Unhandled rejection: ${e.reason}`, $page.url.pathname);
+    });
+
     const checkHistory = () => {
       if ('navigation' in window) {
         canGoForward = (window as any).navigation.canGoForward;

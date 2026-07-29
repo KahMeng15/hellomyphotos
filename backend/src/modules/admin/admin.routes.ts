@@ -14,18 +14,18 @@ import { thumbnailQueue } from '../../queue/thumbnailQueue';
 import { videoQueue } from '../../queue/videoQueue';
 import { query } from '../../config/db';
 import { ClusterService } from '../ml/cluster.service';
+import { logger } from '../../utils/logger';
 import path from 'path';
 import fs from 'fs';
 
-async function logAudit(level: string, message: string, userId?: string, ipAddress?: string) {
+function logAudit(level: string, message: string, userId?: string, ipAddress?: string) {
+  logger.info(message, { userId, ipAddress });
   try {
-    await query(
+    query(
       `INSERT INTO system_logs (level, message, user_id, ip_address) VALUES ($1, $2, $3, $4)`,
       [level, message, userId || null, ipAddress || null]
-    );
-  } catch (err) {
-    console.error('[Audit Log] Failed to write log:', err);
-  }
+    ).catch(() => {});
+  } catch {}
 }
 
 // C-2 Fix: Distributed lock for destructive admin operations.
@@ -542,45 +542,67 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.get('/api/admin/logs', async (request, reply) => {
-    const { rows } = await query(`
-      SELECT l.id, l.level, l.message, l.ip_address, l.created_at, u.email as user_email
-      FROM system_logs l
-      LEFT JOIN users u ON l.user_id = u.id
-      ORDER BY l.created_at DESC
-      LIMIT 500
-    `);
-    return reply.send({ logs: rows });
+    const { archive, lines } = request.query as any;
+    try {
+      let content: string;
+      if (archive) {
+        content = await logger.readArchive(archive);
+      } else {
+        content = await logger.readLatest(parseInt(lines || '500', 10));
+      }
+      const archives = await logger.listArchives();
+      const parsed = content.split('\n').filter(Boolean).reverse();
+      return reply.send({ logs: parsed, archives });
+    } catch (e: any) {
+      return reply.status(500).send({ error: e.message });
+    }
   });
 
   fastify.get('/api/admin/analytics', async (request, reply) => {
     try {
-      const stats = await query(`
-        SELECT 
-          (SELECT COUNT(*) FROM media_analytics WHERE event_type = 'view_shared_link') as total_shared_visits,
-          (SELECT COUNT(DISTINCT ip_address) FROM media_analytics) as unique_visitors,
-          (SELECT COUNT(*) FROM media_analytics WHERE event_type = 'download_shared_link') as total_shared_downloads
-      `);
+      const photosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'image/%'`);
+      const videosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'video/%'`);
+      const visitsStats = await query(`SELECT COUNT(*) as count FROM media_analytics`);
       
-      const linkRanking = await query(`
+      const topShares = await query(`
         SELECT 
-          a.share_token, 
-          COALESCE(s.folder_path, s.media_id) as target,
-          COUNT(*) as visits
+          COALESCE(s.folder_path, s.media_id::text) as folder_path,
+          COUNT(*) as views
         FROM media_analytics a
         LEFT JOIN shared_folders s ON a.share_token = s.share_token
-        WHERE a.event_type = 'view_shared_link' AND a.share_token IS NOT NULL
-        GROUP BY a.share_token, target
-        ORDER BY visits DESC
+        WHERE a.share_token IS NOT NULL
+        GROUP BY COALESCE(s.folder_path, s.media_id::text)
+        ORDER BY views DESC
+        LIMIT 10
+      `);
+
+      const topMedia = await query(`
+        SELECT 
+          m.file_name,
+          m.folder_path,
+          COUNT(*) as views
+        FROM media_analytics a
+        JOIN media_files m ON a.media_id = m.id
+        WHERE a.media_id IS NOT NULL
+        GROUP BY m.id, m.file_name, m.folder_path
+        ORDER BY views DESC
         LIMIT 10
       `);
 
       return reply.send({
-        kpis: {
-          totalSharedVisits: parseInt(stats.rows[0].total_shared_visits || '0'),
-          uniqueVisitors: parseInt(stats.rows[0].unique_visitors || '0'),
-          totalSharedDownloads: parseInt(stats.rows[0].total_shared_downloads || '0')
+        stats: {
+          photos: {
+            count: parseInt(photosStats.rows[0].count),
+            size: parseInt(photosStats.rows[0].size)
+          },
+          videos: {
+            count: parseInt(videosStats.rows[0].count),
+            size: parseInt(videosStats.rows[0].size)
+          },
+          visits: parseInt(visitsStats.rows[0].count)
         },
-        linkRanking: linkRanking.rows
+        topShares: topShares.rows,
+        topMedia: topMedia.rows
       });
     } catch (e: any) {
       request.log.error(e);
@@ -593,8 +615,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
     try {
       const { rows } = await query(`
         SELECT s.*, 
-               (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.event_type = 'view_shared_link') as views,
-               (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.event_type = 'download_shared_link') as downloads
+               (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.action_type = 'view_shared_link') as views,
+               (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.action_type = 'download_shared_link') as downloads
         FROM shared_folders s
         ORDER BY s.created_at DESC
       `);
