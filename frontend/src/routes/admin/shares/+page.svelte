@@ -2,9 +2,12 @@
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
   import { ChevronLeft, Trash2, Link as LinkIcon, Folder, Image } from '@lucide/svelte';
+  import Modal from '$lib/components/Modal.svelte';
 
   let shares: any[] = [];
   let isLoading = true;
+  let showRevokeConfirm = false;
+  let revokeTargetToken = '';
 
   async function fetchShares() {
     try {
@@ -24,19 +27,25 @@
   }
 
   async function revokeShare(token: string) {
-    if (!confirm('Are you sure you want to revoke this share link? Anyone using it will instantly lose access.')) return;
-    
+    revokeTargetToken = token;
+    showRevokeConfirm = true;
+  }
+
+  async function confirmRevokeShare() {
     try {
       const jwt = localStorage.getItem('token');
-      const res = await fetch(`${API_BASE}/api/admin/shares/${token}`, {
+      const res = await fetch(`${API_BASE}/api/admin/shares/${revokeTargetToken}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${jwt}` }
       });
       if (res.ok) {
-        shares = shares.filter(s => s.share_token !== token);
+        shares = shares.filter(s => s.share_token !== revokeTargetToken);
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      showRevokeConfirm = false;
+      revokeTargetToken = '';
     }
   }
 
@@ -142,6 +151,14 @@
     </div>
   {/if}
 </div>
+
+<Modal bind:show={showRevokeConfirm} id="admin-revoke-confirm" title="Revoke Share Link">
+  <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">Are you sure you want to revoke this share link? Anyone using it will instantly lose access.</p>
+  <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
+    <button class="btn" style="background: transparent; border: 1px solid var(--glass-border); color: #ccc;" onclick={() => { showRevokeConfirm = false; revokeTargetToken = ''; }}>Cancel</button>
+    <button class="btn" style="background: #ef4444; color: white; border: none;" onclick={confirmRevokeShare}>Revoke</button>
+  </div>
+</Modal>
 
 <style>
   .admin-container {

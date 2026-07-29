@@ -86,13 +86,20 @@
   }
 
   async function handleRevokeShare(token: string) {
-    if (!confirm('Are you sure you want to revoke this share link?')) return;
+    revokeTargetToken = token;
+    showRevokeConfirm = true;
+  }
+
+  async function confirmRevokeShare() {
     try {
-      await revokeShare(token);
+      await revokeShare(revokeTargetToken);
       await loadActiveShares();
     } catch (e) {
       console.error(e);
-      alert('Failed to revoke share');
+      showAppAlert('Error', 'Failed to revoke share');
+    } finally {
+      showRevokeConfirm = false;
+      revokeTargetToken = '';
     }
   }
 
@@ -128,6 +135,8 @@
   let showAlertModal = $state(false);
   let alertModalTitle = $state('');
   let alertModalMessage = $state('');
+  let showRevokeConfirm = $state(false);
+  let revokeTargetToken = $state('');
 
   function showAppAlert(title: string, message: string) {
     alertModalTitle = title;
@@ -490,6 +499,14 @@
   <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">{alertModalMessage}</p>
   <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
     <button class="btn" style="background: white; color: black;" onclick={() => showAlertModal = false}>Okay</button>
+  </div>
+</Modal>
+
+<Modal bind:show={showRevokeConfirm} id="person-revoke-confirm" title="Revoke Share Link">
+  <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">Are you sure you want to revoke this share link? Anyone using it will instantly lose access.</p>
+  <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
+    <button class="btn" style="background: transparent; border: 1px solid var(--glass-border); color: #ccc;" onclick={() => { showRevokeConfirm = false; revokeTargetToken = ''; }}>Cancel</button>
+    <button class="btn" style="background: #ef4444; color: white; border: none;" onclick={confirmRevokeShare}>Revoke</button>
   </div>
 </Modal>
 
