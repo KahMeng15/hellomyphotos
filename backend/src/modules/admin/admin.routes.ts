@@ -10,6 +10,7 @@ import { faceDetectionQueue } from '../../queue/faceDetectionQueue';
 import { facialRecognitionQueue } from '../../queue/facialRecognitionQueue';
 import { smartSearchQueue } from '../../queue/smartSearchQueue';
 import { faceThumbnailQueue } from '../../queue/faceThumbnailQueue';
+import { thumbnailQueue } from '../../queue/thumbnailQueue';
 import { query } from '../../config/db';
 import { ClusterService } from '../ml/cluster.service';
 import path from 'path';
@@ -297,6 +298,30 @@ export async function adminRoutes(fastify: FastifyInstance) {
       });
     }
     return reply.send({ success: true, message: 'Media/EXIF reset initiated in the background' });
+  });
+
+  fastify.post('/api/admin/reset-thumbnails', async (request, reply) => {
+    await query(`UPDATE media_files SET blurhash = NULL WHERE mime_type LIKE 'image/%'`);
+
+    const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
+    fs.rmSync(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
+    fs.rmSync(path.join(cacheRoot, '480p'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(cacheRoot, '1080p'), { recursive: true });
+    fs.mkdirSync(path.join(cacheRoot, '480p'), { recursive: true });
+
+    await allQueues['thumbnail'].clean(0, 10000, 'completed');
+    await allQueues['thumbnail'].clean(0, 10000, 'failed');
+
+    const result = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%'`);
+    for (const row of result.rows) {
+      await thumbnailQueue.add('generate-thumbnail', {
+        mediaId: row.id,
+        fullPath: path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'), row.folder_path, row.file_name),
+        mimeType: row.mime_type,
+        skipCascade: true
+      });
+    }
+    return reply.send({ success: true, message: 'Thumbnail reset initiated in the background' });
   });
 
   fastify.post('/api/admin/reset-faces', async (request, reply) => {

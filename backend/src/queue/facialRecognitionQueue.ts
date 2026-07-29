@@ -1,5 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import { redis } from '../config/redis';
+import { query } from '../config/db';
 import { ClusterService } from '../modules/ml/cluster.service';
 import { faceThumbnailQueue } from './faceThumbnailQueue';
 import { getExecutionMode } from './mode';
@@ -12,7 +13,15 @@ if (process.env.IS_WORKER === 'true') {
   const { mediaId, fullPath } = job.data;
   console.log(`[Facial Recognition Worker] Running recognition/clustering for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
-  await ClusterService.reclusterFaces();
+  const unclustered = await query(
+    'SELECT 1 FROM face_embeddings WHERE media_id = $1 AND person_id IS NULL LIMIT 1',
+    [mediaId]
+  );
+  if (unclustered.rows.length === 0) {
+    console.log(`[Facial Recognition Worker] Skipping ${mediaId}, faces already clustered`);
+  } else {
+    await ClusterService.reclusterFaces();
+  }
 
   // Sequential handoff to face thumbnail generation
   const mode = await getExecutionMode();

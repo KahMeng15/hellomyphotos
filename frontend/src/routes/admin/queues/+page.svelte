@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Layers } from '@lucide/svelte';
+  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Layers, Image, RefreshCw } from '@lucide/svelte';
   import Modal from '$lib/components/Modal.svelte';
 
   let queues = $state<any>({});
@@ -159,9 +159,17 @@
   }
 
   async function triggerResetExif() {
-    customConfirm('Reset EXIF & Thumbnails', 'Are you sure you want to flush all EXIF data and thumbnails? They will be re-generated.', true, async () => {
+    customConfirm('Reset EXIF & Thumbnails', 'Are you sure you want to flush all EXIF data and thumbnails? They will be re-generated from scratch.', true, async () => {
       await fetch(`${API_BASE}/api/admin/reset-exif`, { method: 'POST', credentials: 'include' });
       customAlert('Success', 'EXIF data reset and reprocessing initiated!');
+    });
+  }
+
+  async function triggerResetThumbnails() {
+    customConfirm('Reset Thumbnails', 'Are you sure you want to clear all thumbnail caches and blurhash data? EXIF metadata will be preserved. Thumbnails will be regenerated in the background.', false, async () => {
+      await fetch(`${API_BASE}/api/admin/reset-thumbnails`, { method: 'POST', credentials: 'include' });
+      await loadQueuesOnly();
+      customAlert('Success', 'Thumbnail reset and regeneration initiated!');
     });
   }
 
@@ -189,8 +197,6 @@
 
   async function triggerNuke() {
     customConfirm('System Reset & Full Rescan', 'Are you sure you want to completely wipe the index, EXIF data, and facial recognition data, and rescan everything from scratch? This is a destructive operation and will take a significant amount of time.', true, async () => {
-      await fetch(`${API_BASE}/api/admin/reset-faces`, { method: 'POST', credentials: 'include' });
-      await fetch(`${API_BASE}/api/admin/reset-exif`, { method: 'POST', credentials: 'include' });
       await fetch(`${API_BASE}/api/admin/reset-index`, { method: 'POST', credentials: 'include' });
       customAlert('Success', 'Full system reset and background rescan initiated!');
     });
@@ -258,13 +264,18 @@
         <p>Configure processing constraints and monitor background workers across all 8 pipeline queues.</p>
       </div>
     </div>
-    <button class="btn primary" onclick={saveSettings} disabled={saving}>
-      {#if saving}
-        Saving...
-      {:else}
-        <Save size={18} /> Save Changes
-      {/if}
-    </button>
+    <div style="display: flex; gap: 0.5rem;">
+      <button class="btn secondary" onclick={loadQueuesOnly} title="Refresh queue counts">
+        <RefreshCw size={18} /> Refresh
+      </button>
+      <button class="btn primary" onclick={saveSettings} disabled={saving}>
+        {#if saving}
+          Saving...
+        {:else}
+          <Save size={18} /> Save Changes
+        {/if}
+      </button>
+    </div>
   </div>
 
   <div class="pipeline">
@@ -343,13 +354,12 @@
         {#each queueNames as name}
           {#if queues[name]}
             {@const q = queues[name]}
-            {@const counts = q.counts || { waiting: 0, active: 0, completed: 0, failed: 0 }}
-            {@const total = counts.waiting + counts.active + counts.completed + counts.failed}
+            {@const counts = q.counts || { waiting: 0, active: 0, completed: 0, failed: 0, total: 0 }}
+            {@const total = counts.total || counts.waiting + counts.active + counts.completed + counts.failed}
             {@const pCompleted = total > 0 ? (counts.completed / total) * 100 : 0}
             {@const pActive = total > 0 ? (counts.active / total) * 100 : 0}
             {@const pWaiting = total > 0 ? (counts.waiting / total) * 100 : 0}
-            {@const pFailed = total > 0 ? (counts.failed / total) * 100 : 0}
-            {@const isRunning = counts.active > 0 || counts.waiting > 0}
+            {@const isRunning = (q.bullmq?.active || 0) > 0 || (q.bullmq?.waiting || 0) > 0}
 
             <div class="card queue-card" style="margin: 0;">
               <div class="q-header">
@@ -357,7 +367,9 @@
                 <div class="q-actions">
                   <button class="btn success sm" disabled={isRunning} style={isRunning ? 'opacity: 0.5; cursor: not-allowed;' : ''} onclick={() => triggerJob(name)} title="Force Run Queue"><Play size={14}/> Start</button>
                   
-                  {#if !isRunning || q.isPaused}
+                  {#if q.isPaused}
+                    <button class="btn success sm" onclick={() => actionQueue(name, 'resume')}><Play size={14}/> Resume</button>
+                  {:else if !isRunning}
                     <button class="btn warning sm" disabled style="opacity: 0.5; cursor: not-allowed;"><Pause size={14}/> Pause</button>
                   {:else}
                     <button class="btn warning sm" onclick={() => actionQueue(name, 'pause')}><Pause size={14}/> Pause</button>
@@ -369,18 +381,25 @@
               </div>
               
               <div class="progress-container" style="display: flex;">
-                {#if pCompleted > 0}<div class="progress-bar completed" style="width: {pCompleted}%; background: #10b981;" title="Completed: {counts.completed}"></div>{/if}
-                {#if pActive > 0}<div class="progress-bar active" style="width: {pActive}%; background: #3b82f6;" title="Active: {counts.active}"></div>{/if}
-                {#if pWaiting > 0}<div class="progress-bar waiting" style="width: {pWaiting}%; background: #f59e0b;" title="Waiting: {counts.waiting}"></div>{/if}
-                {#if pFailed > 0}<div class="progress-bar failed" style="width: {pFailed}%; background: #ef4444;" title="Failed: {counts.failed}"></div>{/if}
+                {#if pCompleted > 0}<div class="progress-bar completed" style="width: {pCompleted}%; background: #10b981;" title="Completed: {counts.completed}/{total}"></div>{/if}
+                {#if pActive > 0}<div class="progress-bar active" style="width: {pActive}%; background: #3b82f6;" title="Active: {counts.active}/{total}"></div>{/if}
+                {#if pWaiting > 0}<div class="progress-bar waiting" style="width: {pWaiting}%; background: #f59e0b;" title="Waiting: {counts.waiting}/{total}"></div>{/if}
               </div>
               
               <div class="q-stats">
+                <div class="stat"><span class="dot total"></span> Total: {total}</div>
+                <div class="stat"><span class="dot completed"></span> Completed: {counts.completed}</div>
                 <div class="stat"><span class="dot active"></span> Active: {counts.active}</div>
                 <div class="stat"><span class="dot waiting"></span> Waiting: {counts.waiting}</div>
-                <div class="stat"><span class="dot completed"></span> Completed: {counts.completed}</div>
                 <div class="stat"><span class="dot failed"></span> Failed: {counts.failed}</div>
               </div>
+              
+              {#if q.extra && name === 'scanner'}
+                <div class="q-stats" style="margin-top: 0.5rem; background: rgba(0,0,0,0.2); padding: 0.5rem 1rem; border-radius: 6px;">
+                  <div class="stat" style="color: #c084fc;"><span class="dot" style="background: #c084fc;"></span> Unique Folders Found: {q.extra.folders}</div>
+                  <div class="stat" style="color: #60a5fa;"><span class="dot" style="background: #60a5fa;"></span> Media Files Discovered: {q.extra.files}</div>
+                </div>
+              {/if}
 
               {#if q.activeJobs && q.activeJobs.length > 0}
                 <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
@@ -414,7 +433,10 @@
             <Activity size={16}/> Reset Index
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetExif}>
-            <Save size={16}/> Reset EXIF Data
+            <Save size={16}/> Reset EXIF & Thumbnails
+          </button>
+          <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetThumbnails}>
+            <Image size={16}/> Reset Thumbnails Only
           </button>
           <button class="btn warning" style="width: 100%; justify-content: center;" onclick={triggerResetFaces}>
             <Cpu size={16}/> Reset ML Data
@@ -538,6 +560,7 @@
     color: #a1a1aa;
   }
   .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.total { background: #a78bfa; }
   .dot.active { background: #3b82f6; }
   .dot.waiting { background: #f59e0b; }
   .dot.completed { background: #10b981; }

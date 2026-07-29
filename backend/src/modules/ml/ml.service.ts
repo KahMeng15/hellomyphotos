@@ -135,6 +135,7 @@ export class MLService {
 
     } catch (err: any) {
       console.error(`[ML] Failed to process faces for ${mediaId}:`, err.message);
+      throw err;
     }
   }
 
@@ -187,6 +188,7 @@ export class MLService {
       }
     } catch (err: any) {
       console.error(`[ML] Failed to generate face thumbnails for ${mediaId}:`, err.message);
+      throw err;
     }
   }
 

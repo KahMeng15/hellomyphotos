@@ -1,5 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import { redis } from '../config/redis';
+import { query } from '../config/db';
 import { MediaService } from '../modules/media/media.service';
 import { smartSearchQueue } from './smartSearchQueue';
 import { getExecutionMode } from './mode';
@@ -9,16 +10,21 @@ export const thumbnailQueue = new Queue('thumbnail', { connection: redis });
 export let thumbnailWorker: Worker | undefined;
 if (process.env.IS_WORKER === 'true') {
   thumbnailWorker = new Worker('thumbnail', async (job) => {
-  const { mediaId, fullPath, mimeType } = job.data;
+  const { mediaId, fullPath, mimeType, skipCascade } = job.data;
   console.log(`[Thumbnail Worker] Processing thumbnails for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   if (mimeType && mimeType.startsWith('image/')) {
-    await MediaService.processImage(mediaId, fullPath);
+    const existing = await query('SELECT has_1080p, has_480p FROM media_files WHERE id = $1', [mediaId]);
+    if (existing.rows.length > 0 && existing.rows[0].has_1080p && existing.rows[0].has_480p) {
+      console.log(`[Thumbnail Worker] Skipping ${mediaId}, thumbnails already generated`);
+    } else {
+      await MediaService.processImage(mediaId, fullPath);
+    }
   }
 
   // Sequential handoff
   const mode = await getExecutionMode();
-  if (mode === 'sequential') {
+  if (mode === 'sequential' && !skipCascade) {
     await smartSearchQueue.add('generate-smart-search', { mediaId, fullPath, mimeType });
   }
 }, {

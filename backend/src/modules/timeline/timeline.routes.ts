@@ -25,9 +25,15 @@ export async function timelineRoutes(fastify: FastifyInstance) {
 
     const result = await query(`
       SELECT 
-        id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json,
+        id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, created_at,
         COALESCE(
           (exif_json->>'dateTimeOriginal')::timestamp,
+          (exif_json->>'DateTimeOriginal')::timestamp,
+          (exif_json->>'createDate')::timestamp,
+          (exif_json->>'CreateDate')::timestamp,
+          (exif_json->>'modifyDate')::timestamp,
+          (exif_json->>'ModifyDate')::timestamp,
+          (exif_json->>'timestamp')::timestamp,
           created_at
         ) as sort_date
       FROM media_files

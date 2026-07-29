@@ -4,6 +4,7 @@
   import Lightbox from '$lib/components/Lightbox.svelte';
   import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription } from '$lib/api/media';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
+  import { getSortDate } from '$lib/utils/date';
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
   import { invalidateAll } from '$app/navigation';
   import { page } from '$app/stores';
@@ -22,16 +23,6 @@
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
-
-  function getSortDate(file: typeof data.files[number]): number {
-    const exifDate = file.exif_json?.dateTimeOriginal;
-    if (exifDate) {
-      const normalized = exifDate.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-      const time = new Date(normalized).getTime();
-      if (!isNaN(time)) return time;
-    }
-    return new Date(file.created_at).getTime() || 0;
-  }
 
   let sortedFiles = $derived([...data.files].sort((a, b) => {
     if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);

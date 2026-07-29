@@ -8,9 +8,10 @@ const checkInterval = async () => {
     // Default to 1 hour (3600000 ms) if not set
     const intervalMs = scanIntervalStr ? parseInt(scanIntervalStr, 10) : 3600000;
     
-    // Add job to scan root folder periodically
-    console.log(`[Cron] Adding periodic root scan job. Next run in ${intervalMs}ms`);
-    await scannerQueue.add('scan-directory', { folderPath: '' });
+    // Add job to scan all folders periodically
+    console.log(`[Cron] Adding periodic full scan job. Next run in ${intervalMs}ms`);
+    const { ScannerService } = await import('../modules/scanner/scanner.service');
+    await ScannerService.scanAllDirectories('');
 
     setTimeout(checkInterval, intervalMs);
   } catch (error) {

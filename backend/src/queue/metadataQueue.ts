@@ -1,5 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import { redis } from '../config/redis';
+import { query } from '../config/db';
 import { MetadataService } from '../modules/media/metadata.service';
 import { thumbnailQueue } from './thumbnailQueue';
 import { videoQueue } from './videoQueue';
@@ -13,7 +14,12 @@ if (process.env.IS_WORKER === 'true') {
   const { mediaId, fullPath, mimeType } = job.data;
   console.log(`[Metadata Worker] Extracting metadata for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
-  await MetadataService.extractMetadata(mediaId, fullPath, mimeType);
+  const existing = await query('SELECT exif_json FROM media_files WHERE id = $1', [mediaId]);
+  if (existing.rows.length > 0 && existing.rows[0].exif_json !== null) {
+    console.log(`[Metadata Worker] Skipping ${mediaId}, metadata already extracted`);
+  } else {
+    await MetadataService.extractMetadata(mediaId, fullPath, mimeType);
+  }
 
   // Sequential handoff
   const mode = await getExecutionMode();

@@ -91,7 +91,7 @@ export class MetadataService {
 
       await query(
         `UPDATE media_files SET exif_json = $1, updated_at = NOW() WHERE id = $2`,
-        [exifJson ? JSON.stringify(exifJson) : null, mediaId]
+        [exifJson ? JSON.stringify(exifJson) : '{}', mediaId]
       );
 
       return exifJson;

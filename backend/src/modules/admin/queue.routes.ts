@@ -46,11 +46,78 @@ export async function queueRoutes(fastify: FastifyInstance) {
     const currentMode = await getExecutionMode();
 
     for (const [name, q] of Object.entries(queues)) {
-      const counts = await q.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed', 'paused');
+      const bullmqCounts = await q.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed', 'paused');
       const isPaused = await q.isPaused();
 
-      const total = counts.waiting + counts.active + counts.completed + counts.failed;
-      const progress = total > 0 ? Math.round((counts.completed / total) * 100) : 0;
+      // Derive accurate pipeline counts from the database
+      let total = 0;
+      let completed = 0;
+      try {
+        switch (name) {
+          case 'scanner': {
+            const dbRes = await query('SELECT COUNT(DISTINCT folder_path)::int as folders, COUNT(*)::int as files FROM media_files');
+            (q as any).extraStats = { folders: dbRes.rows[0].folders, files: dbRes.rows[0].files };
+            
+            // Use database unique folders for 'completed' to avoid endlessly growing BullMQ history
+            completed = dbRes.rows[0].folders;
+            total = (bullmqCounts.waiting || 0) + (bullmqCounts.active || 0) + (bullmqCounts.failed || 0) + completed;
+            break;
+          }
+          case 'metadata': {
+            const r = await query('SELECT COUNT(*)::int as total, COUNT(exif_json)::int as completed FROM media_files');
+            total = r.rows[0].total; completed = r.rows[0].completed;
+            break;
+          }
+          case 'thumbnail': {
+            const r = await query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE has_1080p AND has_480p)::int as completed FROM media_files WHERE mime_type LIKE 'image/%'`);
+            total = r.rows[0].total; completed = r.rows[0].completed;
+            break;
+          }
+          case 'video': {
+            const r = await query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE has_480p IS NOT NULL)::int as completed FROM media_files WHERE mime_type LIKE 'video/%'`);
+            total = r.rows[0].total; completed = r.rows[0].completed;
+            break;
+          }
+          case 'smart-search': {
+            const r = await query('SELECT COUNT(*)::int as total, COUNT(clip_embedding)::int as completed FROM media_files');
+            total = r.rows[0].total; completed = r.rows[0].completed;
+            break;
+          }
+          case 'face-detection': {
+            const r = await query(`
+              SELECT (SELECT COUNT(*)::int FROM media_files WHERE mime_type LIKE 'image/%') as total,
+                     COALESCE((SELECT COUNT(DISTINCT media_id)::int FROM face_embeddings), 0) as completed
+            `);
+            total = r.rows[0].total; completed = r.rows[0].completed;
+            break;
+          }
+          case 'facial-recognition': {
+            const r = await query(`
+              SELECT (SELECT COUNT(DISTINCT media_id)::int FROM face_embeddings) as total,
+                     COALESCE((SELECT COUNT(DISTINCT fe.media_id)::int FROM face_embeddings fe
+                       WHERE NOT EXISTS (SELECT 1 FROM face_embeddings fe2 WHERE fe2.media_id = fe.media_id AND fe2.person_id IS NULL)), 0) as completed
+            `);
+            total = r.rows[0].total; completed = r.rows[0].completed;
+            break;
+          }
+          case 'face-thumbnail': {
+            const r = await query(`
+              SELECT COALESCE((SELECT COUNT(*)::int FROM people p WHERE EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.person_id = p.id)), 0) as total,
+                     COALESCE((SELECT COUNT(*)::int FROM people p WHERE EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.person_id = p.id)), 0) as completed
+            `);
+            total = r.rows[0].total; completed = r.rows[0].completed;
+            break;
+          }
+        }
+      } catch (err) {
+        console.error(`[Queue Stats] DB query failed for ${name}:`, err);
+        total = 0; completed = 0;
+      }
+
+      const active = bullmqCounts.active || 0;
+      const failed = bullmqCounts.failed || 0;
+      const waiting = Math.max(0, total - completed - active);
+      const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
 
       const activeJobsRaw = await q.getJobs(['active']);
       const activeJobs = await Promise.all(activeJobsRaw.map(async (j: any) => {
@@ -59,8 +126,8 @@ export async function queueRoutes(fastify: FastifyInstance) {
           try {
             const res = await query('SELECT folder_path, file_name FROM media_files WHERE id = $1', [j.data.mediaId]);
             if (res.rows.length > 0) {
-              const r = res.rows[0];
-              target = r.folder_path ? `${r.folder_path}/${r.file_name}` : r.file_name;
+              const r2 = res.rows[0];
+              target = r2.folder_path ? `${r2.folder_path}/${r2.file_name}` : r2.file_name;
             } else {
               target = j.data.mediaId;
             }
@@ -74,7 +141,14 @@ export async function queueRoutes(fastify: FastifyInstance) {
         };
       }));
 
-      stats[name] = { counts, isPaused, activeJobs, progress };
+      stats[name] = {
+        counts: { waiting, active, completed, failed, total },
+        bullmq: { waiting: bullmqCounts.waiting || 0, active: bullmqCounts.active || 0 },
+        isPaused,
+        activeJobs,
+        progress,
+        extra: (q as any).extraStats
+      };
     }
 
     return reply.send({ queues: stats, mode: currentMode });
@@ -105,6 +179,8 @@ export async function queueRoutes(fastify: FastifyInstance) {
     if (!q) return reply.status(404).send({ error: `Queue '${name}' not found` });
     await q.pause();
     await q.drain(true);
+    await q.clean(0, 10000, 'active');
+    await q.resume(); // Unpause after stopping so it doesn't stay paused
     return reply.send({ success: true });
   });
 
@@ -128,7 +204,8 @@ export async function queueRoutes(fastify: FastifyInstance) {
     await q.resume();
 
     if (name === 'scanner') {
-      await scannerQueue.add('scan-directory', { folderPath: '' });
+      const { ScannerService } = await import('../scanner/scanner.service');
+      await ScannerService.scanAllDirectories('');
     } else if (name === 'metadata') {
       const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files`);
       for (const row of res.rows) {

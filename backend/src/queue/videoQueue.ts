@@ -1,5 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import { redis } from '../config/redis';
+import { query } from '../config/db';
 import { VideoService } from '../modules/media/video.service';
 import { smartSearchQueue } from './smartSearchQueue';
 import { getExecutionMode } from './mode';
@@ -13,7 +14,12 @@ if (process.env.IS_WORKER === 'true') {
   console.log(`[Video Worker] Processing video for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   if (mimeType && mimeType.startsWith('video/')) {
-    await VideoService.processVideo(mediaId, fullPath);
+    const existing = await query('SELECT has_480p FROM media_files WHERE id = $1', [mediaId]);
+    if (existing.rows.length > 0 && existing.rows[0].has_480p !== null) {
+      console.log(`[Video Worker] Skipping ${mediaId}, video already processed`);
+    } else {
+      await VideoService.processVideo(mediaId, fullPath);
+    }
   }
 
   // Sequential handoff

@@ -1,5 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import { redis } from '../config/redis';
+import { query } from '../config/db';
 import { MLService } from '../modules/ml/ml.service';
 import { facialRecognitionQueue } from './facialRecognitionQueue';
 
@@ -12,7 +13,12 @@ if (process.env.IS_WORKER === 'true') {
   console.log(`[Face Detection Worker] Running face detection for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   if (!mimeType || mimeType.startsWith('image/')) {
-    await MLService.detectFaces(mediaId, fullPath);
+    const existing = await query('SELECT 1 FROM face_embeddings WHERE media_id = $1 LIMIT 1', [mediaId]);
+    if (existing.rows.length > 0) {
+      console.log(`[Face Detection Worker] Skipping ${mediaId}, faces already detected`);
+    } else {
+      await MLService.detectFaces(mediaId, fullPath);
+    }
   }
 
   // Always trigger reclustering after detection completes

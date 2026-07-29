@@ -12,7 +12,8 @@ export class ScannerService {
     const fullPath = path.join(MEDIA_ROOT, basePath);
     try {
       const files = await fs.promises.readdir(fullPath, { withFileTypes: true });
-      await this.scanDirectory(basePath);
+      const { scannerQueue } = await import('../../queue/scannerQueue');
+      await scannerQueue.add('scan-directory', { folderPath: basePath });
       
       for (const file of files) {
         if (file.isDirectory() && !file.name.startsWith('.')) {
@@ -20,7 +21,7 @@ export class ScannerService {
         }
       }
     } catch (err: any) {
-      console.error(`Error scanning all directories at ${fullPath}:`, err.message);
+      console.error(`Error queuing all directories at ${fullPath}:`, err.message);
     }
   }
 

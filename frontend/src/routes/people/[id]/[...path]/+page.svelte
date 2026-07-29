@@ -2,6 +2,7 @@
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import CoverImage from '$lib/components/CoverImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
+  import { getSortDate } from '$lib/utils/date';
   import Modal from '$lib/components/Modal.svelte';
   import { getThumbnailUrl, getPreviewUrl, API_BASE } from '$lib/api/media';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
@@ -110,16 +111,6 @@
     setTimeout(() => {
       if (copiedToken === token) copiedToken = null;
     }, 2000);
-  }
-
-  function getSortDate(file: typeof data.files[number]): number {
-    const exifDate = file.exif_json?.dateTimeOriginal;
-    if (exifDate) {
-      const normalized = exifDate.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-      const time = new Date(normalized).getTime();
-      if (!isNaN(time)) return time;
-    }
-    return new Date(file.created_at).getTime() || 0;
   }
 
   let sortedFiles = $derived([...data.files].sort((a, b) => {

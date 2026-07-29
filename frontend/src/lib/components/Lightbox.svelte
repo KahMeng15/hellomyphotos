@@ -7,6 +7,7 @@
   import BlurhashImage from './BlurhashImage.svelte';
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
+  import { formatDate } from '$lib/utils/date';
 
   let { 
     media, 
@@ -192,7 +193,7 @@
             <h4>DETAILS</h4>
             <p><strong>Filename:</strong> {media.file_name}</p>
             <p><strong>Size:</strong> {(media.size_bytes / 1024 / 1024).toFixed(2)} MB</p>
-            <p><strong>Date Taken:</strong> {media.exif_json?.dateTimeOriginal ? new Date(media.exif_json.dateTimeOriginal).toLocaleString() : 'Unknown'}</p>
+            <p><strong>Date Taken:</strong> {formatDate(media)}</p>
           </div>
           {#if media.folder_path}
           <div class="info-section">
