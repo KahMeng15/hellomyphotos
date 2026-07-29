@@ -67,11 +67,11 @@
   onMount(async () => {
     try {
       const user = await loadAuthUser();
-      if (!user && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login') {
+      if (!user && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login' && $page.url.pathname !== '/') {
         goto('/login');
       }
     } catch (err) {
-      if (!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login') {
+      if (!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login' && $page.url.pathname !== '/') {
         goto('/login');
       }
     }
@@ -160,7 +160,7 @@
 </svelte:head>
 
 <div class="app-layout">
-  {#if isSidebarOpen}
+  {#if isSidebarOpen && $page.url.pathname !== '/login' && ($currentUser || $page.url.pathname !== '/')}
     <aside class="sidebar" transition:slide={{ axis: 'x', duration: 300 }}>
       <div class="sidebar-header">
         <a href="/" style="text-decoration: none;">
@@ -211,7 +211,7 @@
     </aside>
   {/if}
 
-  <main class="main-content {$page.url.pathname === '/login' ? 'no-padding' : ''}">
+  <main class="main-content {($page.url.pathname === '/login' || (!$currentUser && $page.url.pathname === '/')) ? 'no-padding' : ''}">
     {#if $navigating}
       <div class="nav-loading-bar"></div>
     {/if}
@@ -234,7 +234,7 @@
         <slot />
       </div>
     {/if}
-    {#if $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/admin') && !$page.url.pathname.startsWith('/settings')}
+    {#if $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/admin') && !$page.url.pathname.startsWith('/settings') && !(!$currentUser && $page.url.pathname === '/')}
       {#key $page.url.pathname}
         <footer class="app-footer {$page.url.pathname.startsWith('/folder') || $page.url.pathname.startsWith('/share') ? 'animate-footer' : ''}">
           <p>
@@ -251,7 +251,7 @@
     {/if}
   </main>
 
-  {#if !isSidebarOpen && $page.url.pathname !== '/login'}
+  {#if !isSidebarOpen && $page.url.pathname !== '/login' && ($currentUser || $page.url.pathname !== '/')}
     <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => isSidebarOpen = true} title="Open sidebar">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg>
     </button>

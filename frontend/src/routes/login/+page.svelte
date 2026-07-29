@@ -80,6 +80,10 @@
             Login
           {/if}
         </button>
+
+        <a href="/" class="back-btn">
+          Back to Homepage
+        </a>
       </form>
     </div>
   </div>
@@ -240,6 +244,21 @@
     opacity: 0.6;
     cursor: not-allowed;
     transform: none;
+  }
+
+  .back-btn {
+    display: inline-block;
+    width: 100%;
+    margin-top: 1rem;
+    text-align: center;
+    color: #a1a1aa;
+    text-decoration: none;
+    font-size: 0.95rem;
+    transition: color 0.2s ease;
+  }
+  
+  .back-btn:hover {
+    color: #f4f4f5;
   }
 
   .error-banner {
