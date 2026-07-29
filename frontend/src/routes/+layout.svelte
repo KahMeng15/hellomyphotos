@@ -28,10 +28,22 @@
     }
   });
 
+  function toggleSidebar(open: boolean) {
+    isSidebarOpen = open;
+    try { localStorage.setItem('sidebarOpen', String(open)); } catch {}
+  }
+
   let canGoForward = $state(false);
   let canGoBack = $state(true);
 
   onMount(() => {
+    try {
+      const saved = localStorage.getItem('sidebarOpen');
+      if (saved !== null && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login') {
+        isSidebarOpen = saved === 'true';
+      }
+    } catch {}
+
     window.addEventListener('error', (e) => {
       frontendLogger.error(`Uncaught error: ${e.message}`, $page.url.pathname);
     });
@@ -195,7 +207,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <button class="icon-btn hide-sidebar-btn" onclick={() => isSidebarOpen = false} title="Hide sidebar" style="margin-bottom: 1rem; width: 100%; display: flex; justify-content: flex-end; border: none; background: transparent; cursor: pointer;">
+        <button class="icon-btn hide-sidebar-btn" onclick={() => toggleSidebar(false)} title="Hide sidebar" style="margin-bottom: 1rem; width: 100%; display: flex; justify-content: flex-end; border: none; background: transparent; cursor: pointer;">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #a1a1aa;"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
         </button>
 
@@ -252,7 +264,7 @@
   </main>
 
   {#if !isSidebarOpen && $page.url.pathname !== '/login' && ($currentUser || $page.url.pathname !== '/')}
-    <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => isSidebarOpen = true} title="Open sidebar">
+    <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => toggleSidebar(true)} title="Open sidebar">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg>
     </button>
   {/if}

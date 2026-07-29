@@ -17,6 +17,7 @@
     try {
       const res = await login(email, password);
       currentUser.set(res.user);
+      try { localStorage.setItem('sidebarOpen', 'true'); } catch {}
       goto('/');
     } catch (err: any) {
       error = err.message || 'Invalid credentials';
