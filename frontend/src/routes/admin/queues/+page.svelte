@@ -408,11 +408,24 @@
             {@const pWaiting = total > 0 ? (counts.waiting / total) * 100 : 0}
             {@const isRunning = (q.bullmq?.active || 0) > 0}
 
+            {@const isWaiting = !isRunning && counts.waiting > 0}
+
             <div class="card queue-card" style="margin: 0;">
               <div class="q-header">
-                <h3>{queueTitles[name] || name}</h3>
+                <h3 style="display: flex; align-items: center; gap: 0.5rem;">
+                  {queueTitles[name] || name}
+                  {#if q.isPaused}
+                    <span style="background: #6b7280; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">PAUSED</span>
+                  {:else if isRunning}
+                    <span style="background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">RUNNING</span>
+                  {:else if counts.waiting > 0}
+                    <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">WAITING</span>
+                  {:else if counts.total > 0}
+                    <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">COMPLETED</span>
+                  {/if}
+                </h3>
                 <div class="q-actions">
-                  <button class="btn success sm" disabled={isRunning} style={isRunning ? 'opacity: 0.5; cursor: not-allowed;' : ''} onclick={() => triggerJob(name)} title="Force Run Queue"><Play size={14}/> Start</button>
+                  <button class="btn success sm" disabled={isRunning || isWaiting} style={(isRunning || isWaiting) ? 'opacity: 0.5; cursor: not-allowed;' : ''} onclick={() => triggerJob(name)} title="Force Run Queue"><Play size={14}/> Start</button>
                   
                   {#if q.isPaused}
                     <button class="btn success sm" onclick={() => actionQueue(name, 'resume')}><Play size={14}/> Resume</button>

@@ -79,7 +79,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
             break;
           }
           case 'smart-search': {
-            const r = await query('SELECT COUNT(*)::int as total, COUNT(clip_embedding)::int as completed FROM media_files');
+            const r = await query(`SELECT COUNT(*)::int as total, COUNT(clip_embedding)::int as completed FROM media_files WHERE mime_type LIKE 'image/%'`);
             total = r.rows[0].total; completed = r.rows[0].completed;
             break;
           }
@@ -107,7 +107,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
             const facesDir = path.join(cacheRoot, 'faces');
             const r = await query(`
               SELECT COALESCE(
-                (SELECT COUNT(DISTINCT fe.person_id)::int FROM face_embeddings fe WHERE fe.person_id IS NOT NULL), 0
+                (SELECT COUNT(DISTINCT media_id)::int FROM face_embeddings), 0
               ) AS total
             `);
             total = r.rows[0].total;
@@ -127,7 +127,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
         total = 0; completed = 0;
       }
 
-      const active = bullmqCounts.active || 0;
+      const active = (bullmqCounts.active || 0) + (bullmqCounts.delayed || 0);
       const failed = bullmqCounts.failed || 0;
       const waiting = Math.max(0, total - completed - active);
       const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
@@ -156,7 +156,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
 
       stats[name] = {
         counts: { waiting, active, completed, failed, total },
-        bullmq: { waiting: bullmqCounts.waiting || 0, active: bullmqCounts.active || 0 },
+        bullmq: { waiting: bullmqCounts.waiting || 0, active: (bullmqCounts.active || 0) + (bullmqCounts.delayed || 0) },
         isPaused,
         activeJobs,
         progress,

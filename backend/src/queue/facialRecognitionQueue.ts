@@ -7,28 +7,24 @@ import { getExecutionMode } from './mode';
 
 export const facialRecognitionQueue = new Queue('facial-recognition', { connection: redis });
 
-// C-4 Fix: Debounce recluster so it runs once after a burst of detections settles.
-// Each recognition job arms a 30-second timer in Redis. The last job to arrive
-// wins and triggers the actual (expensive) O(n²) DBSCAN cluster run.
-const RECLUSTER_DEBOUNCE_KEY = 'recluster:debounce_timer';
-const RECLUSTER_DEBOUNCE_MS = 30_000;
-let reclusterDebounceHandle: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleRecluster(): void {
-  // Clear any existing in-process debounce timer
-  if (reclusterDebounceHandle !== null) {
-    clearTimeout(reclusterDebounceHandle);
+// C-4 Fix: Debounce recluster using BullMQ delayed jobs so the UI sees the active state.
+async function scheduleRecluster(): Promise<void> {
+  // Remove any existing delayed debounce job
+  const existingJobs = await facialRecognitionQueue.getJobs(['delayed', 'waiting']);
+  for (const j of existingJobs) {
+    if (j.id === 'debounce-recluster') {
+      await j.remove().catch(() => {});
+    }
   }
-  reclusterDebounceHandle = setTimeout(async () => {
-    reclusterDebounceHandle = null;
-    try {
-      // Use a Redis lock to prevent concurrent cluster runs across worker restarts
-      const lock = await redis.set(RECLUSTER_DEBOUNCE_KEY, '1', 'EX', 300, 'NX');
-      if (!lock) {
-        console.log('[Facial Recognition] Recluster already running, skipping.');
-        return;
-      }
-      console.log('[Facial Recognition] Debounce settled — running DBSCAN recluster.');
+  // Arm the debounce timer for 30 seconds
+  await facialRecognitionQueue.add('recluster-all', {}, { jobId: 'debounce-recluster', delay: 30000 });
+}
+
+export let facialRecognitionWorker: Worker | undefined;
+if (process.env.IS_WORKER === 'true') {
+  facialRecognitionWorker = new Worker('facial-recognition', async (job) => {
+    if (job.name === 'recluster-all') {
+      console.log('[Facial Recognition Worker] Debounce settled — running DBSCAN recluster.');
       await ClusterService.reclusterFaces();
 
       // After clustering, queue face thumbnail regeneration for all people
@@ -36,19 +32,12 @@ function scheduleRecluster(): void {
         JOIN people p ON p.id = fe.person_id WHERE fe.person_id IS NOT NULL`);
       for (const row of people.rows) {
         await faceThumbnailQueue.add('generate-face-thumbnails', { mediaId: row.media_id },
-          { jobId: `face-thumb-${row.media_id}` });
+          { jobId: `face-thumb-${row.media_id}-${Date.now()}` });
       }
-    } catch (err) {
-      console.error('[Facial Recognition] Debounced recluster failed:', err);
-    } finally {
-      await redis.del(RECLUSTER_DEBOUNCE_KEY);
+      return;
     }
-  }, RECLUSTER_DEBOUNCE_MS);
-}
 
-export let facialRecognitionWorker: Worker | undefined;
-if (process.env.IS_WORKER === 'true') {
-  facialRecognitionWorker = new Worker('facial-recognition', async (job) => {
+    // Otherwise, handle standard 'recognize-faces' individual job
     const { mediaId, fullPath } = job.data;
     console.log(`[Facial Recognition Worker] Scheduling recluster for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
@@ -59,15 +48,14 @@ if (process.env.IS_WORKER === 'true') {
     if (unclustered.rows.length === 0) {
       console.log(`[Facial Recognition Worker] No unclustered faces for ${mediaId}, skipping recluster.`);
     } else {
-      // Arm the debounce — actual clustering happens 30s after the last upload settles
-      scheduleRecluster();
+      await scheduleRecluster();
     }
 
     // Sequential mode: chain immediately to face-thumbnail for this specific media
     const mode = await getExecutionMode();
     if (mode === 'sequential') {
       await faceThumbnailQueue.add('generate-face-thumbnails', { mediaId },
-        { jobId: `face-thumb-${mediaId}` });
+        { jobId: `face-thumb-${mediaId}-${Date.now()}` });
     }
   }, {
     connection: redis,
