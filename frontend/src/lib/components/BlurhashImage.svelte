@@ -1,29 +1,4 @@
-<script module lang="ts">
-  let loadQueue: (() => void)[] = [];
-  let isProcessingQueue = false;
 
-  function processQueue() {
-    if (loadQueue.length === 0) {
-      isProcessingQueue = false;
-      return;
-    }
-    isProcessingQueue = true;
-    
-    // Process up to 4 images at a time (approx 1 row) to create a cascading effect
-    const batch = loadQueue.splice(0, 4);
-    batch.forEach(fn => fn());
-    
-    // Wait slightly before loading the next row
-    setTimeout(processQueue, 100);
-  }
-
-  function enqueueLoad(fn: () => void) {
-    loadQueue.push(fn);
-    if (!isProcessingQueue) {
-      processQueue();
-    }
-  }
-</script>
 
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -98,12 +73,10 @@
     if (!priority) {
       observer = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting) {
-          enqueueLoad(() => {
-            visible = true;
-          });
+          visible = true;
           observer.disconnect();
         }
-      }, { rootMargin: '100px' });
+      }, { rootMargin: '800px' });
       
       if (container) {
         observer.observe(container);
