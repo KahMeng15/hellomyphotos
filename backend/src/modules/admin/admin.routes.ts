@@ -17,6 +17,17 @@ import { ClusterService } from '../ml/cluster.service';
 import path from 'path';
 import fs from 'fs';
 
+async function logAudit(level: string, message: string, userId?: string, ipAddress?: string) {
+  try {
+    await query(
+      `INSERT INTO system_logs (level, message, user_id, ip_address) VALUES ($1, $2, $3, $4)`,
+      [level, message, userId || null, ipAddress || null]
+    );
+  } catch (err) {
+    console.error('[Audit Log] Failed to write log:', err);
+  }
+}
+
 // C-2 Fix: Distributed lock for destructive admin operations.
 // Prevents concurrent reset calls (double-click, two admin tabs) from corrupting state.
 const ADMIN_RESET_LOCK_KEY = 'admin:reset_lock';
@@ -197,7 +208,9 @@ export async function adminRoutes(fastify: FastifyInstance) {
       mlConfidenceThreshold: 0.6,
       throttleAuth: 0,
       throttlePublic: 0,
-      rateLimitApi: 100,
+      authMaxLoginTries: 5,
+      authTimeoutMinutes: 15,
+      authDoubleTimeout: true,
       watermarkText: 'hellomyphotos',
       watermarkOpacity: 0.5,
       watermarkPosition: 'center',
@@ -212,6 +225,9 @@ export async function adminRoutes(fastify: FastifyInstance) {
       if (r.key === 'throttle_auth') settings.throttleAuth = r.value;
       if (r.key === 'throttle_public') settings.throttlePublic = r.value;
       if (r.key === 'rate_limit_api') settings.rateLimitApi = r.value;
+      if (r.key === 'auth_max_login_tries') settings.authMaxLoginTries = r.value;
+      if (r.key === 'auth_timeout_minutes') settings.authTimeoutMinutes = r.value;
+      if (r.key === 'auth_double_timeout') settings.authDoubleTimeout = typeof r.value === 'string' ? r.value === 'true' : r.value;
       if (r.key === 'watermark_text') settings.watermarkText = r.value;
       if (r.key === 'watermark_opacity') settings.watermarkOpacity = r.value;
       if (r.key === 'watermark_position') settings.watermarkPosition = r.value;
@@ -222,7 +238,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.put('/api/admin/settings', async (request, reply) => {
-    const { maxCpuCores, scanInterval, scanSchedule, mlConfidenceThreshold, throttleAuth, throttlePublic, rateLimitApi, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal } = request.body as any;
+    const { maxCpuCores, scanInterval, scanSchedule, mlConfidenceThreshold, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal } = request.body as any;
     
     const updates = [];
     // H-3 Note: maxCpuCores is persisted here but worker concurrency is set at startup from env vars.
@@ -234,6 +250,9 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (throttleAuth !== undefined) updates.push({ k: 'throttle_auth', v: throttleAuth });
     if (throttlePublic !== undefined) updates.push({ k: 'throttle_public', v: throttlePublic });
     if (rateLimitApi !== undefined) updates.push({ k: 'rate_limit_api', v: rateLimitApi });
+    if (authMaxLoginTries !== undefined) updates.push({ k: 'auth_max_login_tries', v: authMaxLoginTries });
+    if (authTimeoutMinutes !== undefined) updates.push({ k: 'auth_timeout_minutes', v: authTimeoutMinutes });
+    if (authDoubleTimeout !== undefined) updates.push({ k: 'auth_double_timeout', v: authDoubleTimeout });
     if (watermarkText !== undefined) updates.push({ k: 'watermark_text', v: watermarkText });
     if (watermarkOpacity !== undefined) updates.push({ k: 'watermark_opacity', v: watermarkOpacity });
     if (watermarkPosition !== undefined) updates.push({ k: 'watermark_position', v: watermarkPosition });
@@ -246,6 +265,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       );
     }
     
+    logAudit('info', 'Settings updated', (request as any).user?.id, request.ip);
     return reply.send({ success: true });
   });
 
@@ -259,6 +279,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
     await redis.set(cooldownKey, '1', 'EX', 10); // 10-second cooldown
     // Run it asynchronously in the background so we don't block the HTTP request
     ScannerService.scanAllDirectories('').catch(console.error);
+    const uid = (request as any).user?.id;
+    logAudit('info', 'Full rescan triggered', uid, request.ip);
     return reply.send({ success: true, message: 'Rescan initiated in the background' });
   });
 

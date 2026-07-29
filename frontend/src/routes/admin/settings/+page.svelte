@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
   import { ChevronLeft, Settings, Cpu, HardDrive, ShieldCheck, Save, Clock } from '@lucide/svelte';
+  import { toast } from '$lib/stores/toast';
 
   let settings = $state<any>({
     throttleAuth: 0,
@@ -38,7 +39,10 @@
         body: JSON.stringify({
           throttleAuth: Number(settings.throttleAuth),
           throttlePublic: Number(settings.throttlePublic),
-          rateLimitApi: Number(settings.rateLimitApi)
+          rateLimitApi: Number(settings.rateLimitApi),
+          authMaxLoginTries: Number(settings.authMaxLoginTries),
+          authTimeoutMinutes: Number(settings.authTimeoutMinutes),
+          authDoubleTimeout: Boolean(settings.authDoubleTimeout)
         })
       });
       if (res.ok) {
@@ -105,6 +109,35 @@
             <div class="preset-btns">
               <button class="btn sm secondary" onclick={() => settings.rateLimitApi = 60}>60 / min</button>
               <button class="btn sm secondary" onclick={() => settings.rateLimitApi = 300}>300 / min</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Auth Security -->
+      <div class="card">
+        <div class="card-header">
+          <ShieldCheck size={20} class="text-purple" />
+          <h3>Authentication Security</h3>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Max Login Tries Before Timeout</label>
+            <p class="help">Number of failed login attempts allowed before the IP is temporarily blocked.</p>
+            <input type="number" bind:value={settings.authMaxLoginTries} step="1" min="1" />
+          </div>
+          
+          <div class="form-group">
+            <label>Timeout Duration (Minutes)</label>
+            <p class="help">How long the IP address is blocked after exceeding max tries.</p>
+            <input type="number" bind:value={settings.authTimeoutMinutes} step="1" min="1" />
+          </div>
+          
+          <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-top: 0.5rem;">
+            <input type="checkbox" bind:checked={settings.authDoubleTimeout} id="authDoubleTimeout" style="width: auto; margin: 0; cursor: pointer;" />
+            <div style="display: flex; flex-direction: column;">
+              <label for="authDoubleTimeout" style="margin: 0; cursor: pointer;">Double Timeout Duration Automatically</label>
+              <p class="help" style="margin: 0;">Industry standard: each subsequent block doubles the timeout duration for repeat offenders.</p>
             </div>
           </div>
         </div>

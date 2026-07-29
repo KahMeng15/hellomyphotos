@@ -5,6 +5,7 @@
 
   let logs = $state<any[]>([]);
   let loading = $state(true);
+  let error = $state('');
   let filterLevel = $state('all');
 
   async function fetchLogs() {
@@ -13,7 +14,12 @@
       if (res.ok) {
         const data = await res.json();
         logs = data.logs || [];
+      } else {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        error = err.error || 'Failed to fetch logs';
       }
+    } catch (e: any) {
+      error = e.message;
     } finally {
       loading = false;
     }
@@ -64,6 +70,8 @@
         <div class="line muted">Loading logs from database...</div>
       {:else if logs.length === 0}
         <div class="line muted">No system logs recorded yet.</div>
+      {:else if error}
+        <div class="line error">{error}</div>
       {:else}
         {#each logs.filter(l => filterLevel === 'all' || l.level.toLowerCase() === filterLevel) as log}
           <div class="line">
