@@ -267,7 +267,16 @@ export async function adminRoutes(fastify: FastifyInstance) {
       // 1. Wipe out existing face embeddings
       await query(`TRUNCATE TABLE face_embeddings`);
 
-      // 2. Queue every image file for face detection again (paginated to avoid OOM)
+      // 2. Clear orphaned face thumbnail cache on disk
+      const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
+      await fs.promises.rm(path.join(cacheRoot, 'faces'), { recursive: true, force: true });
+      await fs.promises.mkdir(path.join(cacheRoot, 'faces'), { recursive: true });
+
+      // 3. Clean stale face thumbnail queue jobs
+      await faceThumbnailQueue.clean(0, 10000, 'completed');
+      await faceThumbnailQueue.clean(0, 10000, 'failed');
+
+      // 4. Queue every image file for face detection again (paginated to avoid OOM)
       const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
       await enqueuePaginated(`WHERE mime_type LIKE 'image/%'`, [], async (row) => {
         const fullPath = path.resolve(mediaRoot, row.folder_path, row.file_name);
@@ -276,7 +285,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     } finally {
       await releaseResetLock();
     }
-    return reply.send({ success: true, message: 'Face reset initiated in the background' });
+    return reply.send({ success: true, message: 'Face data reset, thumbnails cleared, re-detection initiated!' });
   });
 
   fastify.post('/api/admin/rescan-exif', async (request, reply) => {

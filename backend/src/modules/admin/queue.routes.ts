@@ -217,6 +217,8 @@ export async function queueRoutes(fastify: FastifyInstance) {
     const q = queues[name];
     if (!q) return reply.status(404).send({ error: `Queue '${name}' not found` });
 
+    // Clean any stuck active jobs (e.g. from a crashed worker) so the queue can restart
+    await q.clean(0, 10000, 'active');
     await q.resume();
 
     if (name === 'scanner') {
