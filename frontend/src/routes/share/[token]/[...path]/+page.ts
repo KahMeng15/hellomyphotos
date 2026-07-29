@@ -35,7 +35,7 @@ export const load: PageLoad = async ({ params, fetch }) => {
       folderCoverId: data.folderCoverId,
       folderDescription: data.folderDescription || '',
       baseFolderPath: data.baseFolderPath || '',
-      folderPath,
+      folderPath: data.folderPath || folderPath,
       selectedFile,
       token,
       person: data.person || null

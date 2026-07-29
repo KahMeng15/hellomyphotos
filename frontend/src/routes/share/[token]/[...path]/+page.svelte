@@ -140,6 +140,8 @@
     }
   });
 
+  let personName = $derived(data.person ? (data.person.name || 'Unnamed Person') : null);
+
   let fallbackCoverId = $derived(
     data.folderCoverId || 
     (data.files.length > 0 ? data.files[0].id : null) || 
@@ -155,7 +157,7 @@
   </div>
 {:else}
 <div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
-  {#if data.folderPath && data.folderPath !== data.baseFolderPath}
+  {#if !personName && data.folderPath && data.folderPath !== data.baseFolderPath}
     {@const parts = data.folderPath.split('/')}
     {@const parentPath = parts.slice(0, -1).join('/')}
     {@const isParentBase = parentPath === data.baseFolderPath}
@@ -183,25 +185,30 @@
   <div class="header-content">
     <div class="header-left">
       <div class="header-text-container">
-        {#key data.folderPath}
-          {#if data.folderPath && data.folderPath.includes('/')}
-            <div class="subheading breadcrumbs">
-              {#each data.folderPath.split('/').slice(0, -1) as part, index}
-                {@const currentPath = data.folderPath.split('/').slice(0, index + 1).join('/')}
-                {#if index > 0}<span class="separator"> &gt; </span>{/if}
-                {#if currentPath === data.baseFolderPath}
-                  <a href="/share/{$page.params.token}">{part}</a>
-                {:else if currentPath.startsWith(data.baseFolderPath + '/')}
-                  <a href="/share/{$page.params.token}/{currentPath.substring(data.baseFolderPath.length + 1)}">{part}</a>
-                {:else}
-                  <span class="breadcrumb unclickable" style="color: #888; cursor: default;">{part}</span>
-                {/if}
-              {/each}
-            </div>
-          {/if}
-          <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
-          {#if data.folderDescription}
-            <p class="folder-desc">{data.folderDescription}</p>
+        {#key personName || data.folderPath}
+          {#if personName}
+            <div class="subheading">Person</div>
+            <h2>{personName}</h2>
+          {:else}
+            {#if data.folderPath && data.folderPath.includes('/')}
+              <div class="subheading breadcrumbs">
+                {#each data.folderPath.split('/').slice(0, -1) as part, index}
+                  {@const currentPath = data.folderPath.split('/').slice(0, index + 1).join('/')}
+                  {#if index > 0}<span class="separator"> &gt; </span>{/if}
+                  {#if currentPath === data.baseFolderPath}
+                    <a href="/share/{$page.params.token}">{part}</a>
+                  {:else if currentPath.startsWith(data.baseFolderPath + '/')}
+                    <a href="/share/{$page.params.token}/{currentPath.substring(data.baseFolderPath.length + 1)}">{part}</a>
+                  {:else}
+                    <span class="breadcrumb unclickable" style="color: #888; cursor: default;">{part}</span>
+                  {/if}
+                {/each}
+              </div>
+            {/if}
+            <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+            {#if data.folderDescription}
+              <p class="folder-desc">{data.folderDescription}</p>
+            {/if}
           {/if}
         {/key}
       </div>
@@ -238,13 +245,13 @@
         </div>
         
         <div class="actions">
-          {#if data.share.allow_download_folder}<a href={getFolderZipUrl(data.share.folder_path, data.token)} target="_blank" class="icon-btn" title="Download ZIP"><Download size={18} /></a>{/if}
+          {#if !personName && data.share.allow_download_folder}<a href={getFolderZipUrl(data.share.folder_path, data.token)} target="_blank" class="icon-btn" title="Download ZIP"><Download size={18} /></a>{/if}
         </div>
         
       </div>
       
       <span class="count">
-        {#if data.directories && data.directories.length > 0}{data.directories.length} {data.directories.length === 1 ? 'folder' : 'folders'}{#if data.files.length > 0}{' & '}{/if}{/if}{#if data.files.length > 0 || (data.directories && data.directories.length === 0)}{data.files.length} {data.files.length === 1 ? 'item' : 'items'}{/if}
+        {#if !personName && data.directories && data.directories.length > 0}{data.directories.length} {data.directories.length === 1 ? 'folder' : 'folders'}{#if data.files.length > 0}{' & '}{/if}{/if}{#if data.files.length > 0 || (data.directories && data.directories.length === 0)}{data.files.length} {data.files.length === 1 ? 'item' : 'items'}{/if}
       </span>
     </div>
   </div>
