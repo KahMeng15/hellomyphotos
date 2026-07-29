@@ -78,8 +78,8 @@ export async function setFolderCover(folderPath: string, mediaId: string): Promi
   if (!res.ok) throw new Error('Failed to set folder cover');
 }
 
-export async function fetchTimeline(): Promise<MediaFile[]> {
-  const res = await fetch(`${API_BASE}/api/timeline`, { credentials: 'include' });
+export async function fetchTimeline(fetchFn: typeof fetch = fetch): Promise<MediaFile[]> {
+  const res = await fetchFn(`${API_BASE}/api/timeline`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch timeline');
   const data = await res.json();
   return data.files || [];

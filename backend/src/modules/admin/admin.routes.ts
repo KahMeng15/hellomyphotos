@@ -11,6 +11,7 @@ import { facialRecognitionQueue } from '../../queue/facialRecognitionQueue';
 import { smartSearchQueue } from '../../queue/smartSearchQueue';
 import { faceThumbnailQueue } from '../../queue/faceThumbnailQueue';
 import { thumbnailQueue } from '../../queue/thumbnailQueue';
+import { videoQueue } from '../../queue/videoQueue';
 import { query } from '../../config/db';
 import { ClusterService } from '../ml/cluster.service';
 import path from 'path';
@@ -420,19 +421,11 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.post('/api/admin/reset-thumbnails', async (request, reply) => {
     if (!(await acquireResetLock(reply))) return;
     try {
-      await query(`UPDATE media_files SET blurhash = NULL WHERE mime_type LIKE 'image/%'`);
-
-      const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
-      // M-5 Fix: async rm
-      await fs.promises.rm(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
-      await fs.promises.rm(path.join(cacheRoot, '480p'), { recursive: true, force: true });
-      await fs.promises.mkdir(path.join(cacheRoot, '1080p'), { recursive: true });
-      await fs.promises.mkdir(path.join(cacheRoot, '480p'), { recursive: true });
+      await query(`UPDATE media_files SET blurhash = NULL, has_1080p = false, has_480p = false WHERE mime_type LIKE 'image/%'`);
 
       await allQueues['thumbnail'].clean(0, 10000, 'completed');
       await allQueues['thumbnail'].clean(0, 10000, 'failed');
 
-      // H-5 Fix: Paginated enqueue
       const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
       await enqueuePaginated(`WHERE mime_type LIKE 'image/%'`, [], async (row) => {
         await thumbnailQueue.add('generate-thumbnail', {
@@ -445,7 +438,30 @@ export async function adminRoutes(fastify: FastifyInstance) {
     } finally {
       await releaseResetLock();
     }
-    return reply.send({ success: true, message: 'Thumbnail reset initiated in the background' });
+    return reply.send({ success: true, message: 'Image thumbnail reset initiated in the background' });
+  });
+
+  fastify.post('/api/admin/reset-videos', async (request, reply) => {
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      await query(`UPDATE media_files SET blurhash = NULL, has_1080p = false, has_480p = false WHERE mime_type LIKE 'video/%'`);
+
+      await allQueues['video'].clean(0, 10000, 'completed');
+      await allQueues['video'].clean(0, 10000, 'failed');
+
+      const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
+      await enqueuePaginated(`WHERE mime_type LIKE 'video/%'`, [], async (row) => {
+        await videoQueue.add('generate-video-proxy', {
+          mediaId: row.id,
+          fullPath: path.resolve(mediaRoot, row.folder_path, row.file_name),
+          mimeType: row.mime_type,
+          skipCascade: true
+        });
+      });
+    } finally {
+      await releaseResetLock();
+    }
+    return reply.send({ success: true, message: 'Video reset initiated in the background' });
   });
 
   fastify.post('/api/admin/reset-faces', async (request, reply) => {

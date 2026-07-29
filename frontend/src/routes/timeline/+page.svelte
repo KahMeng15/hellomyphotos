@@ -108,7 +108,8 @@
       const header = document.querySelector<HTMLElement>('.sticky-header');
       if (header) {
         const topOffset = parseFloat(getComputedStyle(header).top) || 0;
-        document.documentElement.style.setProperty('--sticky-header-bottom', (header.offsetHeight + topOffset + 8) + 'px');
+        const marginBottom = parseFloat(getComputedStyle(header).marginBottom) || 0;
+        document.documentElement.style.setProperty('--sticky-header-bottom', (header.offsetHeight + topOffset + marginBottom) + 'px');
       }
     }
 

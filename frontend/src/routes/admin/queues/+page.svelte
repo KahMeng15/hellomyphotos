@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Layers, Image, RefreshCw } from '@lucide/svelte';
+  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Layers, Image, RefreshCw, Video } from '@lucide/svelte';
   import Modal from '$lib/components/Modal.svelte';
 
   let queues = $state<any>({});
@@ -215,10 +215,18 @@
   }
 
   async function triggerResetThumbnails() {
-    customConfirm('Reset Thumbnails', 'Are you sure you want to clear all thumbnail caches and blurhash data? EXIF metadata will be preserved. Thumbnails will be regenerated in the background.', false, async () => {
+    customConfirm('Reset Image Thumbnails', 'Are you sure you want to clear all image thumbnail caches and blurhash data? EXIF metadata will be preserved. Thumbnails will be regenerated in the background.', false, async () => {
       await fetch(`${API_BASE}/api/admin/reset-thumbnails`, { method: 'POST', credentials: 'include' });
       await loadQueuesOnly();
-      customAlert('Success', 'Thumbnail reset and regeneration initiated!');
+      customAlert('Success', 'Image thumbnail reset and regeneration initiated!');
+    });
+  }
+
+  async function triggerResetVideos() {
+    customConfirm('Reset Video Transcoding', 'Are you sure you want to wipe all video thumbnails and transcoded video frames? They will be re-processed in the background.', false, async () => {
+      await fetch(`${API_BASE}/api/admin/reset-videos`, { method: 'POST', credentials: 'include' });
+      await loadQueuesOnly();
+      customAlert('Success', 'Video reset and re-processing initiated!');
     });
   }
 
@@ -580,6 +588,9 @@
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetThumbnails}>
             <Image size={16}/> Reset Thumbnails Only
+          </button>
+          <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetVideos}>
+            <Video size={16}/> Reset Videos
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetFaces}>
             <Cpu size={16}/> Reset ML Data
