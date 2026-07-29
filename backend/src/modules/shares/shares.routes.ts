@@ -76,11 +76,21 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       // Get person info with cover
       const personRes = await query(`SELECT id, name, cover_media_id FROM people WHERE id = $1`, [share.person_id]);
       const person = personRes.rows[0] || null;
+      let personCoverBoundingBox: any = null;
+      let personCoverImgWidth: number | null = null;
+      let personCoverImgHeight: number | null = null;
       // Determine cover media ID (explicit cover or dynamic fallback: fewest other faces)
       let personCoverMediaId = person?.cover_media_id || null;
       if (!personCoverMediaId) {
         const coverRes = await query(`
-          SELECT m.id FROM media_files m
+          SELECT m.id, (
+            SELECT bounding_box FROM face_embeddings
+            WHERE media_id = m.id AND person_id = $1
+            ORDER BY created_at DESC LIMIT 1
+          ) AS bounding_box,
+          (m.exif_json->>'width')::int AS img_width,
+          (m.exif_json->>'height')::int AS img_height
+          FROM media_files m
           WHERE EXISTS (SELECT 1 FROM face_embeddings WHERE media_id = m.id AND person_id = $1)
           AND m.mime_type LIKE 'image/%'
           ORDER BY (SELECT COUNT(*) FROM face_embeddings WHERE media_id = m.id) ASC, m.created_at DESC
@@ -88,9 +98,29 @@ export async function sharesRoutes(fastify: FastifyInstance) {
         `, [share.person_id]);
         if (coverRes.rows.length > 0) {
           personCoverMediaId = coverRes.rows[0].id;
+          personCoverBoundingBox = coverRes.rows[0].bounding_box;
+          personCoverImgWidth = coverRes.rows[0].img_width;
+          personCoverImgHeight = coverRes.rows[0].img_height;
+        }
+      } else {
+        // Fetch bounding box + dims for explicit cover
+        const explicitRes = await query(`
+          SELECT (
+            SELECT bounding_box FROM face_embeddings
+            WHERE media_id = m.id AND person_id = $1
+            ORDER BY created_at DESC LIMIT 1
+          ) AS bounding_box,
+          (m.exif_json->>'width')::int AS img_width,
+          (m.exif_json->>'height')::int AS img_height
+          FROM media_files m WHERE m.id = $2
+        `, [share.person_id, personCoverMediaId]);
+        if (explicitRes.rows.length > 0) {
+          personCoverBoundingBox = explicitRes.rows[0].bounding_box;
+          personCoverImgWidth = explicitRes.rows[0].img_width;
+          personCoverImgHeight = explicitRes.rows[0].img_height;
         }
       }
-      return reply.send({ share, files: fileRes.rows, person, personCoverMediaId });
+      return reply.send({ share, files: fileRes.rows, person, personCoverMediaId, personCoverBoundingBox, personCoverImgWidth, personCoverImgHeight });
     }
     
     let targetPath = share.folder_path || '';

@@ -149,6 +149,18 @@
     (data.directories && data.directories.length > 0 ? (data.directories.find((d: any) => d.cover_id)?.cover_id || null) : null)
   );
 
+  let coverObjectPosition = $derived.by(() => {
+    const bb = data.personCoverBoundingBox;
+    const iw = data.personCoverImgWidth;
+    const ih = data.personCoverImgHeight;
+    if (!bb || !iw || !ih) return 'center 30%';
+    const x1 = bb.x1 ?? bb.x ?? 0;
+    const y1 = bb.y1 ?? bb.y ?? 0;
+    const x2 = bb.x2 ?? (x1 + (bb.w || 200));
+    const y2 = bb.y2 ?? (y1 + (bb.h || 200));
+    return `${((x1 + x2) / 2 / iw) * 100}% ${((y1 + y2) / 2 / ih) * 100}%`;
+  });
+
   let coverLoaded = $state(false);
 </script>
 
@@ -172,7 +184,7 @@
     </a>
   {/if}
   {#if fallbackCoverId}
-    <img src={getPreviewUrl(fallbackCoverId, false, data.token)} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" />
+    <img src={getPreviewUrl(fallbackCoverId, false, data.token)} class="header-bg" class:loaded={coverLoaded} onload={() => coverLoaded = true} fetchpriority="high" alt="Cover" style="object-position: {coverObjectPosition};" />
     <div class="header-gradient"></div>
   {/if}
 </div>

@@ -183,6 +183,9 @@ export async function scannerRoutes(fastify: FastifyInstance) {
 
     // 5. Get current folder's custom cover (if any) and description
     let folderCoverId = null;
+    let folderCoverBoundingBox: any = null;
+    let folderCoverImgWidth: number | null = null;
+    let folderCoverImgHeight: number | null = null;
     let folderDescription = '';
     if (folderPath !== null && folderPath !== undefined) {
       const currentFolderSettingsRes = await query(`SELECT cover_media_id, description FROM folder_settings WHERE folder_path = $1`, [folderPath]);
@@ -212,9 +215,31 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       }
     }
 
+    // Look up bounding box + dims for the cover image
+    if (folderCoverId) {
+      const bbRes = await query(`
+        SELECT (
+          SELECT bounding_box FROM face_embeddings
+          WHERE media_id = $1
+          ORDER BY created_at DESC LIMIT 1
+        ) AS bounding_box,
+        (exif_json->>'width')::int AS img_width,
+        (exif_json->>'height')::int AS img_height
+        FROM media_files WHERE id = $1
+      `, [folderCoverId]);
+      if (bbRes.rows.length > 0) {
+        folderCoverBoundingBox = bbRes.rows[0].bounding_box;
+        folderCoverImgWidth = bbRes.rows[0].img_width;
+        folderCoverImgHeight = bbRes.rows[0].img_height;
+      }
+    }
+
     return reply.send({
       folderPath,
       folderCoverId,
+      folderCoverBoundingBox,
+      folderCoverImgWidth,
+      folderCoverImgHeight,
       folderDescription,
       scanning: !exists, // Indicate if a scan was just triggered
       files,
