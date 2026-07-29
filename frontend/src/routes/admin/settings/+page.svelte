@@ -42,9 +42,8 @@
         })
       });
       if (res.ok) {
-        alert('Settings saved successfully!');
+        toast.success('Settings saved successfully!');
       } else {
-        alert('Failed to save settings.');
       }
     } finally {
       saving = false;

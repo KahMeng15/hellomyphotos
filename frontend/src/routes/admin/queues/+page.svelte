@@ -16,14 +16,22 @@
   let loading = $state(true);
   let pollInterval: any;
 
+  import { toast } from '$lib/stores/toast';
+
   let alertModal = $state(false);
   let alertTitle = $state('');
   let alertMessage = $state('');
 
   function customAlert(title: string, message: string) {
-    alertTitle = title;
-    alertMessage = message;
-    alertModal = true;
+    if (title.toLowerCase().includes('error') || title.toLowerCase().includes('fail')) {
+      toast.error(message);
+    } else if (title.toLowerCase().includes('success') || title.toLowerCase().includes('started')) {
+      toast.success(message);
+    } else if (title.toLowerCase().includes('warning')) {
+      toast.warning(message);
+    } else {
+      toast.info(message);
+    }
   }
 
   let confirmModal = $state(false);
@@ -590,12 +598,6 @@
   </div>
 </div>
 
-<Modal bind:show={alertModal} id="alert-modal" title={alertTitle}>
-  <p style="color: #cbd5e1; margin-bottom: 0;">{alertMessage}</p>
-  <div class="modal-actions" style="margin-top: 24px; display: flex; justify-content: flex-end;">
-    <button class="btn primary" onclick={() => alertModal = false}>OK</button>
-  </div>
-</Modal>
 
 <Modal bind:show={confirmModal} id="confirm-modal" title={confirmTitle}>
   <p style="color: #cbd5e1; margin-bottom: 0;">{confirmMessage}</p>

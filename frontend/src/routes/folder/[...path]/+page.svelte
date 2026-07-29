@@ -66,11 +66,12 @@
       }
       
       const token = await createShare(data.folderPath || '', null, shareAllowDownloadImages, shareAllowDownloadFolder, false, expiresAt);
+      toast.success('Share link created successfully!');
       newlyCreatedShareToken = token;
       await loadActiveShares();
     } catch (e) {
       console.error(e);
-      alert('Failed to create share');
+      toast.error('Failed to create share');
     } finally {
       isCreatingShare = false;
     }
@@ -97,6 +98,7 @@
   async function copyShareLink(token: string) {
     const url = `${window.location.origin}/share/${token}`;
     await navigator.clipboard.writeText(url);
+    toast.success('Link copied to clipboard!');
     copiedToken = token;
     setTimeout(() => {
       if (copiedToken === token) {
@@ -110,28 +112,32 @@
       isSavingSettings = true;
       await setFolderDescription(data.folderPath || '', folderDescInput);
       await invalidateAll();
+      toast.success('Settings saved successfully!');
       showSettingsModal = false;
     } catch (e) {
       console.error(e);
-      alert('Failed to save settings');
+      toast.error('Failed to save settings');
     } finally {
       isSavingSettings = false;
     }
   }
 
+  import { toast } from '$lib/stores/toast';
+
   let isRescanning = $state(false);
   let isRescanningML = $state(false);
 
-  let alertModalTitle = $state('');
-  let alertModalMessage = $state('');
-  let showAlertModal = $state(false);
   let showRevokeConfirm = $state(false);
   let revokeTargetToken = $state('');
 
   function showAppAlert(title: string, message: string) {
-    alertModalTitle = title;
-    alertModalMessage = message;
-    showAlertModal = true;
+    if (title.toLowerCase().includes('error') || title.toLowerCase().includes('fail')) {
+      toast.error(message);
+    } else if (title.toLowerCase().includes('success') || title.toLowerCase().includes('queued') || title.toLowerCase().includes('updated')) {
+      toast.success(message);
+    } else {
+      toast.info(message);
+    }
   }
 
   async function handleRescanFolder() {
@@ -770,13 +776,6 @@
     <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRescanML} disabled={isRescanningML}>
       {isRescanningML ? 'Queuing...' : 'Rescan Faces & Items in Images'}
     </button>
-  </div>
-</Modal>
-
-<Modal bind:show={showAlertModal} id="folder-alert" title={alertModalTitle}>
-  <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">{alertModalMessage}</p>
-  <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
-    <button class="btn" style="background: white; color: black;" onclick={() => showAlertModal = false}>Okay</button>
   </div>
 </Modal>
 

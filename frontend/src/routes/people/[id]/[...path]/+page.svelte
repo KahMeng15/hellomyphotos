@@ -76,11 +76,12 @@
         expiresAt = date.toISOString();
       }
       const token = await createPersonShare(data.id, shareAllowDownloadImages, shareAllowDownloadFolder, false, expiresAt);
+      toast.success('Share link created successfully!');
       newlyCreatedShareToken = token;
       await loadActiveShares();
     } catch (e) {
       console.error(e);
-      alert('Failed to create share');
+      toast.error('Failed to create share');
     } finally {
       isCreatingShare = false;
     }
@@ -107,6 +108,7 @@
   async function copyShareLink(token: string) {
     const url = `${window.location.origin}/share/${token}`;
     await navigator.clipboard.writeText(url);
+    toast.success('Link copied to clipboard!');
     copiedToken = token;
     setTimeout(() => {
       if (copiedToken === token) copiedToken = null;
@@ -123,16 +125,19 @@
 
   let localCoverOverride: string | null = $state(null);
   let coverRefreshKey = $state(0);
-  let showAlertModal = $state(false);
-  let alertModalTitle = $state('');
-  let alertModalMessage = $state('');
   let showRevokeConfirm = $state(false);
   let revokeTargetToken = $state('');
 
+  import { toast } from '$lib/stores/toast';
+
   function showAppAlert(title: string, message: string) {
-    alertModalTitle = title;
-    alertModalMessage = message;
-    showAlertModal = true;
+    if (title.toLowerCase().includes('error') || title.toLowerCase().includes('fail')) {
+      toast.error(message);
+    } else if (title.toLowerCase().includes('success') || title.toLowerCase().includes('queued') || title.toLowerCase().includes('updated')) {
+      toast.success(message);
+    } else {
+      toast.info(message);
+    }
   }
 
   let fallbackCoverId = $derived(localCoverOverride || data.coverMediaId || (data.files.length > 0 ? data.files[0].id : null));
@@ -486,12 +491,7 @@
   </div>
 </Modal>
 
-<Modal bind:show={showAlertModal} id="person-alert" title={alertModalTitle}>
-  <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">{alertModalMessage}</p>
-  <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
-    <button class="btn" style="background: white; color: black;" onclick={() => showAlertModal = false}>Okay</button>
-  </div>
-</Modal>
+
 
 <Modal bind:show={showRevokeConfirm} id="person-revoke-confirm" title="Revoke Share Link">
   <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">Are you sure you want to revoke this share link? Anyone using it will instantly lose access.</p>

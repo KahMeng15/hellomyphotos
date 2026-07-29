@@ -7,6 +7,7 @@
   import { logout } from '$lib/api/auth';
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
   import { LogOut } from '@lucide/svelte';
+  import Toast from '$lib/components/Toast.svelte';
   
   let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login');
   let isAuthChecking = $state(true);
@@ -239,6 +240,8 @@
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg>
     </button>
   {/if}
+
+  <Toast />
 </div>
 
 <style>
