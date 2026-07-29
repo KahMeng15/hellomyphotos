@@ -93,21 +93,18 @@ export async function queueRoutes(fastify: FastifyInstance) {
           }
           case 'facial-recognition': {
             const r = await query(`
-              SELECT (SELECT COUNT(DISTINCT media_id)::int FROM face_embeddings) as total,
-                     COALESCE((SELECT COUNT(DISTINCT fe.media_id)::int FROM face_embeddings fe
-                       WHERE NOT EXISTS (SELECT 1 FROM face_embeddings fe2 WHERE fe2.media_id = fe.media_id AND fe2.person_id IS NULL)), 0) as completed
+              SELECT (SELECT COUNT(*)::int FROM face_embeddings) as total,
+                     (SELECT COUNT(*)::int FROM face_embeddings WHERE person_id IS NOT NULL) as completed
             `);
             total = r.rows[0].total; completed = r.rows[0].completed;
             break;
           }
           case 'face-thumbnail': {
-            // H-1 Fix: total = people with face embeddings, completed = people with a face thumbnail on disk.
-            // Previously both columns used the same expression, always giving 100%.
             const cacheRoot = process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw');
             const facesDir = path.join(cacheRoot, 'faces');
             const r = await query(`
               SELECT COALESCE(
-                (SELECT COUNT(DISTINCT media_id)::int FROM face_embeddings), 0
+                (SELECT COUNT(*)::int FROM people), 0
               ) AS total
             `);
             total = r.rows[0].total;
