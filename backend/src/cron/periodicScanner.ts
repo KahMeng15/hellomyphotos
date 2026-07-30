@@ -29,7 +29,7 @@ async function getScanSchedule(): Promise<ScanSchedule | null> {
     const res = await query(`SELECT value FROM admin_settings WHERE key = 'scan_schedule'`);
     if (res.rows.length > 0) {
       const val = res.rows[0].value;
-      if (val && val.type && val.type !== 'off') {
+      if (val && val.type) {
         return val as ScanSchedule;
       }
     }
@@ -80,6 +80,9 @@ function msUntilNextSchedule(schedule: ScanSchedule): number | null {
 async function getScheduleDelayMs(): Promise<{ delayMs: number; label: string } | null> {
   const schedule = await getScanSchedule();
   if (schedule) {
+    if (schedule.type === 'off') {
+      return null;
+    }
     const delayMs = msUntilNextSchedule(schedule);
     if (delayMs !== null && delayMs > 0) {
       return { delayMs, label: schedule.type };

@@ -8,6 +8,8 @@
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
   import { LogOut } from '@lucide/svelte';
   import { frontendLogger } from '$lib/utils/frontendLogger';
+  
+  let { children } = $props();
 
   let prevRoute = $state('');
   afterNavigate((nav) => {
@@ -243,7 +245,7 @@
       </div>
     {:else}
       <div class="slot-wrapper">
-        <slot />
+        {@render children()}
       </div>
     {/if}
     {#if $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/admin') && !$page.url.pathname.startsWith('/settings') && !(!$currentUser && $page.url.pathname === '/')}
@@ -396,11 +398,6 @@
     margin-top: auto;
     display: flex;
     flex-direction: column;
-  }
-
-  .nav-actions {
-    display: flex;
-    gap: 4px;
   }
 
   .icon-btn {

@@ -13,13 +13,14 @@
 
 <div class="toast-container">
   {#each $toast as t (t.id)}
+    {@const Icon = icons[t.type]}
     <div 
       class="toast {t.type}" 
       in:fly={{ y: 20, duration: 300 }} 
       out:fade={{ duration: 200 }}
     >
       <div class="icon">
-        <svelte:component this={icons[t.type]} size={20} />
+        <Icon size={20} />
       </div>
       <div class="message">{t.message}</div>
       <button class="close-btn" onclick={() => toast.remove(t.id)}>
