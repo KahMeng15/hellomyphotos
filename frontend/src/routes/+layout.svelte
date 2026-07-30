@@ -27,6 +27,13 @@
   $effect(() => {
     if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') {
       isSidebarOpen = false;
+    } else {
+      try {
+        const saved = localStorage.getItem('sidebarOpen');
+        isSidebarOpen = saved !== 'false';
+      } catch {
+        isSidebarOpen = true;
+      }
     }
   });
 
