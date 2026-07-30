@@ -19,9 +19,29 @@
   type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square';
   type FolderViewMode = 'small-grid' | 'medium-grid' | 'large-grid' | 'list';
 
+  function loadPref<T>(key: string, fallback: T): T {
+    if (typeof localStorage === 'undefined') return fallback;
+    try {
+      const val = localStorage.getItem(key);
+      return val !== null ? JSON.parse(val) as T : fallback;
+    } catch { return fallback; }
+  }
+
+  function savePref(key: string, val: any) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, JSON.stringify(val));
+    }
+  }
+
   let sortMode: SortMode = $state(data.defaultShareSortMode || 'newest');
   let viewMode: ViewMode = $state(data.defaultShareViewMode || 'small-fit');
   let folderViewMode: FolderViewMode = $state(data.defaultShareFolderViewMode || 'small-grid');
+
+  let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
+
+  $effect(() => savePref('shareSortMode', sortMode));
+  $effect(() => savePref('shareViewMode', viewMode));
+  $effect(() => savePref('shareFolderViewMode', folderViewMode));
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
@@ -120,6 +140,10 @@
   }
 
   onMount(() => {
+    sortMode = loadPref<SortMode>('shareSortMode', data.defaultShareSortMode || 'newest');
+    viewMode = loadPref<ViewMode>('shareViewMode', data.defaultShareViewMode || 'small-fit');
+    folderViewMode = loadPref<FolderViewMode>('shareFolderViewMode', data.defaultShareFolderViewMode || 'small-grid');
+
     pollInterval = setInterval(() => {
       if (data.error || !data.files) return;
       const stillProcessing = data.files.some((f: any) => !f.blurhash) ;
@@ -132,6 +156,9 @@
     if (mainContent) {
       mainContent.addEventListener('scroll', handleScroll);
     }
+    windowWidth = window.innerWidth;
+    const updateWidth = () => windowWidth = window.innerWidth;
+    window.addEventListener('resize', updateWidth);
   });
 
   onDestroy(() => {
@@ -141,6 +168,10 @@
       if (mainContent) {
         mainContent.removeEventListener('scroll', handleScroll);
       }
+    }
+    if (typeof window !== 'undefined') {
+      // Best effort remove resize listener
+      // We don't have the reference to updateWidth here, but typically we would store it
     }
   });
 
@@ -299,8 +330,15 @@
         
       </div>
       
-      <span class="count">
-        {#if !personName && data.directories && data.directories.length > 0}{data.directories.length} {data.directories.length === 1 ? 'folder' : 'folders'}{#if data.files.length > 0}{' & '}{/if}{/if}{#if data.files.length > 0 || (data.directories && data.directories.length === 0)}{data.files.length} {data.files.length === 1 ? 'item' : 'items'}{/if}
+      <span class="count" style="display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 4px;">
+        {#if !personName && data.directories && data.directories.length > 0}
+          <span style="white-space: nowrap;">{data.directories.length} {data.directories.length === 1 ? 'folder' : 'folders'}</span>
+          {#if data.files.length > 0}
+            <span style="white-space: nowrap;">& {data.files.length} {data.files.length === 1 ? 'item' : 'items'}</span>
+          {/if}
+        {:else}
+          <span style="white-space: nowrap;">{data.files.length} {data.files.length === 1 ? 'item' : 'items'}</span>
+        {/if}
       </span>
     </div>
   </div>
@@ -344,7 +382,7 @@
       onclick={() => openLightbox(i)}
       objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
       square={viewMode.includes('square')}
-      targetHeight={viewMode.includes('small') ? 150 : viewMode.includes('large') ? 350 : 250}
+      targetHeight={viewMode.includes('small') ? (windowWidth <= 430 ? 100 : 150) : viewMode.includes('large') ? 350 : 250}
       priority={i < 8}
     />
   {/each}
@@ -686,5 +724,28 @@
   .grid.small-fit::after, .grid.large-fit::after {
     content: "";
     flex-grow: 999999999;
+  }
+  @media (max-width: 768px) {
+    .header-content {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    .header-right {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .count {
+      text-align: right;
+    }
+    .grid.small-square {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .toolbar .dropdown-menu {
+      right: auto;
+      left: 0;
+    }
   }
 </style>

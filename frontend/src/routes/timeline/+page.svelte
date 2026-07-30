@@ -28,8 +28,10 @@
     }
   }
 
-  let sortMode: SortMode = $state(loadPref<SortMode>('timelineSortMode', 'newest'));
-  let viewMode: ViewMode = $state(loadPref<ViewMode>('timelineViewMode', 'small-fit'));
+  let sortMode: SortMode = $state(data.defaultSortMode || 'newest');
+  let viewMode: ViewMode = $state(data.defaultViewMode || 'small-fit');
+  
+  let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
   $effect(() => savePref('timelineSortMode', sortMode));
   $effect(() => savePref('timelineViewMode', viewMode));
@@ -97,6 +99,9 @@
   let pollInterval: ReturnType<typeof setInterval>;
 
   onMount(() => {
+    sortMode = loadPref<SortMode>('timelineSortMode', data.defaultSortMode || 'newest');
+    viewMode = loadPref<ViewMode>('timelineViewMode', data.defaultViewMode || 'small-fit');
+
     pollInterval = setInterval(() => {
       const stillProcessing = data.files.some(f => !f.blurhash);
       if (stillProcessing) {
@@ -115,9 +120,14 @@
     updateStickyBottom();
     window.addEventListener('resize', updateStickyBottom);
 
+    windowWidth = window.innerWidth;
+    const updateWidth = () => windowWidth = window.innerWidth;
+    window.addEventListener('resize', updateWidth);
+
     return () => {
       if (pollInterval) clearInterval(pollInterval);
       window.removeEventListener('resize', updateStickyBottom);
+      window.removeEventListener('resize', updateWidth);
     };
   });
 
@@ -184,7 +194,7 @@
               onclick={() => openLightbox(entry.index)}
               objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
               square={viewMode.includes('square')}
-              targetHeight={viewMode.includes('small') ? 150 : viewMode.includes('large') ? 350 : 250}
+              targetHeight={viewMode.includes('small') ? (windowWidth <= 430 ? 100 : 150) : viewMode.includes('large') ? 350 : 250}
               priority={i < 8}
               initialAspectRatio={getAspectRatio(entry.file)}
             />
@@ -203,7 +213,7 @@
           onclick={() => openLightbox(i)}
           objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
           square={viewMode.includes('square')}
-          targetHeight={viewMode.includes('small') ? 150 : viewMode.includes('large') ? 350 : 250}
+          targetHeight={viewMode.includes('small') ? (windowWidth <= 430 ? 100 : 150) : viewMode.includes('large') ? 350 : 250}
           priority={i < 8}
           initialAspectRatio={getAspectRatio(file)}
         />
@@ -396,5 +406,28 @@
   .grid.small-fit::after, .grid.large-fit::after {
     content: "";
     flex-grow: 999999999;
+  }
+  @media (max-width: 768px) {
+    .header-content {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    .header-right {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .count {
+      text-align: right;
+    }
+    .grid.small-square {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .toolbar .dropdown-menu {
+      right: auto;
+      left: 0;
+    }
   }
 </style>

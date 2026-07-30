@@ -184,9 +184,11 @@
   }
 
   type FolderViewMode = 'small-grid' | 'medium-grid' | 'large-grid' | 'list';
-  let sortMode: SortMode = $state(loadPref<SortMode>('folderSortMode', data.defaultSortMode || 'newest'));
-  let viewMode: ViewMode = $state(loadPref<ViewMode>('folderViewMode', data.defaultViewMode || 'small-fit'));
-  let folderViewMode: FolderViewMode = $state(loadPref<FolderViewMode>('folderFolderViewMode', data.defaultFolderViewMode || 'small-grid'));
+  let sortMode: SortMode = $state(data.defaultSortMode || 'newest');
+  let viewMode: ViewMode = $state(data.defaultViewMode || 'small-fit');
+  let folderViewMode: FolderViewMode = $state(data.defaultFolderViewMode || 'small-grid');
+
+  let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
   $effect(() => savePref('folderSortMode', sortMode));
   $effect(() => savePref('folderViewMode', viewMode));
@@ -406,6 +408,10 @@
   }
 
   onMount(() => {
+    sortMode = loadPref<SortMode>('folderSortMode', data.defaultSortMode || 'newest');
+    viewMode = loadPref<ViewMode>('folderViewMode', data.defaultViewMode || 'small-fit');
+    folderViewMode = loadPref<FolderViewMode>('folderFolderViewMode', data.defaultFolderViewMode || 'small-grid');
+
     pollInterval = setInterval(() => {
       // Poll if any file lacks a blurhash (still processing) or if the scanner is active
       const stillProcessing = data.files.some(f => !f.blurhash) || data.scanning;
@@ -419,11 +425,16 @@
       mainContent.addEventListener('scroll', handleScroll);
     }
 
+    windowWidth = window.innerWidth;
+    const updateWidth = () => windowWidth = window.innerWidth;
+    window.addEventListener('resize', updateWidth);
+
     return () => {
       if (pollInterval) clearInterval(pollInterval);
       if (mainContent) {
         mainContent.removeEventListener('scroll', handleScroll);
       }
+      window.removeEventListener('resize', updateWidth);
     };
   });
 
@@ -541,8 +552,15 @@
         </button>
       </div>
       
-      <span class="count">
-        {#if data.directories.length > 0}{data.directories.length} {data.directories.length === 1 ? 'folder' : 'folders'}{#if data.files.length > 0}{' & '}{/if}{/if}{#if data.files.length > 0 || data.directories.length === 0}{data.files.length} {data.files.length === 1 ? 'item' : 'items'}{/if}
+      <span class="count" style="display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 4px;">
+        {#if data.directories.length > 0}
+          <span style="white-space: nowrap;">{data.directories.length} {data.directories.length === 1 ? 'folder' : 'folders'}</span>
+          {#if data.files.length > 0}
+            <span style="white-space: nowrap;">& {data.files.length} {data.files.length === 1 ? 'item' : 'items'}</span>
+          {/if}
+        {:else}
+          <span style="white-space: nowrap;">{data.files.length} {data.files.length === 1 ? 'item' : 'items'}</span>
+        {/if}
       </span>
     </div>
   </div>
@@ -616,7 +634,7 @@
       onclick={() => openLightbox(i)}
       objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
       square={viewMode.includes('square')}
-      targetHeight={viewMode.includes('small') ? 150 : viewMode.includes('large') ? 350 : 250}
+      targetHeight={viewMode.includes('small') ? (windowWidth <= 430 ? 100 : 150) : viewMode.includes('large') ? 350 : 250}
       priority={i < 8}
       initialAspectRatio={getAspectRatio(file)}
     />
@@ -1211,5 +1229,28 @@
   .grid.small-fit::after, .grid.large-fit::after {
     content: "";
     flex-grow: 999999999;
+  }
+  @media (max-width: 768px) {
+    .header-content {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    .header-right {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .count {
+      text-align: right;
+    }
+    .grid.small-square {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .toolbar .dropdown-menu {
+      right: auto;
+      left: 0;
+    }
   }
 </style>

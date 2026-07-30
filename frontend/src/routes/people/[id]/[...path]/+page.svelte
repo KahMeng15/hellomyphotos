@@ -36,8 +36,10 @@
     }
   }
 
-  let sortMode: SortMode = $state(loadPref<SortMode>('personSortMode', 'newest'));
-  let viewMode: ViewMode = $state(loadPref<ViewMode>('personViewMode', 'small-fit'));
+  let sortMode: SortMode = $state('newest');
+  let viewMode: ViewMode = $state('small-fit');
+  
+  let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
   $effect(() => savePref('personSortMode', sortMode));
   $effect(() => savePref('personViewMode', viewMode));
@@ -255,14 +257,21 @@
   }
 
   onMount(() => {
+    sortMode = loadPref<SortMode>('personSortMode', 'newest');
+    viewMode = loadPref<ViewMode>('personViewMode', 'small-fit');
+
     const mainContent = document.querySelector('.main-content');
     if (mainContent) {
       mainContent.addEventListener('scroll', handleScroll);
     }
+    windowWidth = window.innerWidth;
+    const updateWidth = () => windowWidth = window.innerWidth;
+    window.addEventListener('resize', updateWidth);
     return () => {
       if (mainContent) {
         mainContent.removeEventListener('scroll', handleScroll);
       }
+      window.removeEventListener('resize', updateWidth);
     };
   });
 
@@ -372,7 +381,7 @@
       onclick={() => openLightbox(i)}
       objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
       square={viewMode.includes('square')}
-      targetHeight={viewMode.includes('small') ? 150 : viewMode.includes('large') ? 350 : 250}
+      targetHeight={viewMode.includes('small') ? (windowWidth <= 430 ? 100 : 150) : viewMode.includes('large') ? 350 : 250}
       priority={i < 8}
     />
   {/each}
@@ -733,4 +742,27 @@
     cursor: not-allowed;
   }
 
+  @media (max-width: 768px) {
+    .header-content {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    .header-right {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .count {
+      text-align: right;
+    }
+    .grid.small-square {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .toolbar .dropdown-menu {
+      right: auto;
+      left: 0;
+    }
+  }
 </style>

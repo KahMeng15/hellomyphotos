@@ -1,7 +1,7 @@
 <script lang="ts">
   import '../app.css';
-  import { slide, fly } from 'svelte/transition';
-  import { onMount } from 'svelte';
+  import { slide, fly, fade } from 'svelte/transition';
+  import { onMount, untrack } from 'svelte';
   import { page, navigating } from '$app/stores';
   import { goto, afterNavigate } from '$app/navigation';
   import { logout } from '$lib/api/auth';
@@ -20,20 +20,39 @@
   });
   import Toast from '$lib/components/Toast.svelte';
   
-  let isSidebarOpen = $state(!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login');
+  const initialSidebarState = () => {
+    if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') return false;
+    if (typeof window === 'undefined') return undefined;
+    if (window.innerWidth <= 768) return false;
+    try {
+      const saved = localStorage.getItem('sidebarOpen');
+      if (saved !== null) return saved === 'true';
+    } catch {}
+    return true;
+  };
+  
+  let isSidebarOpen: boolean | undefined = $state(initialSidebarState());
   let isAuthChecking = $state(true);
   let searchQuery = $state('');
+  let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
   $effect(() => {
-    if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') {
+    const path = $page.url.pathname;
+    if (path.startsWith('/share/') || path === '/login') {
       isSidebarOpen = false;
     } else {
-      try {
-        const saved = localStorage.getItem('sidebarOpen');
-        isSidebarOpen = saved !== 'false';
-      } catch {
-        isSidebarOpen = true;
-      }
+      untrack(() => {
+        if (windowWidth <= 768) {
+          isSidebarOpen = false;
+        } else {
+          try {
+            const saved = localStorage.getItem('sidebarOpen');
+            isSidebarOpen = saved !== 'false';
+          } catch {
+            isSidebarOpen = true;
+          }
+        }
+      });
     }
   });
 
@@ -46,12 +65,9 @@
   let canGoBack = $state(true);
 
   onMount(() => {
-    try {
-      const saved = localStorage.getItem('sidebarOpen');
-      if (saved !== null && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login') {
-        isSidebarOpen = saved === 'true';
-      }
-    } catch {}
+    windowWidth = window.innerWidth;
+    const updateWidth = () => windowWidth = window.innerWidth;
+    window.addEventListener('resize', updateWidth);
 
     window.addEventListener('error', (e) => {
       frontendLogger.error(`Uncaught error: ${e.message}`, $page.url.pathname);
@@ -74,15 +90,18 @@
     
     if ('navigation' in window) {
       (window as any).navigation.addEventListener('currententrychange', checkHistory);
-      return () => {
-        (window as any).navigation.removeEventListener('currententrychange', checkHistory);
-      };
     } else {
       (window as any).addEventListener('popstate', checkHistory);
-      return () => {
-        (window as any).removeEventListener('popstate', checkHistory);
-      };
     }
+    
+    return () => {
+      if ('navigation' in window) {
+        (window as any).navigation.removeEventListener('currententrychange', checkHistory);
+      } else {
+        (window as any).removeEventListener('popstate', checkHistory);
+      }
+      window.removeEventListener('resize', updateWidth);
+    };
   });
 
   onMount(async () => {
@@ -181,8 +200,12 @@
 </svelte:head>
 
 <div class="app-layout">
-  {#if isSidebarOpen && $page.url.pathname !== '/login' && ($currentUser || $page.url.pathname !== '/')}
-    <aside class="sidebar" transition:slide={{ axis: 'x', duration: 300 }}>
+  {#if $page.url.pathname !== '/login' && ($currentUser || $page.url.pathname !== '/')}
+    {#if isSidebarOpen && windowWidth <= 768}
+      <div class="sidebar-backdrop" onclick={() => toggleSidebar(false)} transition:fade={{duration: 200}}></div>
+    {/if}
+
+    <aside class="sidebar {isSidebarOpen === true ? 'force-open' : (isSidebarOpen === false ? 'force-close' : '')}">
       <div class="sidebar-header">
         <a href="/" style="text-decoration: none;">
           <h1>HelloMyPhotos</h1>
@@ -272,7 +295,7 @@
     {/if}
   </main>
 
-  {#if !isSidebarOpen && $page.url.pathname !== '/login' && ($currentUser || $page.url.pathname !== '/')}
+  {#if isSidebarOpen === false && $page.url.pathname !== '/login' && ($currentUser || $page.url.pathname !== '/')}
     <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => toggleSidebar(true)} title="Open sidebar">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg>
     </button>
@@ -321,6 +344,16 @@
     flex-direction: column;
     padding: 24px;
     flex-shrink: 0;
+    transition: transform 0.3s ease, width 0.3s ease, padding 0.3s ease;
+    transform: translateX(0);
+    overflow: hidden;
+  }
+
+  .sidebar.force-close {
+    width: 0;
+    padding: 0;
+    border: none;
+    transform: translateX(-100%);
   }
   
   .sidebar-header {
@@ -544,5 +577,43 @@
   @keyframes shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
+  }
+  
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 998;
+  }
+
+  @media (max-width: 768px) {
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 999;
+      box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+      width: 250px;
+      padding: 24px;
+      border-right: 1px solid var(--glass-border);
+      transform: translateX(-100%);
+    }
+
+    .sidebar.force-open {
+      transform: translateX(0);
+    }
+    
+    .sidebar.force-close {
+      width: 250px;
+      padding: 24px;
+      border-right: 1px solid var(--glass-border);
+      transform: translateX(-100%);
+    }
+    
+    .floating-reopen-btn {
+      bottom: 1.5rem;
+      left: 1.5rem;
+    }
   }
 </style>

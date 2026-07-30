@@ -434,7 +434,7 @@
   }
 
   .sidebar-inner {
-    width: 302px; /* 350px - 48px padding */
+    width: 100%;
   }
 
   .sidebar h3 {
@@ -595,5 +595,18 @@
     max-height: 100%;
     object-fit: contain;
     border-radius: 0;
+  }
+
+  @media (max-width: 768px) {
+    .sidebar {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 100%;
+      max-width: 320px;
+      height: 100%;
+      z-index: 1000;
+      box-shadow: -10px 0 30px rgba(0,0,0,0.7);
+    }
   }
 </style>
