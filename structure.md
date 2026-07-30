@@ -3,7 +3,7 @@
 This outlines the monolithic monorepo directory layout for both the **SvelteKit** frontend and **Fastify** backend, alongside Docker configuration and volume mappings.
 
 ```text
-/hellomyphotos2
+/hellomyphotos
 ├── docker-compose.yml         # Defines Postgres, Redis, Immich ML, Frontend, and Backend containers
 ├── .env                       # Environment variables for database credentials, ports, etc.
 ├── .gitignore                 # Ignores node_modules, generated volumes, and .env

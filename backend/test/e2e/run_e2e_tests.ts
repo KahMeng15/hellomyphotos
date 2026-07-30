@@ -7,7 +7,7 @@ import { closeConnections, cleanupTestData } from './helpers';
 async function main() {
   const startTime = Date.now();
   console.log('================================================================');
-  console.log('       hellomyphotos2 Requirement-Driven E2E Test Suite        ');
+  console.log('       hellomyphotos Requirement-Driven E2E Test Suite        ');
   console.log('================================================================\n');
 
   let totalPassed = 0;

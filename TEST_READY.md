@@ -2,7 +2,7 @@
 
 ## Test Suite Overview
 
-An opaque-box, requirement-driven E2E test suite has been built and verified for **hellomyphotos2**. The suite covers all system capabilities across 4 tiers of testing: Queue Infrastructure & Admin UI, Media Processing Pipeline, Machine Learning & Smart Search (pgvector), and Facial Recognition & Dynamic DBSCAN Clustering.
+An opaque-box, requirement-driven E2E test suite has been built and verified for **hellomyphotos**. The suite covers all system capabilities across 4 tiers of testing: Queue Infrastructure & Admin UI, Media Processing Pipeline, Machine Learning & Smart Search (pgvector), and Facial Recognition & Dynamic DBSCAN Clustering.
 
 ---
 
@@ -20,9 +20,9 @@ npm --prefix backend run test:e2e
 
 ### Execution Prerequisites
 - Node.js (v18+)
-- Active PostgreSQL database with `pgvector` extension installed (Container: `hellomyphotos2-postgres-1`)
-- Active Redis instance (Container: `hellomyphotos2-redis-1`)
-- Immich ML container (Container: `hellomyphotos2-machine-learning-1`)
+- Active PostgreSQL database with `pgvector` extension installed (Container: `hellomyphotos-postgres-1`)
+- Active Redis instance (Container: `hellomyphotos-redis-1`)
+- Immich ML container (Container: `hellomyphotos-machine-learning-1`)
 
 ---
 
@@ -74,7 +74,7 @@ npm --prefix backend run test:e2e
 
 ```text
 ================================================================
-       hellomyphotos2 Requirement-Driven E2E Test Suite        
+       hellomyphotos Requirement-Driven E2E Test Suite        
 ================================================================
 
   ✓ T1.01: 7 distinct queues are registered and returned via API
