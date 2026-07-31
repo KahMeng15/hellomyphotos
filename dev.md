@@ -1,6 +1,6 @@
 # Local Development Guide
 
-To work on HelloMyPhotos locally, it is recommended to run the foundational services (Postgres, Redis, Immich ML) in Docker, while running the Node.js Backend and SvelteKit Frontend directly on your local machine for fast Hot-Module Reloading (HMR).
+To work on hellomyphotos locally, it is recommended to run the foundational services (Postgres, Redis, Immich ML) in Docker, while running the Node.js Backend and SvelteKit Frontend directly on your local machine for fast Hot-Module Reloading (HMR).
 
 ## Prerequisites
 - **Node.js**: v18 or newer

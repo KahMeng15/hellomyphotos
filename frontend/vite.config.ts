@@ -1,6 +1,7 @@
 import adapter from '@sveltejs/adapter-auto';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { SvelteKitPWA } from '@vite-pwa/sveltekit';
 
 export default defineConfig({
 	plugins: [
@@ -15,6 +16,23 @@ export default defineConfig({
 			// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
 			// See https://svelte.dev/docs/kit/adapters for more information about adapters.
 			adapter: adapter()
+		}),
+		SvelteKitPWA({
+			registerType: 'autoUpdate',
+			manifest: {
+				name: 'Hello My Photos',
+				short_name: 'Photos',
+				description: 'Your beautiful photo gallery',
+				theme_color: '#ffffff',
+				icons: [
+					{
+						src: 'icon.svg',
+						sizes: '192x192 512x512',
+						type: 'image/svg+xml',
+						purpose: 'any maskable'
+					}
+				]
+			}
 		})
 	],
 	server: {

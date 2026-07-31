@@ -8,6 +8,8 @@
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
   import { LogOut } from '@lucide/svelte';
   import { frontendLogger } from '$lib/utils/frontendLogger';
+  // @ts-ignore - Ignore virtual module type resolution
+  import { pwaInfo } from 'virtual:pwa-info';
   
   let { children } = $props();
 
@@ -196,7 +198,12 @@
 </script>
 
 <svelte:head>
-  <title>HelloMyPhotos</title>
+  <title>hellomyphotos</title>
+  <meta name="theme-color" content="#ffffff" />
+  {#if pwaInfo}
+    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+    {@html pwaInfo.webManifest.linkTag}
+  {/if}
 </svelte:head>
 
 <div class="app-layout">
@@ -208,7 +215,7 @@
     <aside class="sidebar {isSidebarOpen === true ? 'force-open' : (isSidebarOpen === false ? 'force-close' : '')}">
       <div class="sidebar-header">
         <a href="/" style="text-decoration: none;">
-          <h1>HelloMyPhotos</h1>
+          <h1>hellomyphotos</h1>
         </a>
       </div>
       
