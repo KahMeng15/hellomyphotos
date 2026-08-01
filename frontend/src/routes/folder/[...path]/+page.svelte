@@ -8,6 +8,7 @@
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
   import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { navigating } from '$app/stores';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
@@ -103,14 +104,18 @@
 
   async function copyShareLink(token: string) {
     const url = `${window.location.origin}/share/${token}`;
-    await navigator.clipboard.writeText(url);
-    toast.success('Link copied to clipboard!');
-    copiedToken = token;
-    setTimeout(() => {
-      if (copiedToken === token) {
-        copiedToken = null;
-      }
-    }, 2000);
+    const success = await copyToClipboard(url);
+    if (success) {
+      toast.success('Link copied to clipboard!');
+      copiedToken = token;
+      setTimeout(() => {
+        if (copiedToken === token) {
+          copiedToken = null;
+        }
+      }, 2000);
+    } else {
+      toast.error('Failed to copy. Please manually copy the URL.');
+    }
   }
 
   async function handleSaveSettings() {
@@ -1107,16 +1112,18 @@
     color: #d4d4d8;
   }
 
-  .dir-grid.folder-mode-list .dir-card:not(:hover) .dir-info {
-    background: transparent;
-  }
+  @media (hover: hover) {
+    .dir-grid.folder-mode-list .dir-card:not(:hover) .dir-info {
+      background: transparent;
+    }
 
-  .dir-grid.folder-mode-list .dir-card:nth-child(odd) .dir-info {
-    background: rgba(255, 255, 255, 0.03);
-  }
+    .dir-grid.folder-mode-list .dir-card:nth-child(odd) .dir-info {
+      background: rgba(255, 255, 255, 0.03);
+    }
 
-  .dir-grid.folder-mode-list .dir-card:hover .dir-info {
-    background: rgba(255, 255, 255, 0.08);
+    .dir-grid.folder-mode-list .dir-card:hover .dir-info {
+      background: rgba(255, 255, 255, 0.08);
+    }
   }
 
   .dir-grid.list-view {
@@ -1166,8 +1173,10 @@
     cursor: pointer;
   }
 
-  .dir-card:hover {
-    filter: brightness(1.2);
+  @media (hover: hover) {
+    .dir-card:hover {
+      filter: brightness(1.2);
+    }
   }
 
   .dir-cover {
@@ -1239,8 +1248,17 @@
     padding: 8px;
   }
 
-  .dir-card:hover .dir-actions-overlay {
-    opacity: 1;
+  @media (hover: hover) {
+    .dir-card:hover .dir-actions-overlay {
+      opacity: 1;
+    }
+  }
+
+  @media (hover: none) {
+    .dir-actions-overlay {
+      opacity: 1;
+      background: linear-gradient(to top, rgba(0,0,0,0.5) 0%, transparent 100%);
+    }
   }
 
   .overlay-btn {

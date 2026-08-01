@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { API_BASE } from '$lib/api/media';
   import { ChevronLeft, Trash2, Link as LinkIcon, Folder, Image, User, Copy, Check, Edit, Power, PowerOff } from '@lucide/svelte';
   import Modal from '$lib/components/Modal.svelte';
@@ -37,11 +38,13 @@
     }
   }
 
-  function copyLink(token: string) {
+  async function copyLink(token: string) {
     const url = `${window.location.origin}/share/${token}`;
-    navigator.clipboard.writeText(url);
-    copiedToken = token;
-    setTimeout(() => { copiedToken = ''; }, 2000);
+    const success = await copyToClipboard(url);
+    if (success) {
+      copiedToken = token;
+      setTimeout(() => { copiedToken = ''; }, 2000);
+    }
   }
 
   function openEditShare(share: any) {

@@ -9,6 +9,7 @@
   import { createPersonShare, getActivePersonShares, revokeShare, type ShareData } from '$lib/api/shares';
   import type { PageData } from './$types';
   import { onMount, onDestroy } from 'svelte';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import { ArrowDownUp, ChevronLeft, LayoutGrid, Share2, Check, Copy, Trash2, Clock, User, Folder } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
 
@@ -109,12 +110,16 @@
 
   async function copyShareLink(token: string) {
     const url = `${window.location.origin}/share/${token}`;
-    await navigator.clipboard.writeText(url);
-    toast.success('Link copied to clipboard!');
-    copiedToken = token;
-    setTimeout(() => {
-      if (copiedToken === token) copiedToken = null;
-    }, 2000);
+    const success = await copyToClipboard(url);
+    if (success) {
+      toast.success('Link copied to clipboard!');
+      copiedToken = token;
+      setTimeout(() => {
+        if (copiedToken === token) {
+          copiedToken = null;
+        }
+      }, 2000);
+    }
   }
 
   let sortedFiles = $derived([...data.files].sort((a, b) => {

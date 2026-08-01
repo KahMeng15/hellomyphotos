@@ -4,6 +4,7 @@
   import type { MediaFile } from '$lib/api/media';
   import { getPreviewUrl, getStreamUrl, getThumbnailUrl, getFaceThumbnailUrl, fetchMediaFaces } from '$lib/api/media';
   import { createShare } from '$lib/api/shares';
+  import { copyToClipboard } from '$lib/utils/clipboard';
   import BlurhashImage from './BlurhashImage.svelte';
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
@@ -110,7 +111,7 @@
       const token = await createShare(media.folder_path, media.id, allowDownload, false, false, date.toISOString());
       
       const url = `${window.location.origin}/share/${token}`;
-      await navigator.clipboard.writeText(url);
+      await copyToClipboard(url);
       
       justShared = true;
       setTimeout(() => justShared = false, 2000);

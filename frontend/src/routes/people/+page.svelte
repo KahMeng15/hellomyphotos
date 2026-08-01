@@ -308,4 +308,21 @@
     font-size: 0.75rem;
     color: #94a3b8;
   }
+
+  @media (max-width: 768px) {
+    .grid {
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+    .face-name {
+      font-size: 0.7rem;
+    }
+    .face-count {
+      font-size: 0.6rem;
+    }
+    .face-name-input {
+      font-size: 0.7rem;
+      padding: 2px 4px;
+    }
+  }
 </style>
