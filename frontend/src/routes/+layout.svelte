@@ -276,7 +276,7 @@
         {@render children()}
       </div>
     {/if}
-    {#if $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/admin') && !$page.url.pathname.startsWith('/settings') && !(!$currentUser && $page.url.pathname === '/')}
+    {#if $page.url.pathname !== '/' && $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/admin') && !$page.url.pathname.startsWith('/settings')}
       {#key $page.url.pathname}
         <footer class="app-footer {$page.url.pathname.startsWith('/folder') || $page.url.pathname.startsWith('/share') ? 'animate-footer' : ''}">
           <p>
@@ -305,7 +305,7 @@
 <style>
   .app-layout {
     display: flex;
-    min-height: 100vh;
+    min-height: 100dvh;
     width: 100vw;
     overflow: hidden;
     position: relative;
@@ -315,7 +315,7 @@
     flex: 1;
     overflow-y: auto;
     padding: 24px;
-    height: 100vh;
+    height: 100dvh;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
@@ -335,7 +335,7 @@
   
   .sidebar {
     width: 250px;
-    height: 100vh;
+    height: 100dvh;
     border-right: 1px solid var(--glass-border);
     background: var(--bg-color);
     display: flex;
