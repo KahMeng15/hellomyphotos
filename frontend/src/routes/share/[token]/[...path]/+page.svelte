@@ -596,7 +596,7 @@
     background: rgba(255, 255, 255, 0.05);
     border-radius: 8px;
     padding: 8px;
-    width: auto;
+    width: 250px;
     gap: 12px;
     border: 1px solid var(--glass-border);
   }

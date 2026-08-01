@@ -130,7 +130,6 @@
     justify-content: center;
     align-items: center;
     color: white;
-    border-radius: 0;
   }
 
   .grid-item.is-square {

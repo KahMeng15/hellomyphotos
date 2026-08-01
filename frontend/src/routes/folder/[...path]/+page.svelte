@@ -469,6 +469,7 @@
   backdrop-filter: blur(calc(16px * {scrollProgress}));
   -webkit-backdrop-filter: blur(calc(16px * {scrollProgress}));
   border-bottom-color: rgba(255,255,255,calc(0.05 * {scrollProgress}));
+  z-index: {showSortMenu || showViewMenu || showFolderViewMenu ? 105 : 50};
 ">
   <div class="header-content">
     <div class="header-left">
@@ -570,19 +571,19 @@
 {#if data.directories.length > 0}
   <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (data.files.length > 0 ? 'list-view' : '')}">
     {#each sortedDirectories as dir, i}
-      <div class="dir-card" style="animation-delay: {i * 40}ms" role="link" tabindex="0" onclick={(e) => { if ((e.target as HTMLElement).closest('button')) return; goto(`/folder/${data.folderPath ? data.folderPath + '/' + dir.name : dir.name}`); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goto(`/folder/${data.folderPath ? data.folderPath + '/' + dir.name : dir.name}`); } }}>
+      <div class="dir-card" style="animation-delay: {i * 40}ms; z-index: {activeFolderMenu === dir.name ? 50 : 'auto'};" role="link" tabindex="0" onclick={(e) => { if ((e.target as HTMLElement).closest('button')) return; goto(`/folder/${data.folderPath ? data.folderPath + '/' + dir.name : dir.name}`); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goto(`/folder/${data.folderPath ? data.folderPath + '/' + dir.name : dir.name}`); } }}>
         {#if isFolderOnly && folderViewMode === 'list'}
           <div class="dir-info">
             <div class="dir-label">
               <Folder size={18} />
               <span class="dir-name">{dir.name}</span>
             </div>
-            <div class="dir-actions" use:clickOutside={() => activeFolderMenu = null}>
+            <div class="dir-actions" use:clickOutside={() => { if (activeFolderMenu === dir.name) activeFolderMenu = null; }}>
               <button class="icon-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
                 <MoreVertical size={16} />
               </button>
               {#if activeFolderMenu === dir.name}
-                <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; min-width: 150px; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
+                <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
                   <button onclick={() => { activeFolderMenu = null; window.open(getFolderZipUrl(data.folderPath ? data.folderPath + '/' + dir.name : dir.name), '_blank'); }}>Download ZIP</button>
                 </div>
               {/if}
@@ -601,20 +602,35 @@
             {:else}
               <div class="dir-placeholder"></div>
             {/if}
-            <div class="dir-actions-overlay" use:clickOutside={() => activeFolderMenu = null}>
-              <button class="overlay-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
-                <MoreVertical size={16} />
-              </button>
-              {#if activeFolderMenu === dir.name}
-                <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; min-width: 150px; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
-                  <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
-                  <button onclick={() => { activeFolderMenu = null; window.open(getFolderZipUrl(data.folderPath ? data.folderPath + '/' + dir.name : dir.name), '_blank'); }}>Download ZIP</button>
-                </div>
-              {/if}
-            </div>
+            {#if isFolderOnly}
+              <div class="dir-actions-overlay" use:clickOutside={() => { if (activeFolderMenu === dir.name) activeFolderMenu = null; }}>
+                <button class="overlay-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
+                  <MoreVertical size={16} />
+                </button>
+                {#if activeFolderMenu === dir.name}
+                  <div class="dropdown-menu" style="position: absolute; left: 50%; transform: translateX(-50%); top: 100%; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
+                    <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
+                    <button onclick={() => { activeFolderMenu = null; window.open(getFolderZipUrl(data.folderPath ? data.folderPath + '/' + dir.name : dir.name), '_blank'); }}>Download ZIP</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </div>
           <div class="dir-info">
             <span class="dir-name">{dir.name}</span>
+            {#if !isFolderOnly}
+              <div class="dir-actions" use:clickOutside={() => { if (activeFolderMenu === dir.name) activeFolderMenu = null; }}>
+                <button class="icon-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
+                  <MoreVertical size={16} />
+                </button>
+                {#if activeFolderMenu === dir.name}
+                  <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
+                    <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
+                    <button onclick={() => { activeFolderMenu = null; window.open(getFolderZipUrl(data.folderPath ? data.folderPath + '/' + dir.name : dir.name), '_blank'); }}>Download ZIP</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
@@ -953,7 +969,7 @@
     background: #000;
     border: 1px solid rgba(255,255,255,0.15);
     border-radius: 8px;
-    min-width: 180px;
+    min-width: 140px;
     overflow: hidden;
     z-index: 100;
     box-shadow: 0 10px 30px rgba(0,0,0,0.5);
@@ -1076,7 +1092,7 @@
     background: rgba(255, 255, 255, 0.05);
     border-radius: 8px;
     padding: 8px;
-    width: auto;
+    width: 250px;
     gap: 12px;
     border: 1px solid var(--glass-border);
   }
@@ -1090,6 +1106,8 @@
   .dir-grid.list-view .dir-info {
     padding: 0;
     padding-right: 8px;
+    flex: 1;
+    min-width: 0;
   }
 
   .dir-grid.list-view .dir-name {
@@ -1169,13 +1187,13 @@
   .dir-actions-overlay {
     position: absolute;
     bottom: 0;
+    left: 0;
     right: 0;
-    width: 72px;
     height: 72px;
     opacity: 0;
     transition: opacity 0.2s;
     z-index: 5;
-    background: radial-gradient(circle at 100% 100%, rgba(0,0,0,0.35) 0%, transparent 70%);
+    background: linear-gradient(to top, rgba(0,0,0,0.35) 0%, transparent 100%);
     display: flex;
     align-items: flex-end;
     justify-content: flex-end;

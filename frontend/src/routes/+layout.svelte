@@ -266,16 +266,7 @@
     {#if $navigating}
       <div class="nav-loading-bar"></div>
     {/if}
-    {#if $navigating && $navigating.to?.route.id?.startsWith('/folder')}
-      <div class="nav-skeleton">
-        <div class="nav-skeleton-header"></div>
-        <div class="nav-skeleton-grid">
-          {#each Array(24) as _}
-            <div class="nav-skeleton-item"><div class="nav-skeleton-shimmer"></div></div>
-          {/each}
-        </div>
-      </div>
-    {/if}
+
     {#if isAuthChecking && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login'}
       <div class="loading-overlay">
         <div class="spinner"></div>
@@ -544,47 +535,7 @@
     100% { transform: translateX(100%); }
   }
 
-  .nav-skeleton {
-    position: absolute;
-    inset: 0;
-    z-index: 100;
-    background: var(--bg-color, #000);
-    padding: 24px;
-  }
 
-  .nav-skeleton-header {
-    height: 40vh;
-    margin: -24px -24px 0 -24px;
-    background: #111;
-  }
-
-  .nav-skeleton-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0;
-    padding-top: 96px;
-  }
-
-  .nav-skeleton-item {
-    flex: 1 0 200px;
-    height: 200px;
-    background: #0a0a0a;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .nav-skeleton-shimmer {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.04) 50%, transparent 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
   
   .sidebar-backdrop {
     position: fixed;

@@ -55,14 +55,8 @@
           hash={media.blurhash || ''} 
           src={getThumbnailUrl(media.id)} 
           alt={media.file_name} 
+          isVideo={isVideo(media.file_name)}
         />
-        <div class="media-icon">
-          {#if isVideo(media.file_name)}
-            <Video size={16} color="white" />
-          {:else}
-            <File size={16} color="white" />
-          {/if}
-        </div>
       </div>
     {/each}
   </div>
@@ -132,18 +126,7 @@
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
   }
 
-  .media-icon {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    background: rgba(0,0,0,0.4);
-    border-radius: 4px;
-    padding: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-  }
+
 
   .empty-state {
     text-align: center;
