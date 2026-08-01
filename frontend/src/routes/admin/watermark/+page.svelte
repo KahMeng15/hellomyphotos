@@ -64,9 +64,14 @@
 </script>
 
 <div class="admin-container">
-  <div class="header">
-    <h2>Watermarking & Enforcement</h2>
-    <p>Configure global watermark templates and enforcement rules for public shares.</p>
+  <div class="header" style="display: flex; align-items: center; gap: 16px; margin-bottom: 32px;">
+    <a href="/admin" class="icon-btn" style="text-decoration: none; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; background: rgba(255,255,255,0.05); border-radius: 50%; color: white;" title="Back to Admin Dashboard">
+      <ChevronLeft size={24} />
+    </a>
+    <div>
+      <h2 style="margin: 0;">Watermarking & Enforcement</h2>
+      <p style="color: #a1a1aa; margin-top: 0.5rem; margin-bottom: 0;">Configure global watermark templates and enforcement rules for public shares.</p>
+    </div>
   </div>
 
   {#if isLoading}
@@ -138,6 +143,14 @@
   .admin-container {
     width: 100%;
     color: #f4f4f5;
+  }
+  
+  .icon-btn {
+    transition: background 0.15s, transform 0.15s;
+  }
+  .icon-btn:hover {
+    background: rgba(255,255,255,0.1) !important;
+    transform: scale(1.05);
   }
   
   .header {
