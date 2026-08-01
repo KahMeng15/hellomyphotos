@@ -5,6 +5,9 @@
   import { toast } from '$lib/stores/toast';
 
   let settings = $state<any>({
+    mlConfidenceThreshold: 0.6,
+    throttleAuthGlobal: 0,
+    throttlePublicGlobal: 0,
     throttleAuth: 0,
     throttlePublic: 0,
     rateLimitApi: 100
@@ -37,6 +40,8 @@
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
+          throttleAuthGlobal: Number(settings.throttleAuthGlobal),
+          throttlePublicGlobal: Number(settings.throttlePublicGlobal),
           throttleAuth: Number(settings.throttleAuth),
           throttlePublic: Number(settings.throttlePublic),
           rateLimitApi: Number(settings.rateLimitApi),
@@ -93,14 +98,38 @@
         </div>
         <div class="card-body">
           <div class="form-group">
-            <label>Authenticated Users Limit (Mbps)</label>
-            <p class="help">Limit streaming and downloading for logged in users (0 = Unlimited).</p>
-            <input type="number" bind:value={settings.throttleAuth} step="1" min="0" />
+            <label>Global Server Limit (Authenticated Users)</label>
+            <p class="help">Hard cap for the combined outbound bandwidth across all logged-in users. (0 = Unlimited)</p>
+            <input type="number" bind:value={settings.throttleAuthGlobal} step="1" min="0" />
+            <div class="preset-btns">
+              <button class="btn sm secondary" onclick={() => settings.throttleAuthGlobal = 0}>Unlimited</button>
+              <button class="btn sm secondary" onclick={() => settings.throttleAuthGlobal = 100}>100 Mbps</button>
+              <button class="btn sm secondary" onclick={() => settings.throttleAuthGlobal = 500}>500 Mbps</button>
+            </div>
           </div>
           
           <div class="form-group">
-            <label>Public Share Links Limit (Mbps)</label>
-            <p class="help">Prevent anonymous users from exhausting your bandwidth.</p>
+            <label>Per-User Bandwidth Limit (Authenticated)</label>
+            <p class="help">Cap for logged-in users downloading content. (0 = Unlimited)</p>
+            <input type="number" bind:value={settings.throttleAuth} step="1" min="0" />
+          </div>
+
+          <div style="height: 1px; background: rgba(255,255,255,0.1); margin: 24px 0;"></div>
+
+          <div class="form-group">
+            <label>Global Server Limit (Public Links)</label>
+            <p class="help">Hard cap for the combined outbound bandwidth across all anonymous users to protect network capacity. (0 = Unlimited)</p>
+            <input type="number" bind:value={settings.throttlePublicGlobal} step="1" min="0" />
+            <div class="preset-btns">
+              <button class="btn sm secondary" onclick={() => settings.throttlePublicGlobal = 0}>Unlimited</button>
+              <button class="btn sm secondary" onclick={() => settings.throttlePublicGlobal = 50}>50 Mbps</button>
+              <button class="btn sm secondary" onclick={() => settings.throttlePublicGlobal = 100}>100 Mbps</button>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label>Per-User Bandwidth Limit (Public Links)</label>
+            <p class="help">Cap for anonymous users using share links. (0 = Unlimited)</p>
             <input type="number" bind:value={settings.throttlePublic} step="1" min="0" />
             <div class="preset-btns">
               <button class="btn sm secondary" onclick={() => settings.throttlePublic = 5}>5 Mbps</button>

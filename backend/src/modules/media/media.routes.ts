@@ -10,12 +10,14 @@ const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.c
 
 import { verifyMediaAccess } from '../../utils/auth';
 
-import { getThrottleLimit, BandwidthThrottler } from '../../utils/throttle';
+import { getThrottleLimits, BandwidthThrottler } from '../../utils/throttle';
 async function sendThrottled(request: FastifyRequest, reply: FastifyReply, stream: NodeJS.ReadableStream | Buffer) {
   const isAuth = (request as any).user != null;
-  const limit = await getThrottleLimit(isAuth);
-  if (limit > 0 && typeof (stream as any).pipe === 'function') {
-    return reply.send((stream as any).pipe(new BandwidthThrottler(limit)));
+  const ip = request.ip || 'unknown';
+  const limits = await getThrottleLimits();
+  const globalLimit = isAuth ? limits.authGlobalLimit : limits.publicGlobalLimit;
+  if ((globalLimit > 0 || (isAuth ? limits.authLimit : limits.publicLimit) > 0) && typeof (stream as any).pipe === 'function') {
+    return reply.send((stream as any).pipe(new BandwidthThrottler(ip, isAuth)));
   }
   return reply.send(stream);
 }

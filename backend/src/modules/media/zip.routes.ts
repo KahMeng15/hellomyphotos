@@ -8,7 +8,7 @@ import { WatermarkService } from './watermark.service';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
-import { getThrottleLimit, BandwidthThrottler } from '../../utils/throttle';
+import { getThrottleLimits, BandwidthThrottler } from '../../utils/throttle';
 
 export async function zipRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { '*': string }, Querystring: { shareToken?: string, watermark?: string } }>('/api/zip/*', async (request, reply) => {
@@ -37,11 +37,13 @@ export async function zipRoutes(fastify: FastifyInstance) {
     
 
     const isAuth = (request as any).user != null;
-    const limit = await getThrottleLimit(isAuth);
+    const ip = request.ip || 'unknown';
+    const limits = await getThrottleLimits();
+    const globalLimit = isAuth ? limits.authGlobalLimit : limits.publicGlobalLimit;
     
     // Pipe the archive stream directly to the fastify reply, optionally through the throttler
-    if (limit > 0) {
-      reply.send(archive.pipe(new BandwidthThrottler(limit)));
+    if (globalLimit > 0 || (isAuth ? limits.authLimit : limits.publicLimit) > 0) {
+      reply.send(archive.pipe(new BandwidthThrottler(ip, isAuth)));
     } else {
       reply.send(archive);
     }
