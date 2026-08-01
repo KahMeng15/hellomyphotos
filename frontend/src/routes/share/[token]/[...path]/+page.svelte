@@ -33,7 +33,7 @@
     }
   }
 
-  let sortMode: SortMode = $state(data.defaultShareSortMode || 'newest');
+  let sortMode: SortMode = $state(data.defaultShareSortMode || 'oldest');
   let viewMode: ViewMode = $state(data.defaultShareViewMode || 'small-fit');
   let folderViewMode: FolderViewMode = $state(data.defaultShareFolderViewMode || 'small-grid');
 
@@ -370,6 +370,13 @@
   </div>
 {/if}
 {/key}
+
+{#if data.directories.length === 0 && data.files.length === 0}
+  <div class="empty-state">
+    <h3 style="color: var(--text-color); margin-bottom: 8px;">This folder is empty</h3>
+    <p style="color: #a1a1aa; max-width: 400px; margin: 0 auto;">There are no files or subfolders shared here yet.</p>
+  </div>
+{/if}
 
 {#key data.folderPath}
 <div class="grid {viewMode}">
@@ -747,5 +754,14 @@
       right: auto;
       left: 0;
     }
+  }
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 64px 24px;
+    text-align: center;
+    min-height: 400px;
   }
 </style>

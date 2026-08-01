@@ -324,7 +324,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     ]);
     const defaults: Record<string, string> = {
       defaultViewMode: 'small-fit',
-      defaultSortMode: 'newest',
+      defaultSortMode: 'oldest',
       defaultFolderViewMode: 'small-grid'
     };
     for (const r of defaultsRes.rows) {

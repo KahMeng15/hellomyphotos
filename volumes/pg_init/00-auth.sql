@@ -4,6 +4,7 @@ CREATE TABLE users (
     name VARCHAR(255),
     password_hash TEXT NOT NULL,
     role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'user', 'viewer')),
+    preferences JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

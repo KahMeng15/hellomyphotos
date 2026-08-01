@@ -11,6 +11,8 @@
   import { navigating } from '$app/stores';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
+  import { currentUser } from '$lib/stores/auth';
+  import { updatePreferences } from '$lib/api/auth';
   import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
@@ -173,6 +175,9 @@
   type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square';
 
   function loadPref<T>(key: string, fallback: T): T {
+    if ($currentUser && $currentUser.preferences && $currentUser.preferences[key] !== undefined) {
+      return $currentUser.preferences[key] as T;
+    }
     if (typeof localStorage === 'undefined') return fallback;
     try {
       const val = localStorage.getItem(key);
@@ -184,18 +189,37 @@
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(key, JSON.stringify(val));
     }
+    if ($currentUser) {
+      if (!$currentUser.preferences) $currentUser.preferences = {};
+      if ($currentUser.preferences[key] !== val) {
+        $currentUser.preferences[key] = val;
+        updatePreferences($currentUser.preferences).catch(err => {
+          console.error('Failed to save preference to DB:', err);
+        });
+      }
+    }
   }
 
   type FolderViewMode = 'small-grid' | 'medium-grid' | 'large-grid' | 'list';
-  let sortMode: SortMode = $state(data.defaultSortMode || 'newest');
+  let sortMode: SortMode = $state(data.defaultSortMode || 'oldest');
   let viewMode: ViewMode = $state(data.defaultViewMode || 'small-fit');
   let folderViewMode: FolderViewMode = $state(data.defaultFolderViewMode || 'small-grid');
 
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
-  $effect(() => savePref('folderSortMode', sortMode));
-  $effect(() => savePref('folderViewMode', viewMode));
-  $effect(() => savePref('folderFolderViewMode', folderViewMode));
+  let hasSyncedPreferences = $state(false);
+  $effect(() => {
+    if ($currentUser && $currentUser.preferences && !hasSyncedPreferences) {
+      hasSyncedPreferences = true;
+      if ($currentUser.preferences.folderSortMode) sortMode = $currentUser.preferences.folderSortMode as SortMode;
+      if ($currentUser.preferences.folderViewMode) viewMode = $currentUser.preferences.folderViewMode as ViewMode;
+      if ($currentUser.preferences.folderFolderViewMode) folderViewMode = $currentUser.preferences.folderFolderViewMode as FolderViewMode;
+    }
+  });
+
+  $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderSortMode', sortMode); });
+  $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderViewMode', viewMode); });
+  $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderFolderViewMode', folderViewMode); });
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
@@ -645,6 +669,13 @@
   </div>
 {/if}
 {/key}
+
+{#if data.directories.length === 0 && data.files.length === 0}
+  <div class="empty-state">
+    <h3 style="color: var(--text-color); margin-bottom: 8px;">This folder is empty</h3>
+    <p style="color: #a1a1aa; max-width: 400px; margin: 0 auto;">There are no files or subfolders here yet.</p>
+  </div>
+{/if}
 
 {#key data.folderPath}
 <div class="grid {viewMode}">
@@ -1277,5 +1308,14 @@
       right: auto;
       left: 0;
     }
+  }
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 64px 24px;
+    text-align: center;
+    min-height: 400px;
   }
 </style>

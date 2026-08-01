@@ -216,10 +216,10 @@ export async function adminRoutes(fastify: FastifyInstance) {
       watermarkPosition: 'center',
       watermarkEnforceGlobal: false,
       defaultViewMode: 'small-fit',
-      defaultSortMode: 'newest',
+      defaultSortMode: 'oldest',
       defaultFolderViewMode: 'small-grid',
       defaultShareViewMode: 'small-fit',
-      defaultShareSortMode: 'newest',
+      defaultShareSortMode: 'oldest',
       defaultShareFolderViewMode: 'small-grid'
     };
     

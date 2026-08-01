@@ -143,7 +143,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
       
-      const { rows } = await pool.query('SELECT role, email, name FROM users WHERE id = $1', [decoded.id]);
+      const { rows } = await pool.query('SELECT role, email, name, preferences FROM users WHERE id = $1', [decoded.id]);
       if (rows.length === 0) {
         return reply.status(401).send({ error: 'User not found' });
       }
@@ -163,13 +163,35 @@ export async function authRoutes(fastify: FastifyInstance) {
         name: rows[0].name,
         email: rows[0].email,
         role,
-        folders
+        folders,
+        preferences: rows[0].preferences || {}
       };
       
       return { user: latestUser };
     } catch (error) {
       return reply.status(401).send({ error: 'Invalid token' });
     }
+  });
+
+  fastify.post('/preferences', { preHandler: [requireAuth] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const user = (request as any).user;
+    if (!user) return reply.status(401).send({ error: 'Unauthorized' });
+
+    const preferences = request.body;
+    if (typeof preferences !== 'object' || preferences === null) {
+      return reply.status(400).send({ error: 'Preferences must be an object' });
+    }
+
+    // Merge existing preferences
+    const { rows } = await pool.query('SELECT preferences FROM users WHERE id = $1', [user.id]);
+    let currentPrefs = {};
+    if (rows.length > 0 && rows[0].preferences) {
+      currentPrefs = rows[0].preferences;
+    }
+
+    const mergedPrefs = { ...currentPrefs, ...preferences };
+    await pool.query('UPDATE users SET preferences = $1 WHERE id = $2', [JSON.stringify(mergedPrefs), user.id]);
+    return { success: true, preferences: mergedPrefs };
   });
 
   fastify.put('/profile', { preHandler: requireAuth }, async (request, reply) => {

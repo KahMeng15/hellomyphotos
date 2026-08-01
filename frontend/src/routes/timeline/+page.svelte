@@ -28,7 +28,7 @@
     }
   }
 
-  let sortMode: SortMode = $state(data.defaultSortMode || 'newest');
+  let sortMode: SortMode = $state(data.defaultSortMode || 'oldest');
   let viewMode: ViewMode = $state(data.defaultViewMode || 'small-fit');
   
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);

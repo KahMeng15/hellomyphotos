@@ -35,3 +35,14 @@ export async function getAuthUser() {
   const data = await res.json();
   return data.user;
 }
+
+export async function updatePreferences(preferences: Record<string, any>) {
+  const res = await fetch(`${API_BASE}/api/auth/preferences`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(preferences),
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error('Failed to update preferences');
+  return await res.json();
+}

@@ -36,7 +36,7 @@
     }
   }
 
-  let sortMode: SortMode = $state('newest');
+  let sortMode: SortMode = $state('oldest');
   let viewMode: ViewMode = $state('small-fit');
   
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);

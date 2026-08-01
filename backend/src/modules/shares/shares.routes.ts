@@ -61,7 +61,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     if (share.media_id) {
       if (subPath) return reply.status(404).send({ error: 'Not a folder share' });
       const fileRes = await query(`SELECT * FROM media_files WHERE id = $1`, [share.media_id]);
-      return reply.send({ share, files: fileRes.rows, folderCoverId: null, defaultShareViewMode: 'small-fit', defaultShareSortMode: 'newest', defaultShareFolderViewMode: 'small-grid' });
+      return reply.send({ share, files: fileRes.rows, folderCoverId: null, defaultShareViewMode: 'small-fit', defaultShareSortMode: 'oldest', defaultShareFolderViewMode: 'small-grid' });
     }
 
     // Person-scoped share: return all media for this person
@@ -138,7 +138,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
           // non-critical, fallback positioning will be used
         }
       }
-      return reply.send({ share, files: fileRes.rows, person, personCoverMediaId, personCoverBoundingBox, personCoverImgWidth, personCoverImgHeight, defaultShareViewMode: 'small-fit', defaultShareSortMode: 'newest', defaultShareFolderViewMode: 'small-grid' });
+      return reply.send({ share, files: fileRes.rows, person, personCoverMediaId, personCoverBoundingBox, personCoverImgWidth, personCoverImgHeight, defaultShareViewMode: 'small-fit', defaultShareSortMode: 'oldest', defaultShareFolderViewMode: 'small-grid' });
     }
     
     let targetPath = share.folder_path || '';
@@ -246,7 +246,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     ]);
     const shareDefaults: Record<string, string> = {
       defaultShareViewMode: 'small-fit',
-      defaultShareSortMode: 'newest',
+      defaultShareSortMode: 'oldest',
       defaultShareFolderViewMode: 'small-grid'
     };
     for (const r of shareDefaultsRes.rows) {
