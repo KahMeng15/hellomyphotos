@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { API_BASE } from '$lib/api/media';
   import ExpandableList from '$lib/components/ExpandableList.svelte';
   import KpiCard from '$lib/components/KpiCard.svelte';
@@ -15,8 +16,6 @@
     Link as LinkIcon,
     Users,
     Globe,
-    HardDrive,
-    Database,
     MonitorSmartphone,
     Activity,
     Monitor,
@@ -31,17 +30,25 @@
     Repeat,
     ArrowLeftRight,
     Settings2,
-    Shield
+    Shield,
+    FolderOpen
   } from '@lucide/svelte';
+
+  const folderPath = $derived($page.params.path || '');
 
   let data = $state<any>(null);
   let loading = $state(true);
   let scope = $state<'all' | 'shares'>('all');
+  let includeDesc = $state(true);
+  let shareToken = $state('');
   let settings = $state({ analyticsFilterBots: false, analyticsFilterSpam: false });
 
   async function loadAnalytics() {
+    loading = true;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/analytics${scope === 'shares' ? '?scope=shares' : ''}`, { credentials: 'include' });
+      const params = new URLSearchParams({ path: folderPath, includeDescendants: includeDesc ? '1' : '0', scope });
+      if (scope === 'shares' && shareToken) params.set('shareToken', shareToken);
+      const res = await fetch(`${API_BASE}/api/admin/analytics/folder?${params}`, { credentials: 'include' });
       if (res.ok) {
         data = await res.json();
         if (data.filters) {
@@ -57,6 +64,18 @@
   function setScope(next: 'all' | 'shares') {
     if (scope === next) return;
     scope = next;
+    if (next === 'all') shareToken = '';
+    loadAnalytics();
+  }
+
+  function setIncludeDesc(v: boolean) {
+    if (includeDesc === v) return;
+    includeDesc = v;
+    loadAnalytics();
+  }
+
+  function onShareChange(e: Event) {
+    shareToken = (e.currentTarget as HTMLSelectElement).value;
     loadAnalytics();
   }
 
@@ -128,8 +147,6 @@
   const uniqueDetails = $derived((data?.topIPs || []).map((i: any) => ({ label: i.ip, value: i.visits.toLocaleString() })));
   const bandwidthDetails = $derived((data?.bandwidthByDay || []).map((d: any) => ({ label: d.day, value: formatBytes(d.bytes) })));
   const downloadsDetails = $derived((data?.downloadsByDay || []).map((d: any) => ({ label: d.day, value: d.count.toLocaleString() })));
-  const cacheDetails = $derived((data?.cacheBreakdown || []).map((c: any) => ({ label: c.name, value: formatBytes(c.bytes) })));
-  const dbDetails = $derived((data?.dbTableSizes || []).map((d: any) => ({ label: d.name, value: formatBytes(d.bytes) })));
 
   // --- Line/area chart data (visits & bandwidth) ---
   const timelineRows = $derived((data?.timeline || []).map((d: any) => ({ day: d.day, v: d.count })));
@@ -147,12 +164,15 @@
 <div class="admin-container">
   <div class="header">
     <div style="display: flex; align-items: center; gap: 16px;">
-      <a href="/admin" title="Back to Admin Dashboard" style="display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s, transform 0.2s;" onmouseover={(e) => { e.currentTarget.style.color = 'white'; e.currentTarget.style.transform = 'scale(1.1)'; }} onmouseout={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; e.currentTarget.style.transform = 'scale(1)'; }}>
+      <a href="/admin/analytics" title="Back to Global Analytics" style="display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s, transform 0.2s;">
         <ChevronLeft size={28} strokeWidth={2.5} />
       </a>
       <div>
-        <h2>Global Analytics</h2>
-        <p>System-wide media statistics, visitor insights, and shared-link traffic.</p>
+        <h2>Folder Analytics</h2>
+        <p class="folder-line">
+          <a href={folderHref(folderPath)} target="_blank" rel="noreferrer" class="link-cell"><FolderOpen size={15} /> {folderPath || '/'}</a>
+          {#if includeDesc}<span class="hint">including subfolders</span>{/if}
+        </p>
       </div>
     </div>
   </div>
@@ -167,7 +187,21 @@
         <button class:active={scope === 'all'} onclick={() => setScope('all')} title="All traffic including logged-in users">Global</button>
         <button class:active={scope === 'shares'} onclick={() => setScope('shares')} title="Only shared-link traffic">Share Links</button>
       </div>
-      <span class="scope-hint">{scope === 'shares' ? 'Showing shared-link traffic only' : 'Showing global traffic'}</span>
+      {#if scope === 'shares' && data.availableShares.length > 0}
+        <select class="share-picker" value={shareToken} onchange={onShareChange} aria-label="Choose a specific shared link">
+          <option value="">All shared links</option>
+          {#each data.availableShares as s}
+            <option value={s.share_token}>{s.label}</option>
+          {/each}
+        </select>
+      {/if}
+      <div class="switch-row">
+        <span>Include subfolders</span>
+        <span class="toggle" class:toggle-on={includeDesc} role="switch" aria-checked={includeDesc} aria-label="Include subfolders" tabindex="0" onclick={() => setIncludeDesc(!includeDesc)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setIncludeDesc(!includeDesc); } }}>
+          <span class="knob"></span>
+        </span>
+      </div>
+      <span class="scope-hint">{scope === 'shares' ? (shareToken ? 'Showing one shared link' : 'Showing shared-link traffic only') : 'Showing all traffic'}</span>
       <div class="filter-spacer"></div>
       <div class="switch-row">
         <span>Exclude bots & crawlers from visitor charts</span>
@@ -176,8 +210,8 @@
         </span>
       </div>
       <div class="switch-row">
-        <span>Hide known referrer-spam traffic</span>
-        <span class="toggle" class:toggle-on={settings.analyticsFilterSpam} role="switch" aria-checked={settings.analyticsFilterSpam} aria-label="Hide referrer spam traffic" tabindex="0" onclick={() => toggleFilter('analyticsFilterSpam', !settings.analyticsFilterSpam)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFilter('analyticsFilterSpam', !settings.analyticsFilterSpam); } }}>
+        <span>Hide referrer spam</span>
+        <span class="toggle" class:toggle-on={settings.analyticsFilterSpam} role="switch" aria-checked={settings.analyticsFilterSpam} aria-label="Hide referrer spam" tabindex="0" onclick={() => toggleFilter('analyticsFilterSpam', !settings.analyticsFilterSpam)} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFilter('analyticsFilterSpam', !settings.analyticsFilterSpam); } }}>
           <span class="knob"></span>
         </span>
       </div>
@@ -190,20 +224,18 @@
       <KpiCard icon={Eye} color="bg-emerald" title="Total Media Views" value={data.stats.visits.toLocaleString()} subtitle={scope === 'shares' ? 'Shared-link access only' : 'Across all users & public shares'} details={viewsDetails} />
     </div>
 
-    <!-- Visitor & Storage KPI Stats -->
+    <!-- Visitor & Download KPI Stats -->
     <div class="stats-grid">
       <KpiCard icon={Users} color="bg-cyan" title="Total Visitors" value={data.stats.visitors.total.toLocaleString()} subtitle="Page loads & media access events" details={visitorDetails} />
       <KpiCard icon={Globe} color="bg-orange" title="Unique Visitors" value={data.stats.visitors.unique.toLocaleString()} subtitle="Distinct IP addresses" details={uniqueDetails} />
       <KpiCard icon={Download} color="bg-red" title="Bandwidth Served" value={formatBytes(data.stats.bandwidth)} subtitle="Total bytes served to clients" details={bandwidthDetails} />
-      <KpiCard icon={Download} color="bg-orange" title="Total Downloads" value={data.stats.downloads.toLocaleString()} subtitle="File & folder (zip) downloads" details={downloadsDetails} />
-      <KpiCard icon={HardDrive} color="bg-amber" title="Cache Size" value={formatBytes(data.stats.cache.size)} subtitle="Thumbnails, previews & transcodes" details={cacheDetails} />
-      <KpiCard icon={Database} color="bg-slate" title="Database Size" value={formatBytes(data.stats.db.size)} subtitle="PostgreSQL on-disk usage" details={dbDetails} />
+      <KpiCard icon={Download} color="bg-amber" title="Total Downloads" value={data.stats.downloads.toLocaleString()} subtitle="File & folder (zip) downloads" details={downloadsDetails} />
     </div>
 
     <!-- Access Timeline -->
     <div class="card" style="margin-bottom: 1.5rem;">
       <h3><Activity size={18} /> Access Timeline <span class="hint">Last 30 days</span></h3>
-      <LineChart data={timelineRows} stroke="#a855f7" fillId="areaFill" unit="visits total" />
+      <LineChart data={timelineRows} stroke="#a855f7" fillId="fAreaFill" unit="visits total" />
     </div>
 
     <!-- Distribution charts -->
@@ -305,7 +337,7 @@
     <!-- Bandwidth by day -->
     <div class="card" style="margin-bottom: 1.5rem;">
       <h3><Download size={18} /> Bandwidth by Day <span class="hint">Last 30 days</span></h3>
-      <LineChart data={bandwidthRows} stroke="#34d399" fillId="bwFill" unit="served" formatTotal={formatBytes} />
+      <LineChart data={bandwidthRows} stroke="#34d399" fillId="fBwFill" unit="served" formatTotal={formatBytes} />
     </div>
 
     <div class="tables-grid">
@@ -562,21 +594,21 @@
     <div class="card" style="margin-top: 1.5rem;">
       <h3><Shield size={18} /> Expiring & Expired Shares <span class="hint">next 7 days</span></h3>
       {#if data.expiringShares.length === 0}
-        <p class="muted">No active shares expiring within the next 7 days.</p>
+        <p class="muted">No active shares for this folder expiring within the next 7 days.</p>
       {:else}
         <ExpandableList items={data.expiringShares} limit={10}>
           {#snippet children(rows)}
             <table>
               <thead><tr><th>Folder Path</th><th>Created By</th><th>Expires</th><th>Status</th></tr></thead>
               <tbody>
-                  {#each rows as share}
-                    <tr>
-                      <td class="truncate" title={share.folder_path}>{#if share.folder_path}<a href={folderHref(share.folder_path)} target="_blank" rel="noreferrer" class="link-cell">{share.folder_path}</a>{:else if share.media_id}(single media){:else}<span class="muted">/</span>{/if}</td>
-                      <td class="muted">{share.creator_email || 'Unknown'}</td>
-                      <td>{formatDate(share.expires_at)}</td>
-                      <td>{#if isExpired(share.expires_at)}<span class="badge badge-red">Expired</span>{:else}<span class="badge badge-amber">Expiring soon</span>{/if}</td>
-                    </tr>
-                  {/each}
+                {#each rows as share}
+                  <tr>
+                    <td class="truncate" title={share.folder_path}>{#if share.folder_path}<a href={folderHref(share.folder_path)} target="_blank" rel="noreferrer" class="link-cell">{share.folder_path}</a>{:else}<span class="muted">/</span>{/if}</td>
+                    <td class="muted">{share.creator_email || 'Unknown'}</td>
+                    <td>{formatDate(share.expires_at)}</td>
+                    <td>{#if isExpired(share.expires_at)}<span class="badge badge-red">Expired</span>{:else}<span class="badge badge-amber">Expiring soon</span>{/if}</td>
+                  </tr>
+                {/each}
               </tbody>
             </table>
           {/snippet}
@@ -591,6 +623,8 @@
   .header { margin-bottom: 2rem; }
   h2 { font-size: 2rem; margin: 0 0 0.5rem 0; }
   p { color: #a1a1aa; margin: 0; }
+  .folder-line { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .folder-line .link-cell { display: inline-flex; align-items: center; gap: 0.35rem; }
 
   .stats-grid {
     display: grid;
@@ -640,6 +674,12 @@
   .segmented button:hover { color: #e4e4e7; }
   .segmented button.active { background: rgba(168, 85, 247, 0.55); color: #fff; font-weight: 600; }
 
+  .share-picker {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #e4e4e7;
+    font-family: inherit; font-size: 0.8rem; padding: 0.35rem 0.6rem; border-radius: 8px; max-width: 260px;
+  }
+  .share-picker option { background: #18181b; color: #e4e4e7; }
+
   .switch-row { display: inline-flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; color: #a1a1aa; cursor: pointer; }
   .toggle {
     width: 40px; height: 22px; border-radius: 999px; background: rgba(255,255,255,0.12);
@@ -663,8 +703,6 @@
   .bar-fill.blue { background: linear-gradient(90deg, #2563eb, #60a5fa); }
   .bar-fill.emerald { background: linear-gradient(90deg, #059669, #34d399); }
   .bar-fill.cyan { background: linear-gradient(90deg, #0891b2, #22d3ee); }
-
-  /* Line chart & heatmap styling is owned by LineChart.svelte / PeakHoursHeatmap.svelte */
 
   /* Blocked attempts */
   .blocked-total { margin-bottom: 1rem; }

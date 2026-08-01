@@ -15,7 +15,7 @@
   import Modal from '$lib/components/Modal.svelte';
   import { currentUser } from '$lib/stores/auth';
   import { updatePreferences } from '$lib/api/auth';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3 } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
@@ -532,6 +532,11 @@
     
     <div class="header-right">
       <div class="toolbar">
+        {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}
+          <a href="/admin/analytics/folder/{encodePath(data.folderPath || '')}" class="icon-btn" title="Folder Analytics" style="display: inline-flex; align-items: center; justify-content: center;">
+            <BarChart3 size={18} />
+          </a>
+        {/if}
         <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
           <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; showFolderViewMenu = false; }} title="Sort">
             <ArrowDownUp size={18} />
