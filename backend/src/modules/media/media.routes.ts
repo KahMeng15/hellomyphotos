@@ -57,11 +57,20 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     
     if (!(await verifyMediaAccess(request, reply, id))) return;
 
-    const { watermark } = request.query;
+    const { watermark, shareToken } = request.query;
     const filePath = path.join(CACHE_ROOT, '1080p', `${id}.webp`);
     
     // Log analytics
-    AnalyticsService.logView(id, 'VIEW_1080P', 120000); // Rough byte size estimate for analytics buffer
+    AnalyticsService.logView(id, 'VIEW_1080P', 120000, shareToken); // Rough byte size estimate for analytics buffer
+    AnalyticsService.logVisit({
+      mediaId: id,
+      shareToken,
+      actionType: 'preview',
+      ip: request.ip,
+      userAgent: request.headers['user-agent'] as string | undefined,
+      referrer: request.headers.referer as string | undefined,
+      path: request.url
+    });
 
     if (fs.existsSync(filePath)) {
       reply.header('Content-Type', 'image/webp');
@@ -103,7 +112,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
 
     if (!(await verifyMediaAccess(request, reply, id))) return;
 
-    const { download, watermark } = request.query as any;
+    const { download, watermark, shareToken } = request.query as any;
     const result = await query(`SELECT folder_path, file_name, mime_type, size_bytes FROM media_files WHERE id = $1`, [id]);
     
     if (result.rows.length === 0) return reply.status(404).send({ error: 'File not found' });
@@ -112,6 +121,19 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
     
     if (!fs.existsSync(fullPath)) return reply.status(404).send({ error: 'Source file missing' });
+
+    // Log a visit only for explicit downloads (range-request video streaming would be too noisy)
+    if (download === '1' || download === 'true') {
+      AnalyticsService.logVisit({
+        mediaId: id,
+        shareToken,
+        actionType: 'download',
+        ip: request.ip,
+        userAgent: request.headers['user-agent'] as string | undefined,
+        referrer: request.headers.referer as string | undefined,
+        path: request.url
+      });
+    }
 
       const wSettings = await WatermarkService.getSettings();
       if (download !== 'true' && download !== '1' && (watermark === 'true' || wSettings.enforceGlobal)) {

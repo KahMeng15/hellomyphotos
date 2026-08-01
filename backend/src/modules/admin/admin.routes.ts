@@ -15,8 +15,55 @@ import { videoQueue } from '../../queue/videoQueue';
 import { query } from '../../config/db';
 import { ClusterService } from '../ml/cluster.service';
 import { logger } from '../../utils/logger';
+import { normalizeReferrer, SPAM_DOMAINS, SPAM_SUBSTRINGS } from '../../utils/referrer';
 import path from 'path';
 import fs from 'fs';
+
+const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
+
+// Walk a directory recursively and sum the size of every file it contains.
+async function getDirSize(dir: string): Promise<number> {
+  let total = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    let entries;
+    try {
+      entries = await fs.promises.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.isFile()) {
+        try { total += (await fs.promises.stat(full)).size; } catch {}
+      }
+    }
+  }
+  return total;
+}
+
+// Per top-level subfolder sizes of the cache directory (480p, 1080p, faces, transcodes, ...)
+async function getCacheBreakdown(root: string): Promise<{ name: string; bytes: number }[]> {
+  let entries;
+  try {
+    entries = await fs.promises.readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: { name: string; bytes: number }[] = [];
+  for (const entry of entries) {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      out.push({ name: entry.name, bytes: await getDirSize(full) });
+    } else if (entry.isFile()) {
+      try { out.push({ name: entry.name, bytes: (await fs.promises.stat(full)).size }); } catch {}
+    }
+  }
+  return out.sort((a, b) => b.bytes - a.bytes);
+}
 
 function logAudit(level: string, message: string, userId?: string, ipAddress?: string) {
   logger.info(message, { userId, ipAddress });
@@ -222,7 +269,9 @@ export async function adminRoutes(fastify: FastifyInstance) {
       defaultFolderViewMode: 'small-grid',
       defaultShareViewMode: 'small-fit',
       defaultShareSortMode: 'oldest',
-      defaultShareFolderViewMode: 'small-grid'
+      defaultShareFolderViewMode: 'small-grid',
+      analyticsFilterBots: false,
+      analyticsFilterSpam: false
     };
     
     for (const r of rows) {
@@ -248,13 +297,15 @@ export async function adminRoutes(fastify: FastifyInstance) {
       if (r.key === 'default_share_view_mode') settings.defaultShareViewMode = r.value;
       if (r.key === 'default_share_sort_mode') settings.defaultShareSortMode = r.value;
       if (r.key === 'default_share_folder_view_mode') settings.defaultShareFolderViewMode = r.value;
+      if (r.key === 'analytics_filter_bots') settings.analyticsFilterBots = typeof r.value === 'string' ? r.value === 'true' : r.value;
+      if (r.key === 'analytics_filter_spam') settings.analyticsFilterSpam = typeof r.value === 'string' ? r.value === 'true' : r.value;
     }
     
     return reply.send(settings);
   });
 
   fastify.put('/api/admin/settings', async (request, reply) => {
-    const { maxCpuCores, scanInterval, scanSchedule, mlConfidenceThreshold, throttleAuthGlobal, throttlePublicGlobal, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal, defaultViewMode, defaultSortMode, defaultFolderViewMode, defaultShareViewMode, defaultShareSortMode, defaultShareFolderViewMode } = request.body as any;
+    const { maxCpuCores, scanInterval, scanSchedule, mlConfidenceThreshold, throttleAuthGlobal, throttlePublicGlobal, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal, defaultViewMode, defaultSortMode, defaultFolderViewMode, defaultShareViewMode, defaultShareSortMode, defaultShareFolderViewMode, analyticsFilterBots, analyticsFilterSpam } = request.body as any;
     
     const updates = [];
     // H-3 Note: maxCpuCores is persisted here but worker concurrency is set at startup from env vars.
@@ -281,6 +332,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (defaultShareViewMode !== undefined) updates.push({ k: 'default_share_view_mode', v: defaultShareViewMode });
     if (defaultShareSortMode !== undefined) updates.push({ k: 'default_share_sort_mode', v: defaultShareSortMode });
     if (defaultShareFolderViewMode !== undefined) updates.push({ k: 'default_share_folder_view_mode', v: defaultShareFolderViewMode });
+    if (analyticsFilterBots !== undefined) updates.push({ k: 'analytics_filter_bots', v: analyticsFilterBots });
+    if (analyticsFilterSpam !== undefined) updates.push({ k: 'analytics_filter_spam', v: analyticsFilterSpam });
     
     for (const u of updates) {
       await query(
@@ -586,8 +639,117 @@ export async function adminRoutes(fastify: FastifyInstance) {
     try {
       const photosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'image/%'`);
       const videosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'video/%'`);
-      const visitsStats = await query(`SELECT COUNT(*) as count FROM media_analytics`);
-      
+
+      // Scope: 'all' (global) or 'shares' (shared links only)
+      const { scope } = request.query as any;
+      const shareOnly = scope === 'shares';
+      const mediaScope = shareOnly ? ' AND share_token IS NOT NULL' : '';
+      const mediaWhere = shareOnly ? ' WHERE share_token IS NOT NULL' : '';
+
+      const visitsStats = await query(`SELECT COUNT(*) as count FROM media_analytics${mediaWhere}`);
+
+      // Analytics filtering preferences (bot traffic / referrer spam)
+      const prefRes = await query(`SELECT key, value FROM admin_settings WHERE key IN ('analytics_filter_bots', 'analytics_filter_spam')`);
+      const pref = (key: string, def: boolean) => {
+        const row = prefRes.rows.find((r: any) => r.key === key);
+        if (!row) return def;
+        return typeof row.value === 'string' ? row.value === 'true' : !!row.value;
+      };
+      const filterBots = pref('analytics_filter_bots', false);
+      const filterSpam = pref('analytics_filter_spam', false);
+
+      // Build a reusable WHERE clause for visitor-based queries
+      const visitConds: string[] = [];
+      const visitParams: any[] = [];
+      const P = (v: any) => { visitParams.push(v); return `$${visitParams.length}`; };
+      if (filterBots) visitConds.push(`device_type <> ${P('bot')}`);
+      if (shareOnly) visitConds.push(`share_token IS NOT NULL`);
+      if (filterSpam) {
+        const spamConds: string[] = [];
+        for (const d of SPAM_DOMAINS) spamConds.push(`referrer ILIKE ${P('%' + d + '%')}`);
+        for (const s of SPAM_SUBSTRINGS) spamConds.push(`referrer ILIKE ${P('%' + s + '%')}`);
+        visitConds.push(`(referrer IS NULL OR NOT (${spamConds.join(' OR ')}))`);
+      }
+      const visitWhere = visitConds.length > 0 ? `WHERE ${visitConds.join(' AND ')}` : '';
+
+      const downloadsFileWhere = `${visitWhere}${visitWhere ? ' AND' : ' WHERE'} a.action_type = 'download'`;
+      const downloadsFolderWhere = `${visitWhere}${visitWhere ? ' AND' : ' WHERE'} action_type = 'download_folder'`;
+      const downloadsByDayWhere = `${visitWhere}${visitWhere ? ' AND' : ' WHERE'} action_type = 'download' AND created_at > NOW() - INTERVAL '30 days'`;
+
+      const [
+        visitorStats,
+        osStats,
+        browserStats,
+        deviceStats,
+        timeline,
+        topIPs,
+        peakHours,
+        rawReferrers,
+        dbSizeRes,
+        bandwidthTotal,
+        bandwidthByDay,
+        topBandwidthMedia,
+        topBandwidthShares,
+        popularFolders,
+        shareConversion,
+        expiringShares,
+        blockedStats,
+        blockedRecent,
+        folderBreakdown,
+        viewsByDay,
+        dbTableSizes,
+        downloadsTotal,
+        downloadsByDay,
+        topFileDownloads,
+        topFolderDownloads
+      ] = await Promise.all([
+        query(`SELECT COUNT(*) as total, COUNT(DISTINCT ip_hash) as unique_visitors FROM analytics_visits ${visitWhere}`, visitParams),
+        query(`SELECT COALESCE(NULLIF(os, ''), 'Unknown') as name, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY name ORDER BY count DESC`, visitParams),
+        query(`SELECT COALESCE(NULLIF(browser, ''), 'Unknown') as name, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY name ORDER BY count DESC`, visitParams),
+        query(`SELECT COALESCE(NULLIF(device_type, ''), 'unknown') as name, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY name ORDER BY count DESC`, visitParams),
+        query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} created_at > NOW() - INTERVAL '30 days' GROUP BY day ORDER BY day`, visitParams),
+        query(`SELECT ip, COUNT(*) as visits FROM analytics_visits ${visitWhere} GROUP BY ip ORDER BY visits DESC LIMIT 100`, visitParams),
+        query(`SELECT EXTRACT(HOUR FROM created_at)::int as hour, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY hour ORDER BY hour`, visitParams),
+        query(`SELECT referrer, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY referrer ORDER BY count DESC`, visitParams),
+        query(`SELECT pg_database_size(current_database()) as size`),
+        query(`SELECT COALESCE(SUM(bytes_served), 0) as bytes FROM media_analytics${mediaWhere}`),
+        query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COALESCE(SUM(bytes_served), 0) as bytes FROM media_analytics WHERE created_at > NOW() - INTERVAL '30 days' ${mediaScope} GROUP BY day ORDER BY day`),
+        query(`SELECT m.id, m.file_name, m.folder_path, COALESCE(SUM(a.bytes_served), 0) as bytes, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id WHERE a.media_id IS NOT NULL ${mediaScope} GROUP BY m.id, m.file_name, m.folder_path ORDER BY bytes DESC LIMIT 500`),
+        query(`SELECT COALESCE(s.folder_path, s.media_id::text, a.share_token) as label, a.share_token, COALESCE(SUM(a.bytes_served), 0) as bytes, COUNT(*) as views FROM media_analytics a LEFT JOIN shared_folders s ON a.share_token = s.share_token WHERE a.share_token IS NOT NULL GROUP BY label, a.share_token ORDER BY bytes DESC LIMIT 500`),
+        query(`SELECT m.folder_path, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id WHERE a.media_id IS NOT NULL ${mediaScope} GROUP BY m.folder_path ORDER BY views DESC LIMIT 500`),
+        query(`SELECT COALESCE(s.folder_path, s.media_id::text, v.share_token) as label, v.share_token, COUNT(*) as visits, COUNT(DISTINCT v.ip_hash) as unique_visitors, (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = v.share_token) as media_views FROM analytics_visits v LEFT JOIN shared_folders s ON v.share_token = s.share_token WHERE v.share_token IS NOT NULL GROUP BY label, v.share_token ORDER BY unique_visitors DESC LIMIT 500`),
+        query(`SELECT s.share_token, s.folder_path, s.media_id, s.expires_at, s.is_active, u.email as creator_email FROM shared_folders s LEFT JOIN users u ON s.created_by = u.id WHERE s.is_active = true AND s.expires_at IS NOT NULL AND s.expires_at < NOW() + INTERVAL '7 days' ORDER BY s.expires_at ASC`),
+        query(`SELECT COUNT(*) as count FROM analytics_visits WHERE action_type IN ('blocked_access', 'not_found')`),
+        query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits WHERE action_type IN ('blocked_access', 'not_found') AND created_at > NOW() - INTERVAL '7 days' GROUP BY day ORDER BY day`),
+        query(`SELECT folder_path, COUNT(*) FILTER (WHERE mime_type LIKE 'image/%') as photos, COUNT(*) FILTER (WHERE mime_type LIKE 'video/%') as videos FROM media_files GROUP BY folder_path ORDER BY (COUNT(*) FILTER (WHERE mime_type LIKE 'image/%') + COUNT(*) FILTER (WHERE mime_type LIKE 'video/%')) DESC LIMIT 500`),
+        query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM media_analytics WHERE created_at > NOW() - INTERVAL '30 days' ${mediaScope} GROUP BY day ORDER BY day`),
+        query(`SELECT c.relname as name, pg_total_relation_size(c.oid) as bytes FROM pg_class c WHERE c.relkind IN ('r', 'm') AND c.relnamespace = 'public'::regnamespace ORDER BY bytes DESC LIMIT 20`),
+        query(`SELECT COUNT(*) as count FROM analytics_visits ${visitWhere}${visitWhere ? ' AND' : ' WHERE'} action_type IN ('download', 'download_folder')`, visitParams),
+        query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits ${downloadsByDayWhere} GROUP BY day ORDER BY day`, visitParams),
+        query(`SELECT m.id, m.file_name, m.folder_path, COUNT(*) as downloads FROM analytics_visits a JOIN media_files m ON a.media_id = m.id ${downloadsFileWhere} GROUP BY m.id, m.file_name, m.folder_path ORDER BY downloads DESC LIMIT 500`, visitParams),
+        query(`SELECT folder_path, COUNT(*) as downloads FROM analytics_visits ${downloadsFolderWhere} GROUP BY folder_path ORDER BY downloads DESC LIMIT 500`, visitParams)
+      ]);
+
+      const cacheSize = await getDirSize(CACHE_ROOT);
+      const cacheBreakdown = await getCacheBreakdown(CACHE_ROOT);
+
+      const toInt = (v: any) => parseInt(v, 10);
+
+      // Normalize referrers into source buckets (Direct, domain, ...) and drop spam
+      const selfHost = (() => {
+        try { return new URL(process.env.APP_DOMAIN || '').hostname; } catch { return ''; }
+      })();
+      const refMap = new Map<string, number>();
+      for (const r of rawReferrers.rows) {
+        const { name, spam } = normalizeReferrer(r.referrer, selfHost);
+        if (filterSpam && spam) continue;
+        refMap.set(name, (refMap.get(name) || 0) + toInt(r.count));
+      }
+      const topReferrers = [...refMap.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 500);
+
       const topShares = await query(`
         SELECT 
           COALESCE(s.folder_path, s.media_id::text) as folder_path,
@@ -597,37 +759,94 @@ export async function adminRoutes(fastify: FastifyInstance) {
         WHERE a.share_token IS NOT NULL
         GROUP BY COALESCE(s.folder_path, s.media_id::text)
         ORDER BY views DESC
-        LIMIT 10
+        LIMIT 500
       `);
 
       const topMedia = await query(`
         SELECT 
+          m.id,
           m.file_name,
           m.folder_path,
           COUNT(*) as views
         FROM media_analytics a
         JOIN media_files m ON a.media_id = m.id
-        WHERE a.media_id IS NOT NULL
+        WHERE a.media_id IS NOT NULL AND a.share_token IS NOT NULL
         GROUP BY m.id, m.file_name, m.folder_path
         ORDER BY views DESC
-        LIMIT 10
+        LIMIT 500
       `);
 
+      const normBreakdown = (rows: any[]) => rows.map(r => ({ name: r.name, count: toInt(r.count) }));
+      const normIPs = (rows: any[]) => rows.map(r => ({ ip: r.ip, visits: toInt(r.visits) }));
+
       return reply.send({
+        filters: {
+          filterBots,
+          filterSpam
+        },
         stats: {
           photos: {
-            count: parseInt(photosStats.rows[0].count),
-            size: parseInt(photosStats.rows[0].size)
+            count: toInt(photosStats.rows[0].count),
+            size: toInt(photosStats.rows[0].size)
           },
           videos: {
-            count: parseInt(videosStats.rows[0].count),
-            size: parseInt(videosStats.rows[0].size)
+            count: toInt(videosStats.rows[0].count),
+            size: toInt(videosStats.rows[0].size)
           },
-          visits: parseInt(visitsStats.rows[0].count)
+          visits: toInt(visitsStats.rows[0].count),
+          visitors: {
+            total: toInt(visitorStats.rows[0].total),
+            unique: toInt(visitorStats.rows[0].unique_visitors)
+          },
+          bandwidth: toInt(bandwidthTotal.rows[0].bytes),
+          downloads: toInt(downloadsTotal.rows[0].count),
+          cache: { size: cacheSize },
+          db: { size: toInt(dbSizeRes.rows[0].size) }
         },
-        topShares: topShares.rows,
-        topMedia: topMedia.rows
+        topShares: topShares.rows.map(r => ({ folder_path: r.folder_path, views: toInt(r.views) })),
+        topMedia: topMedia.rows.map(r => ({ id: r.id, file_name: r.file_name, folder_path: r.folder_path, views: toInt(r.views) })),
+        osBreakdown: normBreakdown(osStats.rows),
+        browserBreakdown: normBreakdown(browserStats.rows),
+        deviceBreakdown: normBreakdown(deviceStats.rows),
+        timeline: timeline.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+        topIPs: normIPs(topIPs.rows),
+        topReferrers,
+        peakHours: peakHours.rows.map(r => ({ hour: toInt(r.hour), count: toInt(r.count) })),
+        bandwidthByDay: bandwidthByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
+        topBandwidthMedia: topBandwidthMedia.rows.map(r => ({ id: r.id, file_name: r.file_name, folder_path: r.folder_path, bytes: toInt(r.bytes), views: toInt(r.views) })),
+        topBandwidthShares: topBandwidthShares.rows.map(r => ({ label: r.label, share_token: r.share_token, bytes: toInt(r.bytes), views: toInt(r.views) })),
+        popularFolders: popularFolders.rows.map(r => ({ folder_path: r.folder_path, views: toInt(r.views) })),
+        shareConversion: shareConversion.rows.map(r => ({ label: r.label, share_token: r.share_token, visits: toInt(r.visits), unique_visitors: toInt(r.unique_visitors), media_views: toInt(r.media_views) })),
+        expiringShares: expiringShares.rows,
+        blockedAttempts: {
+          total: toInt(blockedStats.rows[0].count),
+          recent: blockedRecent.rows.map(r => ({ day: r.day, count: toInt(r.count) }))
+        },
+        folderBreakdown: folderBreakdown.rows.map(r => ({ folder_path: r.folder_path, photos: toInt(r.photos), videos: toInt(r.videos) })),
+        viewsByDay: viewsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+        cacheBreakdown: cacheBreakdown.map(r => ({ name: r.name, bytes: r.bytes })),
+        dbTableSizes: dbTableSizes.rows.map(r => ({ name: r.name, bytes: toInt(r.bytes) })),
+        downloadsByDay: downloadsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+        topFileDownloads: topFileDownloads.rows.map(r => ({ id: r.id, file_name: r.file_name, folder_path: r.folder_path, downloads: toInt(r.downloads) })),
+        topFolderDownloads: topFolderDownloads.rows.map(r => ({ folder_path: r.folder_path, downloads: toInt(r.downloads) }))
       });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // Lightweight endpoint for dashboard alerts (avoids loading full analytics)
+  fastify.get('/api/admin/expiring-shares', async (request, reply) => {
+    try {
+      const { rows } = await query(`
+        SELECT s.share_token, s.folder_path, s.media_id, s.expires_at, u.email as creator_email
+        FROM shared_folders s
+        LEFT JOIN users u ON s.created_by = u.id
+        WHERE s.is_active = true AND s.expires_at IS NOT NULL AND s.expires_at < NOW() + INTERVAL '7 days'
+        ORDER BY s.expires_at ASC
+      `);
+      return reply.send({ shares: rows });
     } catch (e: any) {
       request.log.error(e);
       return reply.status(500).send({ error: e.message });

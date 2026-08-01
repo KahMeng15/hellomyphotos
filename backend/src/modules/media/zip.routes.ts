@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { verifyFolderAccess } from '../../utils/auth';
 import { WatermarkService } from './watermark.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
@@ -13,9 +14,19 @@ import { getThrottleLimits, BandwidthThrottler } from '../../utils/throttle';
 export async function zipRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { '*': string }, Querystring: { shareToken?: string, watermark?: string } }>('/api/zip/*', async (request, reply) => {
     const folderPath = decodeURIComponent(request.params['*'] || '');
-    const { watermark } = request.query;
+    const { watermark, shareToken } = request.query;
     
     if (!(await verifyFolderAccess(request, reply, folderPath))) return;
+
+    AnalyticsService.logVisit({
+      actionType: 'download_folder',
+      folderPath,
+      shareToken,
+      ip: request.ip,
+      userAgent: request.headers['user-agent'] as string | undefined,
+      referrer: request.headers.referer as string | undefined,
+      path: request.url
+    });
     
     const result = await query(
       `SELECT folder_path, file_name, mime_type FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 

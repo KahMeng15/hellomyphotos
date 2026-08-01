@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import jwt from 'jsonwebtoken';
+import { AnalyticsService } from '../modules/analytics/analytics.service';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_please_change';
 
@@ -108,10 +109,23 @@ export function canBrowseFolder(user: AuthUser, folderPath: string): boolean {
 export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyReply, mediaId: string) {
   // 1. Check share token first
   const { shareToken } = request.query as { shareToken?: string };
-  
+
+  const logBlocked = (actionType: string) => {
+    AnalyticsService.logVisit({
+      mediaId,
+      shareToken,
+      actionType,
+      ip: request.ip,
+      userAgent: request.headers['user-agent'] as string | undefined,
+      referrer: request.headers.referer as string | undefined,
+      path: request.url
+    });
+  };
+
   let mediaFolder = null;
   const mediaResult = await pool.query('SELECT folder_path FROM media_files WHERE id = $1', [mediaId]);
   if (mediaResult.rows.length === 0) {
+    logBlocked('not_found');
     reply.status(404).send({ error: 'Media not found' });
     return false; // Not allowed
   }
@@ -129,11 +143,15 @@ export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyR
 
   // 2. If no valid share token, fallback to standard user auth
   await requireAuth(request, reply);
-  if (reply.sent) return false;
+  if (reply.sent) {
+    logBlocked('blocked_access');
+    return false;
+  }
 
   if (hasFolderAccess(request.user!, mediaFolder)) {
     return true; // Access granted via user auth
   } else {
+    logBlocked('blocked_access');
     reply.status(403).send({ error: 'Forbidden: You do not have access to this media' });
     return false;
   }
@@ -142,7 +160,18 @@ export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyR
 export async function verifyFolderAccess(request: FastifyRequest, reply: FastifyReply, folderPath: string) {
   // 1. Check share token first
   const { shareToken } = request.query as { shareToken?: string };
-  
+
+  const logBlocked = (actionType: string) => {
+    AnalyticsService.logVisit({
+      shareToken,
+      actionType,
+      ip: request.ip,
+      userAgent: request.headers['user-agent'] as string | undefined,
+      referrer: request.headers.referer as string | undefined,
+      path: request.url
+    });
+  };
+
   if (shareToken) {
     const shareResult = await pool.query('SELECT folder_path, allow_download_folder FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())', [shareToken]);
     if (shareResult.rows.length > 0) {
@@ -151,6 +180,7 @@ export async function verifyFolderAccess(request: FastifyRequest, reply: Fastify
       // If we are checking for zip download, enforce allow_download_folder
       if (request.url.includes('/api/zip/')) {
         if (!shareResult.rows[0].allow_download_folder) {
+          logBlocked('blocked_access');
           reply.status(403).send({ error: 'Forbidden: ZIP download not allowed for this share link' });
           return false;
         }
@@ -164,11 +194,15 @@ export async function verifyFolderAccess(request: FastifyRequest, reply: Fastify
 
   // 2. If no valid share token, fallback to standard user auth
   await requireAuth(request, reply);
-  if (reply.sent) return false;
+  if (reply.sent) {
+    logBlocked('blocked_access');
+    return false;
+  }
 
   if (hasFolderAccess(request.user!, folderPath)) {
     return true; // Access granted via user auth
   } else {
+    logBlocked('blocked_access');
     reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
     return false;
   }

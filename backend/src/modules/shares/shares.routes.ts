@@ -298,6 +298,15 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
 
     AnalyticsService.logView(share.media_id || '', 'view_shared_link', 0, token);
+    AnalyticsService.logVisit({
+      mediaId: share.media_id || null,
+      shareToken: token,
+      actionType: 'view_shared_link',
+      ip: request.ip,
+      userAgent: request.headers['user-agent'] as string | undefined,
+      referrer: request.headers.referer as string | undefined,
+      path: request.url
+    });
 
     const shareDefaultsRes = await query("SELECT key, value FROM admin_settings WHERE key = ANY($1)", [
       ['default_share_view_mode', 'default_share_sort_mode', 'default_share_folder_view_mode']

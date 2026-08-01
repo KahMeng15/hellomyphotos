@@ -1,7 +1,32 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronRight } from '@lucide/svelte';
+  import { ChevronRight, ShieldAlert, Shield } from '@lucide/svelte';
+
+  let expiringShares = $state<any[]>([]);
+
+  async function loadExpiringShares() {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/expiring-shares`, { credentials: 'include' });
+      if (res.ok) {
+        const d = await res.json();
+        expiringShares = d.shares || [];
+      }
+    } catch {}
+  }
+
+  function isExpired(iso: string) {
+    return new Date(iso).getTime() < Date.now();
+  }
+
+  function formatDate(iso: string) {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  onMount(() => {
+    loadExpiringShares();
+  });
 </script>
 
 <div class="admin-container">
@@ -9,7 +34,39 @@
     <h2>Admin Dashboard</h2>
     <p>Manage system configurations, user access, and background pipelines.</p>
   </div>
-  
+
+  {#if expiringShares.length > 0}
+    <div class="card link-card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(245, 158, 11, 0.08)); border-color: rgba(239, 68, 68, 0.3);">
+      <a href="/admin/shares" style="text-decoration: none; color: inherit;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h3 style="margin: 0 0 0.5rem 0; color: #f4f4f5; display: flex; align-items: center; gap: 0.5rem;">
+              <ShieldAlert size={18} color="#f87171" />
+              Share Expiration Alerts
+            </h3>
+            <p style="margin: 0; color: #a1a1aa; font-size: 0.9rem;">
+              {#each expiringShares.slice(0, 4) as share}
+                <span style="display: inline-block; margin-right: 1.25rem;">
+                  <Shield size={12} style="vertical-align: middle; margin-right: 4px;" color={isExpired(share.expires_at) ? '#f87171' : '#fbbf24'} />
+                  <span>{share.folder_path || '(single media)'}</span>
+                  {#if isExpired(share.expires_at)}
+                    <span class="badge" style="color:#f87171;">expired {formatDate(share.expires_at)}</span>
+                  {:else}
+                    <span class="badge" style="color:#fbbf24;">expires {formatDate(share.expires_at)}</span>
+                  {/if}
+                </span>
+              {/each}
+              {#if expiringShares.length > 4}
+                <span class="muted" style="color:#71717a;">+{expiringShares.length - 4} more</span>
+              {/if}
+            </p>
+          </div>
+          <ChevronRight color="#a1a1aa" size={24} />
+        </div>
+      </a>
+    </div>
+  {/if}
+
   <a href="/admin/users" class="card link-card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1)); border-color: rgba(168, 85, 247, 0.3);">
     <div style="display: flex; justify-content: space-between; align-items: center;">
       <div>

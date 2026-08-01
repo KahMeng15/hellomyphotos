@@ -65,6 +65,28 @@ CREATE TABLE media_analytics (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Per-visit Analytics (device/OS/browser/IP breakdowns)
+CREATE TABLE IF NOT EXISTS analytics_visits (
+    id BIGSERIAL PRIMARY KEY,
+    media_id UUID REFERENCES media_files(id) ON DELETE CASCADE,
+    share_token VARCHAR(32),
+    action_type VARCHAR(30) NOT NULL,
+    ip VARCHAR(45),
+    ip_hash VARCHAR(64) NOT NULL,
+    user_agent TEXT,
+    os VARCHAR(60),
+    browser VARCHAR(60),
+    device_type VARCHAR(20),
+    referrer TEXT,
+    path TEXT,
+    folder_path TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_analytics_visits_created ON analytics_visits(created_at);
+CREATE INDEX IF NOT EXISTS idx_analytics_visits_share ON analytics_visits(share_token);
+CREATE INDEX IF NOT EXISTS idx_analytics_visits_ip_hash ON analytics_visits(ip_hash);
+CREATE INDEX IF NOT EXISTS idx_analytics_visits_action ON analytics_visits(action_type);
+
 -- Folder Settings (Custom Covers)
 CREATE TABLE folder_settings (
     folder_path TEXT PRIMARY KEY,

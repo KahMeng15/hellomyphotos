@@ -70,6 +70,28 @@ export const ensureSchema = async (): Promise<void> => {
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
           );
           ALTER TABLE folder_settings ADD COLUMN IF NOT EXISTS auto_cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL;
+
+          CREATE TABLE IF NOT EXISTS analytics_visits (
+            id BIGSERIAL PRIMARY KEY,
+            media_id UUID REFERENCES media_files(id) ON DELETE CASCADE,
+            share_token VARCHAR(32),
+            action_type VARCHAR(30) NOT NULL,
+            ip VARCHAR(45),
+            ip_hash VARCHAR(64) NOT NULL,
+            user_agent TEXT,
+            os VARCHAR(60),
+            browser VARCHAR(60),
+            device_type VARCHAR(20),
+            referrer TEXT,
+            path TEXT,
+            folder_path TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+          ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS folder_path TEXT;
+          CREATE INDEX IF NOT EXISTS idx_analytics_visits_created ON analytics_visits(created_at);
+          CREATE INDEX IF NOT EXISTS idx_analytics_visits_share ON analytics_visits(share_token);
+          CREATE INDEX IF NOT EXISTS idx_analytics_visits_ip_hash ON analytics_visits(ip_hash);
+          CREATE INDEX IF NOT EXISTS idx_analytics_visits_action ON analytics_visits(action_type);
         `);
       } catch (err: any) {
         console.warn('[DB] ensureSchema notice:', err.message);
