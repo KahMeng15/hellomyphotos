@@ -19,13 +19,40 @@ if (APP_DOMAIN) {
 
 export async function authRoutes(fastify: FastifyInstance) {
   fastify.post('/login', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { email, password } = request.body as any;
+    const { email, password, 'cf-turnstile-response': turnstileToken } = request.body as any;
 
     if (!email || !password) {
       return reply.status(400).send({ error: 'Email and password required' });
     }
 
     const ip = request.ip || (request.headers['x-forwarded-for'] as string) || request.socket.remoteAddress || 'unknown';
+
+    if (process.env.TURNSTILE_SECRET) {
+      if (!turnstileToken) {
+        return reply.status(400).send({ error: 'Security verification missing. Please try again.' });
+      }
+      try {
+        const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            secret: process.env.TURNSTILE_SECRET,
+            response: turnstileToken,
+            remoteip: ip,
+          }),
+        });
+        if (!r.ok) throw new Error(`siteverify ${r.status}`);
+        const result = await r.json();
+        if (!result.success) {
+          logger.warn(`Turnstile verification failed for ${email}`);
+          return reply.status(403).send({ error: 'Security verification failed' });
+        }
+      } catch (err) {
+        logger.error('Turnstile verification error', err);
+        return reply.status(403).send({ error: 'Security verification error' });
+      }
+    }
+
     const redisKey = `login_attempts:${ip}`;
 
     // Read settings from DB

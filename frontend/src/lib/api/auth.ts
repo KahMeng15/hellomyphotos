@@ -1,10 +1,10 @@
 import { API_BASE } from './media';
 
-export async function login(email: string, password: string) {
+export async function login(email: string, password: string, turnstileToken: string) {
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, 'cf-turnstile-response': turnstileToken }),
     credentials: 'include' // Important for saving the HttpOnly cookie
   });
 

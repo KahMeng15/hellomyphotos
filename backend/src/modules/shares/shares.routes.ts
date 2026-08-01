@@ -41,6 +41,57 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     return reply.send({ shareToken });
   });
 
+  fastify.post('/api/shares/:token/verify', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { token } = request.params as any;
+    const { 'cf-turnstile-response': turnstileToken } = request.body as any;
+
+    if (!process.env.TURNSTILE_SECRET) {
+      return reply.send({ success: true });
+    }
+    
+    if (!turnstileToken) {
+      return reply.status(400).send({ error: 'Security verification missing' });
+    }
+
+    const ip = request.ip || (request.headers['x-forwarded-for'] as string) || request.socket.remoteAddress || '';
+    
+    try {
+      const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          secret: process.env.TURNSTILE_SECRET,
+          response: turnstileToken,
+          remoteip: ip,
+        }),
+      });
+      if (!r.ok) throw new Error(`siteverify ${r.status}`);
+      const result = await r.json();
+      if (!result.success) {
+        return reply.status(403).send({ error: 'Security verification failed' });
+      }
+      
+      const APP_DOMAIN = process.env.APP_DOMAIN || '';
+      let cookieDomain = undefined;
+      if (APP_DOMAIN) {
+        try { cookieDomain = new URL(APP_DOMAIN).hostname; } catch(e){}
+      }
+      
+      reply.setCookie(`ts_${token}`, '1', {
+        path: '/',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        domain: cookieDomain,
+        maxAge: 3600 // 1 hour
+      });
+
+      return reply.send({ success: true });
+    } catch (err) {
+      return reply.status(403).send({ error: 'Security verification error' });
+    }
+  });
+
   async function handleShareGet(request: any, reply: any) {
     const { token } = request.params;
     const subPath = request.params['*'] ? decodeURIComponent(request.params['*']) : '';
@@ -54,6 +105,13 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     
     if (result.rows.length === 0) {
       return reply.status(404).send({ error: 'Share not found or expired' });
+    }
+
+    if (process.env.TURNSTILE_SECRET) {
+      const tsCookie = request.cookies[`ts_${token}`];
+      if (!tsCookie) {
+        return reply.status(403).send({ error: 'turnstile_required' });
+      }
     }
     
     const share = result.rows[0];

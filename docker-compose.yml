@@ -6,6 +6,7 @@ services:
       - "8000:3000"
     environment:
       - PUBLIC_APP_DOMAIN=${PUBLIC_APP_DOMAIN:-http://localhost:8000}
+      - PUBLIC_TURNSTILE_SITEKEY=${PUBLIC_TURNSTILE_SITEKEY:-1x00000000000000000000AA}
       - NODE_ENV=production
     depends_on:
       - backend
@@ -15,6 +16,7 @@ services:
       context: ./backend
     environment:
       - APP_DOMAIN=${APP_DOMAIN:-http://localhost:8000}
+      - TURNSTILE_SECRET=${TURNSTILE_SECRET:-1x0000000000000000000000000000000AA}
       - DISABLE_WORKER=true
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -39,6 +41,7 @@ services:
       context: ./backend
     environment:
       - DISABLE_API=true
+      - TURNSTILE_SECRET=${TURNSTILE_SECRET:-1x0000000000000000000000000000000AA}
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=hellomyphotos

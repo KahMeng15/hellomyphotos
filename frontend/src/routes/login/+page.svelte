@@ -3,6 +3,7 @@
   import { login } from '$lib/api/auth';
   import { currentUser } from '$lib/stores/auth';
   import { ShieldAlert } from '@lucide/svelte';
+  import { PUBLIC_TURNSTILE_SITEKEY } from '$env/static/public';
 
   let email = $state('');
   let password = $state('');
@@ -12,15 +13,30 @@
   async function handleSubmit(e: Event) {
     e.preventDefault();
     error = '';
+    
+    const form = e.target as HTMLFormElement;
+    const fd = new FormData(form);
+    const token = fd.get('cf-turnstile-response')?.toString() || '';
+    
+    if (!token) {
+      error = 'Please complete the security check.';
+      return;
+    }
+    
     loading = true;
 
     try {
-      const res = await login(email, password);
+      const res = await login(email, password, token);
       currentUser.set(res.user);
       try { localStorage.setItem('sidebarOpen', 'true'); } catch {}
       goto('/');
     } catch (err: any) {
       error = err.message || 'Invalid credentials';
+      // @ts-ignore
+      if (window.turnstile) {
+        // @ts-ignore
+        setTimeout(() => window.turnstile.reset(), 0);
+      }
     } finally {
       loading = false;
     }
@@ -29,6 +45,7 @@
 
 <svelte:head>
   <title>Login - hellomyphotos</title>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </svelte:head>
 
 <div class="login-container">
@@ -48,7 +65,7 @@
         </div>
       {/if}
 
-      <form onsubmit={handleSubmit}>
+      <form onsubmit={handleSubmit} id="cf-form">
         <div class="input-group">
           <label for="email">Email Address</label>
           <input 
@@ -73,7 +90,6 @@
             onkeydown={(e) => e.key === 'Enter' && handleSubmit(e)}
           />
         </div>
-
         <button type="submit" class="submit-btn" disabled={loading}>
           {#if loading}
             <div class="spinner"></div>
@@ -81,6 +97,8 @@
             Login
           {/if}
         </button>
+
+        <div class="cf-turnstile" data-sitekey={PUBLIC_TURNSTILE_SITEKEY} data-action="turnstile-spin-v2" data-theme="dark" style="margin-top: 1.5rem; display: flex; justify-content: center;"></div>
 
         <a href="/" class="back-btn">
           Back to Homepage

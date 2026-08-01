@@ -12,8 +12,13 @@
   import type { PageData } from './$types';
   import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
+  import { PUBLIC_TURNSTILE_SITEKEY } from '$env/static/public';
+  import { API_BASE } from '$lib/api/media';
   
   let { data }: { data: PageData } = $props();
+  
+  let verifyingTurnstile = $state(false);
+  let turnstileError = $state('');
   
   type SortMode = 'newest' | 'oldest' | 'a-z' | 'z-a';
   type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square';
@@ -140,6 +145,29 @@
   }
 
   onMount(() => {
+    (window as any).onTurnstileSuccess = async (token: string) => {
+      verifyingTurnstile = true;
+      turnstileError = '';
+      try {
+        const res = await fetch(`${API_BASE}/api/shares/${data.token}/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 'cf-turnstile-response': token })
+        });
+        if (res.ok) {
+          invalidateAll();
+        } else {
+          turnstileError = 'Security verification failed. Please try again.';
+          if ((window as any).turnstile) (window as any).turnstile.reset();
+        }
+      } catch (e) {
+        turnstileError = 'Network error during verification.';
+        if ((window as any).turnstile) (window as any).turnstile.reset();
+      } finally {
+        verifyingTurnstile = false;
+      }
+    };
+
     sortMode = loadPref<SortMode>('shareSortMode', data.defaultShareSortMode || 'newest');
     viewMode = loadPref<ViewMode>('shareViewMode', data.defaultShareViewMode || 'small-fit');
     folderViewMode = loadPref<FolderViewMode>('shareFolderViewMode', data.defaultShareFolderViewMode || 'small-grid');
@@ -217,7 +245,21 @@
 
 </script>
 
-{#if data.error}
+<svelte:head>
+  <title>{data.turnstileRequired ? 'Verifying...' : data.error ? 'Error' : (personName || (data.folderPath ? data.folderPath.split('/').pop() : 'Shared Gallery'))} - hellomyphotos</title>
+  {#if data.turnstileRequired}
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  {/if}
+</svelte:head>
+
+{#if data.turnstileRequired}
+  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: #fff;">
+    <div class="cf-turnstile" data-sitekey={PUBLIC_TURNSTILE_SITEKEY} data-callback="onTurnstileSuccess" data-action="share-gate" data-theme="dark" data-size="invisible"></div>
+    {#if turnstileError}
+      <p style="color: #ff5555; margin-top: 1rem;">{turnstileError}</p>
+    {/if}
+  </div>
+{:else if data.error}
   <div style="text-align: center; padding-top: 10vh; color: var(--text-color);">
     <h2>{data.error}</h2>
   </div>

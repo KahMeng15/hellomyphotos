@@ -28,8 +28,13 @@ export const load: PageLoad = async ({ params, fetch }) => {
 
   try {
     const res = await fetch(`${API_BASE}/api/shares/${token}${folderPath ? '/' + encodeURIComponent(folderPath) : ''}`);
-    if (!res.ok) throw new Error('Share not found');
     const data = await res.json();
+    if (!res.ok) {
+      if (res.status === 403 && data.error === 'turnstile_required') {
+        return { turnstileRequired: true, token };
+      }
+      throw new Error('Share not found');
+    }
     return {
       share: data.share,
       files: data.files,

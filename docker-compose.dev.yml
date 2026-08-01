@@ -8,6 +8,7 @@ services:
     command: npm run dev -- --host
     environment:
       - PUBLIC_APP_DOMAIN=${PUBLIC_APP_DOMAIN:-http://localhost:8000}
+      - PUBLIC_TURNSTILE_SITEKEY=${PUBLIC_TURNSTILE_SITEKEY:-1x00000000000000000000AA}
       - BACKEND_PROXY_URL=http://backend:3000
     depends_on:
       - backend
@@ -21,6 +22,7 @@ services:
     command: npm run dev
     environment:
       - APP_DOMAIN=${APP_DOMAIN:-http://localhost:8000}
+      - TURNSTILE_SECRET=${TURNSTILE_SECRET:-1x0000000000000000000000000000000AA}
       - DISABLE_WORKER=true
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -47,6 +49,7 @@ services:
     command: npm run dev
     environment:
       - DISABLE_API=true
+      - TURNSTILE_SECRET=${TURNSTILE_SECRET:-1x0000000000000000000000000000000AA}
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=hellomyphotos
