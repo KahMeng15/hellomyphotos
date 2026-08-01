@@ -1,5 +1,6 @@
 services:
   frontend:
+    image: ghcr.io/kahmeng15/hellomyphotos2/frontend:latest
     build:
       context: ./frontend
     ports:
@@ -11,6 +12,7 @@ services:
       - backend
 
   backend:
+    image: ghcr.io/kahmeng15/hellomyphotos2/backend:latest
     build:
       context: ./backend
     env_file: .env
@@ -25,6 +27,7 @@ services:
       - ./volumes/cache_rw:/app/cache:rw
 
   backend-worker:
+    image: ghcr.io/kahmeng15/hellomyphotos2/backend:latest
     build:
       context: ./backend
     env_file: .env
