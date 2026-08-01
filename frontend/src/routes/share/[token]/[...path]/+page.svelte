@@ -80,7 +80,15 @@
   function folderUrl() {
     const fp = data.folderPath || '';
     const base = `/share/${$page.params.token}`;
-    return fp ? `${base}/${encodePath(fp)}` : base;
+    if (!fp) return base;
+    const basePath = data.baseFolderPath || '';
+    // The backend expects the sub-path relative to the share's base folder, so strip
+    // the base prefix from the absolute folder path before building the URL.
+    if (basePath && fp === basePath) return base;
+    if (basePath && fp.startsWith(basePath + '/')) {
+      return `${base}/${encodePath(fp.slice(basePath.length + 1))}`;
+    }
+    return `${base}/${encodePath(fp)}`;
   }
 
   function mediaUrl(index: number) {

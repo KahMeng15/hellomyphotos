@@ -94,7 +94,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
 
   async function handleShareGet(request: any, reply: any) {
     const { token } = request.params;
-    const subPath = request.params['*'] ? decodeURIComponent(request.params['*']) : '';
+    let subPath = request.params['*'] ? decodeURIComponent(request.params['*']) : '';
 
     if (subPath.includes('..')) return reply.status(400).send({ error: 'Invalid path' });
     
@@ -115,6 +115,12 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
     
     const share = result.rows[0];
+    
+    // Normalize subPath: tolerate share URLs that include the share's own base folder
+    // path (e.g. old/absolute-path links) by stripping the base prefix.
+    if (share.folder_path && subPath && (subPath === share.folder_path || subPath.startsWith(share.folder_path + '/'))) {
+      subPath = subPath === share.folder_path ? '' : subPath.slice(share.folder_path.length + 1);
+    }
     
     if (share.media_id) {
       if (subPath) return reply.status(404).send({ error: 'Not a folder share' });
