@@ -10,8 +10,9 @@
   import { frontendLogger } from '$lib/utils/frontendLogger';
   // @ts-ignore - Ignore virtual module type resolution
   import { pwaInfo } from 'virtual:pwa-info';
-  
-  let { children } = $props();
+  import MandatorySetupModal from '$lib/components/MandatorySetupModal.svelte';
+
+  const { children } = $props<{ children: any }>();
 
   let prevRoute = $state('');
   afterNavigate((nav) => {
@@ -142,6 +143,7 @@
 
   $effect.pre(() => {
     const path = $page.url.pathname;
+    
     if (prevScrollPath && path !== prevScrollPath) {
       const el = document.querySelector('.main-content');
       if (el) {
@@ -276,6 +278,11 @@
         {@render children()}
       </div>
     {/if}
+    
+    {#if $currentUser?.mustChangeCredentials}
+      <MandatorySetupModal />
+    {/if}
+
     {#if $page.url.pathname !== '/' && $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/admin') && !$page.url.pathname.startsWith('/settings')}
       {#key $page.url.pathname}
         <footer class="app-footer {$page.url.pathname.startsWith('/folder') || $page.url.pathname.startsWith('/share') ? 'animate-footer' : ''}">

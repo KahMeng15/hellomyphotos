@@ -122,15 +122,16 @@ export async function authRoutes(fastify: FastifyInstance) {
       maxAge: 7 * 24 * 60 * 60 // 7 days
     });
 
-    return { 
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-      folders: user.role === 'admin' || user.role === 'super_admin' ? ['*'] : folders
-      }
-    };
+      return { 
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          folders: user.role === 'admin' || user.role === 'super_admin' ? ['*'] : folders,
+          mustChangeCredentials: user.email === 'admin@example.com' || user.password_hash === '$2b$10$6RA2zF7AVoZaXO/Wj126ROvtJnVNecG4dvJRW9Sinw1HHUV1SlWYa'
+        }
+      };
   });
 
   fastify.post('/logout', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -154,7 +155,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as any;
       
-      const { rows } = await pool.query('SELECT role, email, name, preferences FROM users WHERE id = $1', [decoded.id]);
+      const { rows } = await pool.query('SELECT role, email, name, preferences, password_hash FROM users WHERE id = $1', [decoded.id]);
       if (rows.length === 0) {
         return reply.status(401).send({ error: 'User not found' });
       }
@@ -175,7 +176,8 @@ export async function authRoutes(fastify: FastifyInstance) {
         email: rows[0].email,
         role,
         folders,
-        preferences: rows[0].preferences || {}
+        preferences: rows[0].preferences || {},
+        mustChangeCredentials: rows[0].email === 'admin@example.com' || rows[0].password_hash === '$2b$10$6RA2zF7AVoZaXO/Wj126ROvtJnVNecG4dvJRW9Sinw1HHUV1SlWYa'
       };
       
       return { user: latestUser };

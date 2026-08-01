@@ -31,12 +31,21 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
     const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
     
     // Fetch fresh user data from DB
-    const { rows } = await pool.query('SELECT role FROM users WHERE id = $1', [decoded.id]);
+    const { rows } = await pool.query('SELECT role, email, password_hash FROM users WHERE id = $1', [decoded.id]);
     if (rows.length === 0) {
       return reply.status(401).send({ error: 'Unauthorized: User not found' });
     }
-    
+
     const role = rows[0].role;
+    const email = rows[0].email;
+    const pwdHash = rows[0].password_hash;
+    const defaultHash = '$2b$10$6RA2zF7AVoZaXO/Wj126ROvtJnVNecG4dvJRW9Sinw1HHUV1SlWYa';
+
+    // Force default admin to change credentials
+    if ((email === 'admin@example.com' || pwdHash === defaultHash) && !request.url.startsWith('/api/admin/users') && request.url !== '/api/auth/me' && request.url !== '/api/auth/logout' && request.url !== '/api/auth/profile' && request.url !== '/api/auth/password') {
+      return reply.status(403).send({ error: 'MUST_CHANGE_CREDENTIALS', message: 'You must change the default email and password before continuing.' });
+    }
+    
     let folders: string[] = [];
     
     if (role === 'admin' || role === 'super_admin') {

@@ -91,6 +91,16 @@
     <p>Manage your profile, security, and access level.</p>
   </div>
 
+  {#if $currentUser?.mustChangeCredentials}
+    <div class="mandatory-banner">
+      <Shield size={24} class="banner-icon" />
+      <div class="banner-text">
+        <h3>Action Required: Default Credentials Detected</h3>
+        <p>You must change your default email (admin@example.com) and set a new password before you can use the rest of the app.</p>
+      </div>
+    </div>
+  {/if}
+
   <div class="grid">
     <!-- Profile & Access -->
     <div class="column">
@@ -404,10 +414,50 @@
     font-size: 0.85rem;
     color: #e4e4e7;
   }
-  .all-access {
-    background: rgba(16, 185, 129, 0.1);
-    color: #34d399;
-    border-color: rgba(16, 185, 129, 0.2);
+  .folder-badge.all-access {
+    background: rgba(99, 102, 241, 0.1);
+    color: #818cf8;
+    border-color: rgba(99, 102, 241, 0.2);
+    font-weight: 500;
+  }
+
+  .mandatory-banner {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    background: rgba(220, 38, 38, 0.1);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    color: #fca5a5;
+  }
+  
+  .mandatory-banner h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+    color: #ef4444;
+  }
+
+  .mandatory-banner p {
+    margin: 0;
+    font-size: 0.95rem;
+    opacity: 0.9;
+  }
+
+  .banner-icon {
+    flex-shrink: 0;
+    color: #ef4444;
+  }
+
+  @media (max-width: 768px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+    
+    .settings-container {
+      padding: 1rem;
+    }
   }
 
   .muted { color: #71717a; font-style: italic; }
