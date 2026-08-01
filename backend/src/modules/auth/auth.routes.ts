@@ -7,6 +7,15 @@ import { logger } from '../../utils/logger';
 import { requireAuth } from '../../utils/auth';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_please_change';
+const APP_DOMAIN = process.env.APP_DOMAIN || '';
+let cookieDomain: string | undefined = undefined;
+if (APP_DOMAIN) {
+  try {
+    cookieDomain = new URL(APP_DOMAIN).hostname;
+  } catch (e) {
+    // Ignore invalid URL
+  }
+}
 
 export async function authRoutes(fastify: FastifyInstance) {
   fastify.post('/login', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -106,6 +115,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     // Set cookie
     reply.setCookie('token', token, {
       path: '/',
+      domain: cookieDomain,
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
@@ -126,6 +136,7 @@ export async function authRoutes(fastify: FastifyInstance) {
   fastify.post('/logout', async (request: FastifyRequest, reply: FastifyReply) => {
     reply.setCookie('token', '', {
       path: '/',
+      domain: cookieDomain,
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',

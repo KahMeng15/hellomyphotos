@@ -23,8 +23,9 @@ app.addHook('onRequest', async (request) => {
 });
 
 // Enable CORS for frontend client-side requests
+const allowedOrigin = process.env.APP_DOMAIN || true;
 app.register(cors, {
-  origin: true, // Reflect request origin
+  origin: allowedOrigin,
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-password'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']

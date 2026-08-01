@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { env } from '$env/dynamic/public';
   import { fade, slide } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
   import { getPreviewUrl, getStreamUrl, getThumbnailUrl, getFaceThumbnailUrl, fetchMediaFaces } from '$lib/api/media';
@@ -110,7 +111,8 @@
       date.setDate(date.getDate() + 7);
       const token = await createShare(media.folder_path, media.id, allowDownload, false, false, date.toISOString());
       
-      const url = `${window.location.origin}/share/${token}`;
+      const domain = env.PUBLIC_APP_DOMAIN || window.location.origin;
+      const url = `${domain}/share/${token}`;
       await copyToClipboard(url);
       
       justShared = true;

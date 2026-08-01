@@ -9,6 +9,7 @@
   import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
+  import { env } from '$env/dynamic/public';
   import { navigating } from '$app/stores';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
@@ -103,7 +104,8 @@
   }
 
   async function copyShareLink(token: string) {
-    const url = `${window.location.origin}/share/${token}`;
+    const domain = env.PUBLIC_APP_DOMAIN || window.location.origin;
+    const url = `${domain}/share/${token}`;
     const success = await copyToClipboard(url);
     if (success) {
       toast.success('Link copied to clipboard!');
@@ -722,7 +724,7 @@
     <div style="background: rgba(0,255,100,0.1); border: 1px solid rgba(0,255,100,0.3); padding: 16px; border-radius: 8px; margin-bottom: 24px;">
       <p style="color: #4ade80; margin-bottom: 8px; font-weight: 500;">Share link created successfully!</p>
       <div style="display: flex; gap: 8px;">
-        <input type="text" readonly value="{window.location.origin}/share/{newlyCreatedShareToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
+        <input type="text" readonly value="{env.PUBLIC_APP_DOMAIN || window.location.origin}/share/{newlyCreatedShareToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
         <button class="icon-btn" style="display: flex; align-items: center; justify-content: center;" onclick={() => copyShareLink(newlyCreatedShareToken!)}>
           {#if copiedToken === newlyCreatedShareToken}
             <Check size={18} color="#10b981" />

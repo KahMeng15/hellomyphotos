@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
+  import { env } from '$env/dynamic/public';
   import { API_BASE } from '$lib/api/media';
   import { ChevronLeft, Trash2, Link as LinkIcon, Folder, Image, User, Copy, Check, Edit, Power, PowerOff } from '@lucide/svelte';
   import Modal from '$lib/components/Modal.svelte';
@@ -39,7 +40,8 @@
   }
 
   async function copyLink(token: string) {
-    const url = `${window.location.origin}/share/${token}`;
+    const domain = env.PUBLIC_APP_DOMAIN || window.location.origin;
+    const url = `${domain}/share/${token}`;
     const success = await copyToClipboard(url);
     if (success) {
       copiedToken = token;

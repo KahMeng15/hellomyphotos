@@ -7,6 +7,7 @@ services:
       - "8000:5173"
     command: npm run dev -- --host
     environment:
+      - PUBLIC_APP_DOMAIN=${PUBLIC_APP_DOMAIN:-http://localhost:8000}
       - BACKEND_PROXY_URL=http://backend:3000
     depends_on:
       - backend
@@ -19,6 +20,7 @@ services:
       context: ./backend
     command: npm run dev
     environment:
+      - APP_DOMAIN=${APP_DOMAIN:-http://localhost:8000}
       - DISABLE_WORKER=true
       - DB_HOST=postgres
       - DB_PORT=5432
