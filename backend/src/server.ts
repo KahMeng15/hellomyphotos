@@ -38,31 +38,41 @@ const start = async () => {
         console.error('Failed to load max_cpu_cores from DB:', err);
       }
 
-      console.log(`Forking background worker process with concurrency ${maxCpuCores}...`);
-      const workerProc = fork(__filename, [], {
-        env: { 
-          ...process.env, 
-          IS_WORKER: 'true',
-          SCANNER_CONCURRENCY: '1', // Always 1 for IO safety
-          METADATA_CONCURRENCY: maxCpuCores,
-          THUMBNAIL_CONCURRENCY: maxCpuCores,
-          VIDEO_CONCURRENCY: maxCpuCores,
-          SMART_SEARCH_CONCURRENCY: maxCpuCores,
-          FACE_DETECTION_CONCURRENCY: maxCpuCores,
-          FACIAL_RECOGNITION_CONCURRENCY: '1', // Clustering must always be 1
-          FACE_THUMBNAIL_CONCURRENCY: maxCpuCores
-        },
-        execArgv: process.execArgv // preserve tsx loader in dev
-      });
+      let workerProc: ReturnType<typeof fork> | null = null;
+      let isShuttingDown = false;
 
-      workerProc.on('exit', (code) => {
-        console.warn(`Worker process exited with code ${code}`);
-      });
+      const spawnWorker = () => {
+        if (isShuttingDown) return;
+        console.log(`Forking background worker process with concurrency ${maxCpuCores}...`);
+        workerProc = fork(__filename, [], {
+          env: { 
+            ...process.env, 
+            IS_WORKER: 'true',
+            SCANNER_CONCURRENCY: '1', // Always 1 for IO safety
+            METADATA_CONCURRENCY: maxCpuCores,
+            THUMBNAIL_CONCURRENCY: maxCpuCores,
+            VIDEO_CONCURRENCY: maxCpuCores,
+            SMART_SEARCH_CONCURRENCY: maxCpuCores,
+            FACE_DETECTION_CONCURRENCY: maxCpuCores,
+            FACIAL_RECOGNITION_CONCURRENCY: '1', // Clustering must always be 1
+            FACE_THUMBNAIL_CONCURRENCY: maxCpuCores
+          },
+          execArgv: process.execArgv // preserve tsx loader in dev
+        });
+
+        workerProc.on('exit', (code, signal) => {
+          if (isShuttingDown) return;
+          console.warn(`Worker process exited with code ${code}, signal ${signal}. Respawning in 3 seconds...`);
+          setTimeout(spawnWorker, 3000);
+        });
+      };
+
+      spawnWorker();
       
       // Ensure worker is killed when main process exits
-      process.on('exit', () => workerProc.kill());
-      process.on('SIGINT', () => { workerProc.kill(); process.exit(0); });
-      process.on('SIGTERM', () => { workerProc.kill(); process.exit(0); });
+      process.on('exit', () => { isShuttingDown = true; workerProc?.kill(); });
+      process.on('SIGINT', () => { isShuttingDown = true; workerProc?.kill(); process.exit(0); });
+      process.on('SIGTERM', () => { isShuttingDown = true; workerProc?.kill(); process.exit(0); });
     }
   } catch (err) {
     app.log.error(err);

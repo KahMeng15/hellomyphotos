@@ -238,30 +238,19 @@ mkdir -p volumes/media_ro/test_folder
 # Drop some .jpg, .png, or .mp4 files into volumes/media_ro/test_folder
 ```
 
-### 7.2 Start Foundational Services
-Boot up PostgreSQL, Redis, and the Machine Learning container:
+### 7.2 Start the Stack (Docker Hot-Reload)
+The easiest and recommended way to develop is using the fully containerized setup. We use Docker bind-mounts to link your local `./frontend` and `./backend` directories into the containers, providing instant hot-reloading.
+
 ```bash
-docker-compose up -d postgres redis machine-learning
+docker compose -f docker-compose.dev.yml up -d
 ```
 *Wait a few seconds for PostgreSQL to initialize the schema via the `pg_init/01-init.sql` script.*
 
-### 7.3 Start the Backend (Fastify)
-The backend handles the API, background workers, and ML queuing.
-```bash
-cd backend
-npm install
-npm run dev
-```
-*The backend should now be listening on `http://localhost:3000`.*
+### 7.3 Access the Application
+- **Frontend UI:** `http://localhost:8000`
+- **Backend API:** `http://localhost:8001`
 
-### 7.4 Start the Frontend (SvelteKit)
-Open a new terminal window to start the frontend UI.
-```bash
-cd frontend
-npm install
-npm run dev
-```
-*The frontend should now be available at `http://localhost:5173`. Open this in your browser.*
+*(Optional) Non-Docker Fallback:* If you prefer running the processes directly on your host machine without Docker, make sure your local `backend/.env.local` contains the correct `DB_PORT=8002` and `REDIS_PORT=8003`, run `docker compose up -d postgres redis machine-learning`, and then run `npm run dev` in the respective folders.
 
 ### 7.5 Testing the Flow
 1. Open `http://localhost:5173/folder/test_folder` in your browser.

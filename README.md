@@ -15,12 +15,11 @@ A beautiful, self-hosted, directory-first photo management gallery engine. It re
 
 ---
 
-## 🚀 Quick Start (Local Development)
+## 🚀 Quick Start (Docker Hot-Reloading)
 
-The easiest way to get started is by running the foundational services in Docker, and spinning up the frontend and backend locally for fast hot-reloading.
+We use a fully containerized Docker setup that includes **live hot-reloading** for both the frontend and backend. You get the exact environment parity of Docker, but with the instant feedback loop of local development!
 
 ### 1. Prerequisites
-- **Node.js** (v18+)
 - **Docker** and **Docker Compose**
 
 ### 2. Setup Test Media
@@ -30,27 +29,35 @@ mkdir -p volumes/media_ro/test_folder
 # Add some .jpg, .png, or .mp4 files here!
 ```
 
-### 3. Start Core Services
-Boot up Postgres, Redis, and Immich ML:
+### 3. Start the Environment
+Boot up the entire stack in one command using the development configuration:
 ```bash
-docker-compose up -d postgres redis machine-learning
+docker compose -f docker-compose.dev.yml up -d
+```
+*Note: We use Docker bind mounts mapping your `./frontend` and `./backend` directories directly into the containers. Any time you save a file in your code editor on your host machine, the containers will instantly hot-reload!*
+
+### 4. Access the Application
+- **Frontend UI:** [http://localhost:8000](http://localhost:8000)
+- **Backend API:** [http://localhost:8001](http://localhost:8001)
+
+### 5. Stop the Environment
+```bash
+docker compose down
 ```
 
-### 4. Start the Backend API
-```bash
-cd backend
-npm install
-npm run dev
-# The API will start on http://localhost:3000
-```
+---
 
-### 5. Start the Frontend UI
-```bash
-cd frontend
-npm install
-npm run dev
-# Open http://localhost:5173 in your browser
+## 💻 Non-Docker Local Development
+If you prefer running the Node processes directly on your Mac (e.g. `npm run dev`) without Docker:
+
+1. Ensure your local `backend/.env.local` contains the correct port mappings for your running Docker services:
+```env
+DB_PORT=8002
+REDIS_PORT=8003
+IMMICH_ML_URL=http://localhost:8004
 ```
+2. Start the core services only: `docker compose up -d postgres redis machine-learning`
+3. Run `npm install` and `npm run dev` in both `./frontend` and `./backend`.
 
 ---
 

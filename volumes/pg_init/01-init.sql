@@ -63,6 +63,7 @@ CREATE TABLE media_analytics (
 -- Folder Settings (Custom Covers)
 CREATE TABLE folder_settings (
     folder_path TEXT PRIMARY KEY,
+    description TEXT,
     cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

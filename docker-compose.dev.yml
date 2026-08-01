@@ -1,19 +1,25 @@
+
 services:
   frontend:
     build:
       context: ./frontend
     ports:
-      - "8000:3000"
+      - "8000:5173"
+    command: npm run dev -- --host
     environment:
-      - NODE_ENV=production
+      - BACKEND_PROXY_URL=http://backend:3000
     depends_on:
       - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
 
   backend:
     build:
       context: ./backend
     ports:
       - "8001:3000"
+    command: npm run dev
     environment:
       - DB_HOST=postgres
       - DB_PORT=5432
@@ -25,13 +31,14 @@ services:
       - IMMICH_ML_URL=http://machine-learning:3003
       - MEDIA_ROOT=/app/media
       - CACHE_ROOT=/app/cache
-      - NODE_ENV=production
     depends_on:
       - postgres
       - redis
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
+      - ./backend:/app
+      - /app/node_modules
 
   postgres:
     image: ankane/pgvector:v0.5.1
