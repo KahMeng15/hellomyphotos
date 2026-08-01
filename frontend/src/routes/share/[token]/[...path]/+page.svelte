@@ -10,7 +10,7 @@
   import { page } from '$app/stores';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder, AlertCircle } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { PUBLIC_TURNSTILE_SITEKEY } from '$env/static/public';
   import { API_BASE } from '$lib/api/media';
@@ -282,8 +282,12 @@
     {/if}
   </div>
 {:else if data.error}
-  <div style="text-align: center; padding-top: 10vh; color: var(--text-color);">
-    <h2>{data.error}</h2>
+  <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; min-height: 100vh; padding: 2rem;">
+    <h2 style="font-size: 2.5rem; margin-bottom: 16px; color: #fff;">Invalid or expired link</h2>
+    <p style="color: #94a3b8; font-size: 1.125rem; margin-bottom: 32px; max-width: 500px;">The folder you are looking for does not exist, has expired, or the link is incorrect.</p>
+    <a href="/" class="btn" style="text-decoration: none; font-size: 1.125rem; padding: 12px 24px; display: inline-block;">
+      Return to Homepage
+    </a>
   </div>
 {:else}
 <div class="header-wrapper {fallbackCoverId ? 'has-cover' : ''}" bind:this={headerWrapper}>
@@ -828,4 +832,5 @@
     text-align: center;
     min-height: 400px;
   }
+
 </style>
