@@ -31,7 +31,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder or media' });
     }
     
-    const shareToken = crypto.randomBytes(16).toString('hex');
+    const shareToken = crypto.randomBytes(6).toString('base64url');
     
     await query(`
       INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at, created_by)

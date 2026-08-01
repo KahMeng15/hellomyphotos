@@ -38,11 +38,16 @@ CREATE TABLE face_embeddings (
 -- Public Shares
 CREATE TABLE shared_folders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    folder_path TEXT NOT NULL,
+    folder_path TEXT,
+    media_id UUID REFERENCES media_files(id) ON DELETE CASCADE,
+    person_id UUID,
     share_token VARCHAR(32) UNIQUE NOT NULL,
     allow_download BOOLEAN DEFAULT false,
+    allow_download_images BOOLEAN DEFAULT false,
+    allow_download_folder BOOLEAN DEFAULT false,
     watermark_enabled BOOLEAN DEFAULT false,
     strip_gps_on_download BOOLEAN DEFAULT true,
+    is_active BOOLEAN DEFAULT true,
     expires_at TIMESTAMP WITH TIME ZONE,
     password_hash TEXT,
     created_by UUID REFERENCES users(id) ON DELETE CASCADE,
