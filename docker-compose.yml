@@ -12,9 +12,31 @@ services:
   backend:
     build:
       context: ./backend
-    ports:
-      - "8001:3000"
     environment:
+      - DISABLE_WORKER=true
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=hellomyphotos
+      - DB_PASS=hellomyphotos_secret
+      - DB_NAME=hellomyphotos
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - IMMICH_ML_URL=http://machine-learning:3003
+      - MEDIA_ROOT=/app/media
+      - CACHE_ROOT=/app/cache
+      - NODE_ENV=production
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./volumes/media_ro:/app/media:ro
+      - ./volumes/cache_rw:/app/cache:rw
+
+  backend-worker:
+    build:
+      context: ./backend
+    environment:
+      - DISABLE_API=true
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=hellomyphotos
@@ -42,8 +64,6 @@ services:
     volumes:
       - ./volumes/pg_data:/var/lib/postgresql/data
       - ./volumes/pg_init:/docker-entrypoint-initdb.d
-    ports:
-      - "8002:5432"
 
   redis:
     image: redis:7-alpine

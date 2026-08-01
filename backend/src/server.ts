@@ -26,9 +26,13 @@ const start = async () => {
       // Keep worker process alive
       process.on('SIGTERM', () => process.exit(0));
     } else {
-      await app.listen({ port: PORT, host: '0.0.0.0' });
-      app.log.info(`Server listening on port ${PORT}`);
-      logger.info(`Server started on port ${PORT}`);
+      if (process.env.DISABLE_API !== 'true') {
+        await app.listen({ port: PORT, host: '0.0.0.0' });
+        app.log.info(`Server listening on port ${PORT}`);
+        logger.info(`Server started on port ${PORT}`);
+      } else {
+        logger.info(`API disabled via DISABLE_API=true. Running worker orchestrator only.`);
+      }
       
       let maxCpuCores = '2';
       try {
@@ -42,7 +46,12 @@ const start = async () => {
       let isShuttingDown = false;
 
       const spawnWorker = () => {
-        if (isShuttingDown) return;
+        if (isShuttingDown || process.env.DISABLE_WORKER === 'true') {
+          if (process.env.DISABLE_WORKER === 'true') {
+            console.log('Worker disabled via DISABLE_WORKER=true');
+          }
+          return;
+        }
         console.log(`Forking background worker process with concurrency ${maxCpuCores}...`);
         workerProc = fork(__filename, [], {
           env: { 
