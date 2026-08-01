@@ -19,6 +19,9 @@
   
   let verifyingTurnstile = $state(false);
   let turnstileError = $state('');
+
+  let widgetContainer: HTMLElement;
+  let turnstileWidgetId: string | null = null;
   
   type SortMode = 'newest' | 'oldest' | 'a-z' | 'z-a';
   type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square';
@@ -158,15 +161,31 @@
           invalidateAll();
         } else {
           turnstileError = 'Security verification failed. Please try again.';
-          if ((window as any).turnstile) (window as any).turnstile.reset();
+          if (turnstileWidgetId && (window as any).turnstile) (window as any).turnstile.reset(turnstileWidgetId);
         }
       } catch (e) {
         turnstileError = 'Network error during verification.';
-        if ((window as any).turnstile) (window as any).turnstile.reset();
+        if (turnstileWidgetId && (window as any).turnstile) (window as any).turnstile.reset(turnstileWidgetId);
       } finally {
         verifyingTurnstile = false;
       }
     };
+
+    (window as any).onTurnstileLoad = () => {
+      if ((window as any).turnstile && widgetContainer && !turnstileWidgetId) {
+        turnstileWidgetId = (window as any).turnstile.render(widgetContainer, {
+          sitekey: PUBLIC_TURNSTILE_SITEKEY,
+          theme: 'dark',
+          action: 'share-gate',
+          size: 'invisible',
+          callback: (window as any).onTurnstileSuccess
+        });
+      }
+    };
+
+    if ((window as any).turnstile) {
+      (window as any).onTurnstileLoad();
+    }
 
     sortMode = loadPref<SortMode>('shareSortMode', data.defaultShareSortMode || 'newest');
     viewMode = loadPref<ViewMode>('shareViewMode', data.defaultShareViewMode || 'small-fit');
@@ -190,6 +209,9 @@
   });
 
   onDestroy(() => {
+    if (turnstileWidgetId && (window as any).turnstile) {
+      (window as any).turnstile.remove(turnstileWidgetId);
+    }
     if (pollInterval) clearInterval(pollInterval);
     if (typeof document !== 'undefined') {
       const mainContent = document.querySelector('.main-content');
@@ -248,13 +270,13 @@
 <svelte:head>
   <title>{data.turnstileRequired ? 'Verifying...' : data.error ? 'Error' : (personName || (data.folderPath ? data.folderPath.split('/').pop() : 'Shared Gallery'))} - hellomyphotos</title>
   {#if data.turnstileRequired}
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
   {/if}
 </svelte:head>
 
 {#if data.turnstileRequired}
   <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: #fff;">
-    <div class="cf-turnstile" data-sitekey={PUBLIC_TURNSTILE_SITEKEY} data-callback="onTurnstileSuccess" data-action="share-gate" data-theme="dark" data-size="invisible"></div>
+    <div bind:this={widgetContainer}></div>
     {#if turnstileError}
       <p style="color: #ff5555; margin-top: 1rem;">{turnstileError}</p>
     {/if}

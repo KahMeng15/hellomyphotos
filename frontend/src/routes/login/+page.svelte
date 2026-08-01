@@ -4,11 +4,37 @@
   import { currentUser } from '$lib/stores/auth';
   import { ShieldAlert } from '@lucide/svelte';
   import { PUBLIC_TURNSTILE_SITEKEY } from '$env/static/public';
+  import { onMount, onDestroy } from 'svelte';
 
   let email = $state('');
   let password = $state('');
   let error = $state('');
   let loading = $state(false);
+
+  let widgetContainer: HTMLElement;
+  let turnstileWidgetId: string | null = null;
+
+  onMount(() => {
+    (window as any).onTurnstileLoad = () => {
+      if ((window as any).turnstile && widgetContainer && !turnstileWidgetId) {
+        turnstileWidgetId = (window as any).turnstile.render(widgetContainer, {
+          sitekey: PUBLIC_TURNSTILE_SITEKEY,
+          theme: 'dark',
+          action: 'turnstile-spin-v2',
+        });
+      }
+    };
+
+    if ((window as any).turnstile) {
+      (window as any).onTurnstileLoad();
+    }
+  });
+
+  onDestroy(() => {
+    if (turnstileWidgetId && (window as any).turnstile) {
+      (window as any).turnstile.remove(turnstileWidgetId);
+    }
+  });
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
@@ -45,7 +71,7 @@
 
 <svelte:head>
   <title>Login - hellomyphotos</title>
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
 </svelte:head>
 
 <div class="login-container">
@@ -87,7 +113,6 @@
             placeholder="••••••••" 
             required 
             autocomplete="current-password"
-            onkeydown={(e) => e.key === 'Enter' && handleSubmit(e)}
           />
         </div>
         <button type="submit" class="submit-btn" disabled={loading}>
@@ -98,7 +123,7 @@
           {/if}
         </button>
 
-        <div class="cf-turnstile" data-sitekey={PUBLIC_TURNSTILE_SITEKEY} data-action="turnstile-spin-v2" data-theme="dark" style="margin-top: 1.5rem; display: flex; justify-content: center;"></div>
+        <div bind:this={widgetContainer} style="margin-top: 1.5rem; display: flex; justify-content: center;"></div>
 
         <a href="/" class="back-btn">
           Back to Homepage

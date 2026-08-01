@@ -1,4 +1,3 @@
-
 services:
   frontend:
     build:
@@ -6,9 +5,8 @@ services:
     ports:
       - "8000:5173"
     command: npm run dev -- --host
+    env_file: .env
     environment:
-      - PUBLIC_APP_DOMAIN=${PUBLIC_APP_DOMAIN:-http://localhost:8000}
-      - PUBLIC_TURNSTILE_SITEKEY=${PUBLIC_TURNSTILE_SITEKEY:-1x00000000000000000000AA}
       - BACKEND_PROXY_URL=http://backend:3000
     depends_on:
       - backend
@@ -20,20 +18,9 @@ services:
     build:
       context: ./backend
     command: npm run dev
+    env_file: .env
     environment:
-      - APP_DOMAIN=${APP_DOMAIN:-http://localhost:8000}
-      - TURNSTILE_SECRET=${TURNSTILE_SECRET:-1x0000000000000000000000000000000AA}
       - DISABLE_WORKER=true
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=hellomyphotos
-      - DB_PASS=hellomyphotos_secret
-      - DB_NAME=hellomyphotos
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - IMMICH_ML_URL=http://machine-learning:3003
-      - MEDIA_ROOT=/app/media
-      - CACHE_ROOT=/app/cache
     depends_on:
       - postgres
       - redis
@@ -47,19 +34,9 @@ services:
     build:
       context: ./backend
     command: npm run dev
+    env_file: .env
     environment:
       - DISABLE_API=true
-      - TURNSTILE_SECRET=${TURNSTILE_SECRET:-1x0000000000000000000000000000000AA}
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=hellomyphotos
-      - DB_PASS=hellomyphotos_secret
-      - DB_NAME=hellomyphotos
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - IMMICH_ML_URL=http://machine-learning:3003
-      - MEDIA_ROOT=/app/media
-      - CACHE_ROOT=/app/cache
     depends_on:
       - postgres
       - redis
@@ -71,16 +48,14 @@ services:
 
   postgres:
     image: ankane/pgvector:v0.5.1
-    environment:
-      - POSTGRES_USER=hellomyphotos
-      - POSTGRES_PASSWORD=hellomyphotos_secret
-      - POSTGRES_DB=hellomyphotos
+    env_file: .env
     volumes:
       - ./volumes/pg_data:/var/lib/postgresql/data
       - ./volumes/pg_init:/docker-entrypoint-initdb.d
 
   redis:
     image: redis:7-alpine
+    env_file: .env
     volumes:
       - ./volumes/redis_data:/data
     ports:
@@ -88,9 +63,7 @@ services:
 
   machine-learning:
     image: ghcr.io/immich-app/immich-machine-learning:release
-    environment:
-      - MACHINE_LEARNING_WORKERS=1
-      - MACHINE_LEARNING_WORKER_TIMEOUT=120
+    env_file: .env
     ports:
       - "8004:3003"
     volumes:
