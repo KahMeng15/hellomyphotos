@@ -62,6 +62,14 @@ export const ensureSchema = async (): Promise<void> => {
             ip_address TEXT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
           );
+
+          CREATE TABLE IF NOT EXISTS folder_settings (
+            folder_path TEXT PRIMARY KEY,
+            cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL,
+            description TEXT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+          ALTER TABLE folder_settings ADD COLUMN IF NOT EXISTS auto_cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL;
         `);
       } catch (err: any) {
         console.warn('[DB] ensureSchema notice:', err.message);

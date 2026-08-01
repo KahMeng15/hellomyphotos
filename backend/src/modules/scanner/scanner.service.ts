@@ -33,6 +33,9 @@ export class ScannerService {
     console.log(`Scanning: ${fullPath}`);
 
     try {
+      // Invalidate the auto-cover cache for this folder so it can be recomputed after scan
+      await query(`UPDATE folder_settings SET auto_cover_media_id = NULL WHERE folder_path = $1`, [folderPath]);
+
       const files = await fs.promises.readdir(fullPath, { withFileTypes: true });
       const currentFilesOnDisk: string[] = [];
       // Track whether any directory entries were seen (even if all filtered out)

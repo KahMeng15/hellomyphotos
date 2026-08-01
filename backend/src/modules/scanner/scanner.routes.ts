@@ -140,14 +140,14 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         directories = await Promise.all(validDirNames.map(async (name) => {
           const subPath = folderPath ? `${folderPath}/${name}` : name;
           
-          // Check if there is a custom cover in folder_settings
+          // Check if there is a custom cover OR cached auto cover in folder_settings
           const customCoverRes = await query(`
             SELECT m.id, m.blurhash,
               COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
               COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
               (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
             FROM folder_settings fs
-            JOIN media_files m ON m.id = fs.cover_media_id
+            JOIN media_files m ON m.id = COALESCE(fs.cover_media_id, fs.auto_cover_media_id)
             WHERE fs.folder_path = $1
           `, [subPath]);
 
@@ -162,23 +162,55 @@ export async function scannerRoutes(fastify: FastifyInstance) {
             };
           }
 
-          // Fallback: Find a media file inside this directory or its subdirectories, preferring landscape and more faces
-          const coverResult = await query(`
-            SELECT m.id, m.blurhash,
-              COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
-              COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
-              (SELECT COUNT(*) FROM face_embeddings f WHERE f.media_id = m.id) as face_count,
-              (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box,
-              CASE 
-                WHEN CAST(m.exif_json->>'ImageWidth' AS INTEGER) > CAST(m.exif_json->>'ImageHeight' AS INTEGER) THEN 1 
-                WHEN CAST(m.exif_json->>'ExifImageWidth' AS INTEGER) > CAST(m.exif_json->>'ExifImageHeight' AS INTEGER) THEN 1 
-                ELSE 0 
-              END as is_landscape
-            FROM media_files m 
-            WHERE m.folder_path LIKE $1
-            ORDER BY is_landscape DESC, face_count DESC, m.id ASC
+          // Not cached. Check if processing is active for this folder or subfolders.
+          const isProcessingRes = await query(`
+            SELECT 1 FROM media_files 
+            WHERE folder_path LIKE $1 AND blurhash IS NULL 
             LIMIT 1
           `, [`${subPath}%`]);
+          
+          let coverResult;
+          
+          if (isProcessingRes.rows.length > 0) {
+            // Processing is active. Choose a fast "random" image (first found). Do not cache.
+            coverResult = await query(`
+              SELECT m.id, m.blurhash,
+                COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+                COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+                (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
+              FROM media_files m 
+              WHERE m.folder_path LIKE $1
+              ORDER BY m.id ASC
+              LIMIT 1
+            `, [`${subPath}%`]);
+          } else {
+            // Processing finished. Compute the smart cover.
+            coverResult = await query(`
+              SELECT m.id, m.blurhash,
+                COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+                COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+                (SELECT COUNT(*) FROM face_embeddings f WHERE f.media_id = m.id) as face_count,
+                (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box,
+                CASE 
+                  WHEN CAST(m.exif_json->>'ImageWidth' AS INTEGER) > CAST(m.exif_json->>'ImageHeight' AS INTEGER) THEN 1 
+                  WHEN CAST(m.exif_json->>'ExifImageWidth' AS INTEGER) > CAST(m.exif_json->>'ExifImageHeight' AS INTEGER) THEN 1 
+                  ELSE 0 
+                END as is_landscape
+              FROM media_files m 
+              WHERE m.folder_path LIKE $1
+              ORDER BY is_landscape DESC, face_count DESC, m.id ASC
+              LIMIT 1
+            `, [`${subPath}%`]);
+            
+            if (coverResult.rows.length > 0) {
+              // Cache it!
+              await query(`
+                INSERT INTO folder_settings (folder_path, auto_cover_media_id)
+                VALUES ($1, $2)
+                ON CONFLICT (folder_path) DO UPDATE SET auto_cover_media_id = EXCLUDED.auto_cover_media_id
+              `, [subPath, coverResult.rows[0].id]);
+            }
+          }
           
           return {
             name,
@@ -203,27 +235,48 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     let folderCoverImgHeight: number | null = null;
     let folderDescription = '';
     if (folderPath !== null && folderPath !== undefined) {
-      const currentFolderSettingsRes = await query(`SELECT cover_media_id, description FROM folder_settings WHERE folder_path = $1`, [folderPath]);
+      const currentFolderSettingsRes = await query(`
+        SELECT cover_media_id, auto_cover_media_id, description 
+        FROM folder_settings WHERE folder_path = $1
+      `, [folderPath]);
       if (currentFolderSettingsRes.rows.length > 0) {
-        folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id || null;
+        folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id || currentFolderSettingsRes.rows[0].auto_cover_media_id || null;
         folderDescription = currentFolderSettingsRes.rows[0].description || '';
       }
     }
 
     if (!folderCoverId) {
-      const fallbackResult = await query(`
-        SELECT m.id,
-          (SELECT COUNT(*) FROM face_embeddings f WHERE f.media_id = m.id) as face_count,
-          CASE 
-            WHEN CAST(m.exif_json->>'ImageWidth' AS INTEGER) > CAST(m.exif_json->>'ImageHeight' AS INTEGER) THEN 1 
-            WHEN CAST(m.exif_json->>'ExifImageWidth' AS INTEGER) > CAST(m.exif_json->>'ExifImageHeight' AS INTEGER) THEN 1 
-            ELSE 0 
-          END as is_landscape
-        FROM media_files m 
-        WHERE m.folder_path = $1
-        ORDER BY is_landscape DESC, face_count DESC, m.id ASC
-        LIMIT 1
-      `, [folderPath]);
+      // Check if processing is active for the current folder
+      const isProcessingRes = await query(`SELECT 1 FROM media_files WHERE folder_path = $1 AND blurhash IS NULL LIMIT 1`, [folderPath]);
+      
+      let fallbackResult;
+      if (isProcessingRes.rows.length > 0) {
+        // Active processing: fast random image
+        fallbackResult = await query(`SELECT id FROM media_files WHERE folder_path = $1 ORDER BY id ASC LIMIT 1`, [folderPath]);
+      } else {
+        // Processing finished: smart logic
+        fallbackResult = await query(`
+          SELECT m.id,
+            (SELECT COUNT(*) FROM face_embeddings f WHERE f.media_id = m.id) as face_count,
+            CASE 
+              WHEN CAST(m.exif_json->>'ImageWidth' AS INTEGER) > CAST(m.exif_json->>'ImageHeight' AS INTEGER) THEN 1 
+              WHEN CAST(m.exif_json->>'ExifImageWidth' AS INTEGER) > CAST(m.exif_json->>'ExifImageHeight' AS INTEGER) THEN 1 
+              ELSE 0 
+            END as is_landscape
+          FROM media_files m 
+          WHERE m.folder_path = $1
+          ORDER BY is_landscape DESC, face_count DESC, m.id ASC
+          LIMIT 1
+        `, [folderPath]);
+        
+        if (fallbackResult.rows.length > 0 && folderPath) {
+           await query(`
+              INSERT INTO folder_settings (folder_path, auto_cover_media_id)
+              VALUES ($1, $2)
+              ON CONFLICT (folder_path) DO UPDATE SET auto_cover_media_id = EXCLUDED.auto_cover_media_id
+           `, [folderPath, fallbackResult.rows[0].id]);
+        }
+      }
       
       if (fallbackResult.rows.length > 0) {
         folderCoverId = fallbackResult.rows[0].id;

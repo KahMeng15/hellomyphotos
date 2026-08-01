@@ -37,7 +37,7 @@
     if (data.folderPath !== previousPath) {
       localCoverOverride = null;
       previousPath = data.folderPath;
-      if (data.isProcessing || data.scanning) {
+      if (data.isProcessing) {
         toast.info('This folder is still being processed. Some items might be missing or slow to load. Feel free to come back later!', 8000);
       }
     }
@@ -415,7 +415,7 @@
     viewMode = loadPref<ViewMode>('folderViewMode', data.defaultViewMode || 'small-fit');
     folderViewMode = loadPref<FolderViewMode>('folderFolderViewMode', data.defaultFolderViewMode || 'small-grid');
 
-    if (data.isProcessing || data.scanning) {
+    if (data.isProcessing) {
       toast.info('This folder is still being processed. Some items might be missing or slow to load. Feel free to come back later!', 8000);
     }
 
