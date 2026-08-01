@@ -26,6 +26,9 @@ export const toast = {
   remove: (id: number) => {
     update(toasts => toasts.filter(t => t.id !== id));
   },
+  clear: () => {
+    update(() => []);
+  },
   success: (msg: string, duration?: number) => toast.add('success', msg, duration),
   error: (msg: string, duration = 6000) => toast.add('error', msg, duration),
   info: (msg: string, duration?: number) => toast.add('info', msg, duration),

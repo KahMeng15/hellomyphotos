@@ -1,6 +1,8 @@
 import { API_BASE } from '$lib/api/media';
 import type { PageLoad } from './$types';
 
+export const ssr = false;
+
 const MEDIA_EXTENSIONS = new Set([
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif',
   'mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'm4v'

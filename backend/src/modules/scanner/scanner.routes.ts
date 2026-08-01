@@ -21,12 +21,22 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     if (!hasFolderAccess(request.user!, folder)) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
     }
-    await query(`
-      INSERT INTO folder_settings (folder_path, cover_media_id, updated_at) 
-      VALUES ($1, $2, NOW()) 
-      ON CONFLICT (folder_path) DO UPDATE 
-      SET cover_media_id = EXCLUDED.cover_media_id, updated_at = NOW()
-    `, [folder, mediaId]);
+    const paths = [folder];
+    let currentPath = folder;
+    while (currentPath.includes('/')) {
+      currentPath = currentPath.substring(0, currentPath.lastIndexOf('/'));
+      paths.push(currentPath);
+    }
+    if (folder !== '') paths.push('');
+
+    for (const p of paths) {
+      await query(`
+        INSERT INTO folder_settings (folder_path, cover_media_id, updated_at) 
+        VALUES ($1, $2, NOW()) 
+        ON CONFLICT (folder_path) DO UPDATE 
+        SET cover_media_id = EXCLUDED.cover_media_id, updated_at = NOW()
+      `, [p, mediaId]);
+    }
     
     return reply.send({ success: true });
   });

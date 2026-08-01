@@ -39,6 +39,7 @@
     if (data.folderPath !== previousPath) {
       localCoverOverride = null;
       previousPath = data.folderPath;
+      toast.clear();
       if (data.isProcessing) {
         toast.info('This folder is still being processed. Some items might be missing or slow to load. Feel free to come back later!', 8000);
       }
