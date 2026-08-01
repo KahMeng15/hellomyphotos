@@ -33,7 +33,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
       folderDescription: data.folderDescription,
       files: data.files,
       directories: data.directories,
-      scanning: data.scanning
+      scanning: data.scanning,
+      isProcessing: data.isProcessing
     };
   } catch (error) {
     console.error('Failed to load folder:', error);

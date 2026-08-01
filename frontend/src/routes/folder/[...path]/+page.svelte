@@ -37,6 +37,9 @@
     if (data.folderPath !== previousPath) {
       localCoverOverride = null;
       previousPath = data.folderPath;
+      if (data.isProcessing || data.scanning) {
+        toast.info('This folder is still being processed. Some items might be missing or slow to load. Feel free to come back later!', 8000);
+      }
     }
   });
 
@@ -411,6 +414,10 @@
     sortMode = loadPref<SortMode>('folderSortMode', data.defaultSortMode || 'newest');
     viewMode = loadPref<ViewMode>('folderViewMode', data.defaultViewMode || 'small-fit');
     folderViewMode = loadPref<FolderViewMode>('folderFolderViewMode', data.defaultFolderViewMode || 'small-grid');
+
+    if (data.isProcessing || data.scanning) {
+      toast.info('This folder is still being processed. Some items might be missing or slow to load. Feel free to come back later!', 8000);
+    }
 
     pollInterval = setInterval(() => {
       // Poll if any file lacks a blurhash (still processing) or if the scanner is active

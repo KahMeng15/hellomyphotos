@@ -280,8 +280,16 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       if (r.key === 'default_folder_view_mode') defaults.defaultFolderViewMode = r.value;
     }
 
+    const processingRes = await query(`
+      SELECT COUNT(*) as count 
+      FROM media_files 
+      WHERE (folder_path = $1 OR folder_path LIKE $1 || '/%') AND (exif_json IS NULL OR blurhash IS NULL)
+    `, [folderPath || '']);
+    const isProcessing = parseInt(processingRes.rows[0].count) > 0;
+
     return reply.send({
       folderPath,
+      isProcessing,
       folderCoverId,
       folderCoverBoundingBox,
       folderCoverImgWidth,
