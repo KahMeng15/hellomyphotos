@@ -76,6 +76,5 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           build-args: |
-            PUBLIC_TURNSTILE_SITEKEY=${{ vars.PUBLIC_TURNSTILE_SITEKEY || '1x00000000000000000000AA' }}
             VITE_API_URL=${{ vars.VITE_API_URL || '' }}
             PUBLIC_APP_DOMAIN=${{ vars.PUBLIC_APP_DOMAIN || 'http://localhost:8000' }}

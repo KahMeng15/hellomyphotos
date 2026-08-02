@@ -60,6 +60,12 @@ app.post('/api/log', async (request, reply) => {
   return reply.send({ ok: true });
 });
 
+// Public Turnstile config. The frontend fetches the sitekey at runtime instead of
+// having it baked into the image at build time.
+app.get('/api/turnstile/sitekey', async () => {
+  return { sitekey: process.env.TURNSTILE_SITEKEY || '' };
+});
+
 // Health check
 app.get('/health', async () => {
   return { status: 'ok' };
