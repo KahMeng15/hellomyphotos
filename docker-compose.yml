@@ -8,6 +8,7 @@ services:
     env_file: .env
     environment:
       - NODE_ENV=production
+      - BACKEND_PROXY_URL=http://backend:3000
     depends_on:
       - backend
 
