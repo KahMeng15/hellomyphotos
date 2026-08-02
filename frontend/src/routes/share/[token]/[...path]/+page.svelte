@@ -186,9 +186,11 @@
           sitekey,
           theme: 'dark',
           action: 'share-gate',
-          size: 'invisible',
+          execution: 'execute',
+          appearance: 'execute',
           callback: (window as any).onTurnstileSuccess
         });
+        (window as any).turnstile.execute(turnstileWidgetId);
       }
     };
 
