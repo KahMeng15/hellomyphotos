@@ -16,7 +16,8 @@ RUN set -eux; \
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev && rm -rf /root/.npm
+RUN npm ci --omit=dev \
+    && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY . .
 EXPOSE 3000
-CMD ["npx", "tsx", "src/server.ts"]
+CMD ["node_modules/.bin/tsx", "src/server.ts"]
