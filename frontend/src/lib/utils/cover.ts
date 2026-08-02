@@ -3,13 +3,13 @@ export function computeCoverObjectPosition(
   imgWidth: number | null,
   imgHeight: number | null
 ): string {
-  const hero = typeof document !== 'undefined' ? document.querySelector('.header-wrapper') : null;
+  const hero = typeof document !== 'undefined' ? document.querySelector<HTMLElement>('.header-wrapper') : null;
   const containerW = hero?.offsetWidth || 0;
   const containerH = hero?.offsetHeight || 0;
 
   if (!bb) {
-    console.log('[cover] FALLBACK (no bounding box)', { objectPosition: 'center 35%', containerW, containerH });
-    return 'center 35%';
+    console.log('[cover] FALLBACK (no bounding box)', { objectPosition: 'center center', containerW, containerH });
+    return 'center center';
   }
 
   const x1 = bb.x1 ?? bb.x ?? 0;
@@ -23,9 +23,9 @@ export function computeCoverObjectPosition(
 
   if (!imgWidth || !imgHeight) {
     console.log('[cover] FALLBACK (no image dimensions)', {
-      faceCenterX, faceCenterY, faceW, faceH, imgWidth, imgHeight, containerW, containerH, objectPosition: 'center 35%'
+      faceCenterX, faceCenterY, faceW, faceH, imgWidth, imgHeight, containerW, containerH, objectPosition: 'center center'
     });
-    return 'center 35%';
+    return 'center center';
   }
 
   const pctX = (faceCenterX / imgWidth) * 100;

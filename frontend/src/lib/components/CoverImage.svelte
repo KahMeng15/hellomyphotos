@@ -3,7 +3,7 @@
 
   let {
     src,
-    objectPosition = 'center 30%',
+    objectPosition = 'center center',
     alt = 'Cover'
   }: {
     src: string;
