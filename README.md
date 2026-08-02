@@ -2,6 +2,8 @@
 
 A beautiful, self-hosted, directory-first photo management gallery engine. It reads directly from your existing disk folder hierarchies without moving or duplicating files, bringing Google Photos-like speed and AI capabilities to your local storage.
 
+![hellomyphotos screenshot](docs/screenshot.jpg)
+
 ---
 
 ## 🌟 Key Features
