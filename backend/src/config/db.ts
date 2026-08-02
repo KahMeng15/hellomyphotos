@@ -209,9 +209,25 @@ export const ensureSchema = async (): Promise<void> => {
       }
       pendingStatements = stillPending.length > 0 ? stillPending : null;
       schemaPromise = null;
+      try {
+        const status = await getDbStatus();
+        console.log(`[DB] ensureSchema finished. ${pendingStatements ? 'PENDING ' + pendingStatements.length + ' statement(s); ' : ''}public tables (${status.tables.length}): ${status.tables.join(', ')}`);
+      } catch (err: any) {
+        console.warn('[DB] ensureSchema could not list tables:', err.message);
+      }
     })();
   }
   return schemaPromise;
+};
+
+export const getDbStatus = async (): Promise<{ tables: string[]; pending: number }> => {
+  const res = await pool.query(
+    `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
+  );
+  return {
+    tables: res.rows.map((r) => r.tablename as string),
+    pending: pendingStatements?.length ?? 0,
+  };
 };
 
 export const query = async (text: string, params?: any[]) => {

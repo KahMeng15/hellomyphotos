@@ -12,6 +12,7 @@ import cookie from '@fastify/cookie';
 import './queue';
 
 import { logger } from './utils/logger';
+import { getDbStatus } from './config/db';
 
 export const app = Fastify({
   logger: true
@@ -69,4 +70,10 @@ app.get('/api/turnstile/sitekey', async () => {
 // Health check
 app.get('/health', async () => {
   return { status: 'ok' };
+});
+
+// DB bootstrap status: lists tables so schema initialization can be verified
+// without needing psql access to the database host (it may live in another stack).
+app.get('/api/db/status', async () => {
+  return getDbStatus();
 });
