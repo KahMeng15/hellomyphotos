@@ -37,26 +37,6 @@ jobs:
   backend-e2e:
     name: Backend E2E tests
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: ankane/pgvector:v0.5.1
-        env:
-          POSTGRES_USER: hellomyphotos
-          POSTGRES_PASSWORD: hellomyphotos_secret
-          POSTGRES_DB: hellomyphotos
-        ports:
-          - 5432:5432
-        volumes:
-          - ${{ github.workspace }}/volumes/pg_init:/docker-entrypoint-initdb.d:ro
-        options: >-
-          --health-cmd "pg_isready -U hellomyphotos -d hellomyphotos"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
     env:
       DB_HOST: localhost
       DB_PORT: 5432
@@ -83,6 +63,38 @@ jobs:
         run: npm ci
       - name: Prepare media/cache dirs
         run: mkdir -p "$MEDIA_ROOT" "$CACHE_ROOT"
+      - name: Start postgres
+        run: |
+          docker run -d --name e2e-postgres \
+            -e POSTGRES_USER=hellomyphotos \
+            -e POSTGRES_PASSWORD=hellomyphotos_secret \
+            -e POSTGRES_DB=hellomyphotos \
+            -p 5432:5432 \
+            -v "$GITHUB_WORKSPACE/volumes/pg_init:/docker-entrypoint-initdb.d:ro" \
+            --health-cmd "pg_isready -U hellomyphotos -d hellomyphotos" \
+            --health-interval 5s \
+            --health-timeout 3s \
+            --health-retries 15 \
+            ankane/pgvector:v0.5.1
+      - name: Start redis
+        run: |
+          docker run -d --name e2e-redis \
+            -p 6379:6379 \
+            redis:7-alpine
+      - name: Wait for postgres to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' e2e-postgres 2>/dev/null || echo starting)
+            echo "postgres health: $status"
+            if [ "$status" = "healthy" ]; then exit 0; fi
+            if [ "$status" = "unhealthy" ]; then
+              docker logs e2e-postgres
+              exit 1
+            fi
+            sleep 5
+          done
+          docker logs e2e-postgres
+          exit 1
       - name: Run E2E test suite
         run: npm test
 

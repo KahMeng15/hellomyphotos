@@ -1,8 +1,22 @@
 FROM node:22-slim
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
+ARG TARGETARCH
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      arm64) url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz" ;; \
+      *)     url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" ;; \
+    esac; \
+    apt-get update \
+      && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+      && rm -rf /var/lib/apt/lists/* \
+      && curl -fsSL "$url" -o /tmp/ffmpeg.tar.xz \
+      && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp \
+      && cp /tmp/ffmpeg-*-static/ffmpeg /usr/local/bin/ffmpeg \
+      && rm -rf /tmp/ffmpeg*
+
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --omit=dev && rm -rf /root/.npm
 COPY . .
 EXPOSE 3000
 CMD ["npx", "tsx", "src/server.ts"]

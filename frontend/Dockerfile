@@ -13,11 +13,13 @@ ENV VITE_API_URL=$VITE_API_URL
 ENV PUBLIC_APP_DOMAIN=$PUBLIC_APP_DOMAIN
 RUN npm run build
 
-# Run stage
+# Run stage — devDependencies are bundled into the build by Rollup,
+# so only runtime `dependencies` need to be installed here.
 FROM node:22-alpine
 WORKDIR /app
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm ci --omit=dev
 COPY --from=builder /app/build build/
-COPY --from=builder /app/node_modules node_modules/
-COPY package.json .
 EXPOSE 3000
-CMD ["node", "build/index.js"]
+CMD ["node", "build"]
