@@ -48,7 +48,6 @@ jobs:
           - 5432:5432
         volumes:
           - ${{ github.workspace }}/volumes/pg_init:/docker-entrypoint-initdb.d:ro
-          - ${{ github.workspace }}/.github/ci/99-e2e-role.sql:/docker-entrypoint-initdb.d/99-e2e-role.sql:ro
         options: >-
           --health-cmd "pg_isready -U hellomyphotos -d hellomyphotos"
           --health-interval 10s
