@@ -93,20 +93,27 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_analytics_visits_action ON analytics_visits(action_type)`,
 ];
 
+// Statements not yet successfully applied. Succeeded ones are dropped so they
+// aren't re-run; failing ones (e.g. CREATE EXTENSION vector on a DB where the
+// app role lacks privileges) are retried on the next ensureSchema call instead
+// of aborting the whole bootstrap.
+let pendingStatements: string[] | null = SCHEMA_STATEMENTS;
+
 export const ensureSchema = async (): Promise<void> => {
+  if (pendingStatements === null) return;
   if (!schemaPromise) {
     schemaPromise = (async () => {
-      try {
-        for (const statement of SCHEMA_STATEMENTS) {
+      const stillPending: string[] = [];
+      for (const statement of pendingStatements) {
+        try {
           await pool.query(statement);
+        } catch (err: any) {
+          stillPending.push(statement);
+          console.warn('[DB] ensureSchema notice:', err.message);
         }
-      } catch (err: any) {
-        // Reset so the next ensureSchema call retries the remaining statements.
-        // The failing statement (or a preceding race with an unready DB) should
-        // not permanently poison the schema bootstrap.
-        schemaPromise = null;
-        console.warn('[DB] ensureSchema notice:', err.message);
       }
+      pendingStatements = stillPending.length > 0 ? stillPending : null;
+      schemaPromise = null;
     })();
   }
   return schemaPromise;
