@@ -40,7 +40,7 @@ jobs:
         continue-on-error: true
       - name: Save audit report
         run: npm audit --json > audit-report.json || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: npm-audit-${{ matrix.package }}
           path: ${{ matrix.package }}/audit-report.json
