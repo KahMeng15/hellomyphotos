@@ -5,6 +5,7 @@ import { MediaService } from '../../src/modules/media/media.service';
 import { queues } from '../../src/queue';
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
@@ -51,18 +52,33 @@ export async function runTier2Tests(): Promise<{ passed: number; failed: number;
     await query("DELETE FROM media_files WHERE folder_path = 'e2e_boundary_dir'");
   });
 
-  await test('T2.02: Scanning an empty directory executes cleanly and garbage-collects deleted DB rows', async () => {
-    const emptyDir = path.join(MEDIA_ROOT, 'e2e_empty_dir');
-    fs.mkdirSync(emptyDir, { recursive: true });
+  await test('T2.02: Garbage collection prunes DB rows for media files deleted from disk', async () => {
+    const gcDir = path.join(MEDIA_ROOT, 'e2e_gc_dir');
+    fs.mkdirSync(gcDir, { recursive: true });
 
-    await query("INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes) VALUES ('e2e_empty_dir', 'old.jpg', 'image/jpeg', 100)");
+    const jpeg = await sharp({
+      create: { width: 64, height: 64, channels: 3, background: { r: 80, g: 120, b: 160 } }
+    }).jpeg().toBuffer();
 
-    await ScannerService.scanDirectory('e2e_empty_dir');
+    fs.writeFileSync(path.join(gcDir, 'keep.jpg'), jpeg);
+    fs.writeFileSync(path.join(gcDir, 'delete.jpg'), jpeg);
 
-    const check = await query("SELECT id FROM media_files WHERE folder_path = 'e2e_empty_dir'");
-    if (check.rows.length > 0) throw new Error('Garbage collection failed to prune missing files in empty directory');
+    await query("INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes) VALUES ('e2e_gc_dir', 'keep.jpg', 'image/jpeg', 100)");
+    await query("INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes) VALUES ('e2e_gc_dir', 'delete.jpg', 'image/jpeg', 100)");
 
-    fs.rmSync(emptyDir, { recursive: true, force: true });
+    await ScannerService.scanDirectory('e2e_gc_dir');
+
+    fs.rmSync(path.join(gcDir, 'delete.jpg'));
+
+    await ScannerService.scanDirectory('e2e_gc_dir');
+
+    const check = await query("SELECT file_name FROM media_files WHERE folder_path = 'e2e_gc_dir'");
+    const names = check.rows.map(r => r.file_name);
+    if (!names.includes('keep.jpg')) throw new Error('Existing file record was wrongly pruned');
+    if (names.includes('delete.jpg')) throw new Error('Garbage collection failed to prune deleted file record');
+
+    fs.rmSync(gcDir, { recursive: true, force: true });
+    await query("DELETE FROM media_files WHERE folder_path = 'e2e_gc_dir'");
   });
 
   await test('T2.03: Processing extreme image sizes (tiny 1x1 and 4000x4000 high-res) succeeds without crash', async () => {

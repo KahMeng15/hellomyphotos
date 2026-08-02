@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs';
+import { execSync } from 'child_process';
 import sharp from 'sharp';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -99,13 +100,21 @@ export async function createTestVideo(filename: string): Promise<string> {
   fs.mkdirSync(testDir, { recursive: true });
   const filePath = path.join(testDir, filename);
 
-  // Minimal valid MP4 header structure or tiny buffer if ffmpeg unavailable
-  const dummyMp4Buffer = Buffer.from([
-    0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
-    0x00, 0x00, 0x02, 0x00, 0x69, 0x73, 0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32,
-    0x61, 0x76, 0x63, 0x31, 0x6d, 0x70, 0x34, 0x31
-  ]);
-  await fs.promises.writeFile(filePath, dummyMp4Buffer);
+  try {
+    // Generate a real, playable MP4 so transcoding has actual video to process.
+    execSync(
+      `ffmpeg -y -f lavfi -i testsrc=duration=1:size=320x240:rate=10 -c:v libx264 -pix_fmt yuv420p "${filePath}"`,
+      { stdio: 'ignore' }
+    );
+  } catch {
+    // Fallback: minimal MP4 header buffer if ffmpeg is unavailable.
+    const dummyMp4Buffer = Buffer.from([
+      0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+      0x00, 0x00, 0x02, 0x00, 0x69, 0x73, 0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32,
+      0x61, 0x76, 0x63, 0x31, 0x6d, 0x70, 0x34, 0x31
+    ]);
+    await fs.promises.writeFile(filePath, dummyMp4Buffer);
+  }
   return filePath;
 }
 

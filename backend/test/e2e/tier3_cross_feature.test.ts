@@ -48,11 +48,15 @@ export async function runTier3Tests(): Promise<{ passed: number; failed: number;
     // 3. Stage 2: Smart Search CLIP Vector Generation
     await MLService.generateClipEmbedding(mediaId, imgPath);
 
-    // 4. Stage 3: Face Detection & Embedding
+    // 4. Stage 3: Face Detection & Embedding (two matching faces so DBSCAN forms a cluster)
     const dummyFaceVec = new Array(512).fill(0.08);
     await query(
       `INSERT INTO face_embeddings (media_id, bounding_box, embedding) VALUES ($1, $2, $3::vector)`,
       [mediaId, JSON.stringify({ x: 10, y: 10, w: 50, h: 50 }), `[${dummyFaceVec.join(',')}]`]
+    );
+    await query(
+      `INSERT INTO face_embeddings (media_id, bounding_box, embedding) VALUES ($1, $2, $3::vector)`,
+      [mediaId, JSON.stringify({ x: 60, y: 10, w: 50, h: 50 }), `[${dummyFaceVec.join(',')}]`]
     );
 
     // 5. Stage 4: Facial Recognition DBSCAN Clustering
@@ -75,8 +79,8 @@ export async function runTier3Tests(): Promise<{ passed: number; failed: number;
     const res = await fetch(`${url}/api/admin/queues`, { headers });
     if (!res.ok) throw new Error('Failed to fetch admin queues endpoint');
     const data = await res.json();
-    if (!data.queues || Object.keys(data.queues).length !== 7) {
-      throw new Error(`Expected 7 queues in response, found ${Object.keys(data.queues || {}).length}`);
+    if (!data.queues || Object.keys(data.queues).length !== 8) {
+      throw new Error(`Expected 8 queues in response, found ${Object.keys(data.queues || {}).length}`);
     }
   });
 

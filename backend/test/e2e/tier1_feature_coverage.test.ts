@@ -32,17 +32,17 @@ export async function runTier1Tests(): Promise<{ passed: number; failed: number;
 
   // --- Domain 1: Queue Infrastructure & Admin UI ---
 
-  await test('T1.01: 7 distinct queues are registered and returned via API', async () => {
+  await test('T1.01: 8 distinct queues are registered and returned via API', async () => {
     const res = await fetch(`${url}/api/admin/queues`, { headers });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const expectedQueues = ['scanner', 'metadata', 'thumbnail', 'video', 'smart-search', 'face-detection', 'facial-recognition'];
+    const expectedQueues = ['scanner', 'metadata', 'thumbnail', 'video', 'smart-search', 'face-detection', 'facial-recognition', 'face-thumbnail'];
     for (const q of expectedQueues) {
       if (!data.queues[q]) throw new Error(`Missing expected queue: ${q}`);
     }
   });
 
-  await test('T1.02: Stats (active/waiting/completed/failed) and progress bars provided for all 7 queues', async () => {
+  await test('T1.02: Stats (active/waiting/completed/failed) and progress bars provided for all queues', async () => {
     const res = await fetch(`${url}/api/admin/queues`, { headers });
     const data = await res.json();
     for (const [qName, qData] of Object.entries<any>(data.queues)) {

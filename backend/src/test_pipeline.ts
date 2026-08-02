@@ -102,8 +102,8 @@ async function runTests() {
   console.log('\n--- Test 3: Video Transcoding Service (fluent-ffmpeg) ---');
   try {
     const videoResult = await VideoService.processVideo(testVideoMediaId, testVideoPath);
-    const outMp4 = path.join(TEST_CACHE_ROOT, 'video', `${testVideoMediaId}.mp4`);
-    const outWebm = path.join(TEST_CACHE_ROOT, 'video', `${testVideoMediaId}.webm`);
+    const outMp4 = path.join(TEST_CACHE_ROOT, 'transcoded', 'mp4', `${testVideoMediaId}.mp4`);
+    const outWebm = path.join(TEST_CACHE_ROOT, 'transcoded', 'webm', `${testVideoMediaId}.webm`);
 
     assert(fs.existsSync(outMp4), `MP4 output created at ${outMp4}`);
     assert(fs.existsSync(outWebm), `WebM output created at ${outWebm}`);
