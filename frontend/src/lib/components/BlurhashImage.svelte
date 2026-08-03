@@ -10,7 +10,10 @@
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
   let observer: IntersectionObserver;
-  let visible = $state(priority); // If priority, it is visible immediately during SSR
+  // `near`: card is close enough to render the skeleton placeholder (but not content yet).
+  // `visible`: card is scrolled into view — decode blurhash and start loading the image.
+  let near = $state(priority); // If priority, render immediately
+  let visible = $state(priority); // If priority, is visible immediately during SSR
   let container: HTMLDivElement | undefined = $state();
   
   let aspectRatio = $state(initialAspectRatio ?? 1.5);
@@ -71,16 +74,30 @@
 
     // Lazy load image using Intersection Observer ONLY if it's not a priority image
     if (!priority) {
+      // Stage 1: mount the skeleton placeholder once the card gets close to the viewport
+      const nearObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+          near = true;
+          nearObserver.disconnect();
+        }
+      }, { rootMargin: '1200px' });
+
+      if (container) nearObserver.observe(container);
+
+      // Stage 2: when actually in view, decode the blurhash and load the real image
       observer = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting) {
           visible = true;
           observer.disconnect();
         }
       }, { rootMargin: '800px' });
-      
-      if (container) {
-        observer.observe(container);
-      }
+
+      if (container) observer.observe(container);
+
+      return () => {
+        if (nearObserver) nearObserver.disconnect();
+        if (observer) observer.disconnect();
+      };
     }
 
     return () => {
@@ -91,12 +108,14 @@
 
 <div class="grid-item {square ? 'is-square' : ''}" style="{!square ? `flex-grow: ${aspectRatio}; flex-basis: ${targetHeight * aspectRatio}px;` : ''}" {onclick}>
   <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'}; aspect-ratio: {objectFit === 'cover' ? (square ? 1 : aspectRatio) : aspectRatio};">
-    <div class="zoom-wrapper skeleton" style="animation-delay: -{randomDelay}s;">
-      {#if visible}
-        <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
-        <img {src} {alt} onload={handleLoad} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox && transformString ? `transform: ${transformString};` : ''}" />
-      {/if}
-    </div>
+    {#if near}
+      <div class="zoom-wrapper skeleton" style="animation-delay: -{randomDelay}s;">
+        {#if visible}
+          <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
+          <img {src} {alt} onload={handleLoad} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox && transformString ? `transform: ${transformString};` : ''}" />
+        {/if}
+      </div>
+    {/if}
   </div>
   {#if isVideo}
     <div class="video-indicator">
