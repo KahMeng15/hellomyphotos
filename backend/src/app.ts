@@ -21,7 +21,20 @@ export const app = Fastify({
 
 app.addHook('onRequest', async (request) => {
   if (request.url === '/api/log') return;
+  (request as any).startTime = performance.now();
   logger.info(`${request.method} ${request.url}`, { ip: request.ip });
+});
+
+app.addHook('onResponse', async (request, reply) => {
+  if (request.url === '/api/log') return;
+  const start = (request as any).startTime;
+  if (typeof start !== 'number') return;
+  const durationMs = (performance.now() - start).toFixed(2);
+  logger.info(`[RESPONSE] ${request.method} ${request.url} -> ${reply.statusCode} (${durationMs}ms)`, {
+    ip: request.ip,
+    statusCode: reply.statusCode,
+    durationMs: parseFloat(durationMs)
+  });
 });
 
 // Enable CORS for frontend client-side requests

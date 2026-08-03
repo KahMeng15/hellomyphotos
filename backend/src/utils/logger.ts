@@ -37,6 +37,12 @@ function writeLog(level: string, message: string, data?: any) {
   const line = data
     ? `[${ts}] [${level}] ${message} ${JSON.stringify(data)}\n`
     : `[${ts}] [${level}] ${message}\n`;
+  const consoleLine = data
+    ? `[${level}] ${message} ${JSON.stringify(data)}`
+    : `[${level}] ${message}`;
+  if (level === 'ERROR') console.error(consoleLine);
+  else if (level === 'WARN') console.warn(consoleLine);
+  else console.log(consoleLine);
   fs.appendFileSync(LOG_FILE, line, 'utf-8');
   // Also write to system_logs table for structured audit
   try {

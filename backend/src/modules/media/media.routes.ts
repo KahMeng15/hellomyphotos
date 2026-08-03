@@ -9,6 +9,8 @@ const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || path.resolve(process.c
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'));
 
 import { verifyMediaAccess } from '../../utils/auth';
+import { thumbnailQueue } from '../../queue/thumbnailQueue';
+import { videoQueue } from '../../queue/videoQueue';
 
 import { getThrottleLimits, BandwidthThrottler } from '../../utils/throttle';
 async function sendThrottled(request: FastifyRequest, reply: FastifyReply, stream: NodeJS.ReadableStream | Buffer) {
@@ -42,6 +44,14 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     if (result.rows.length > 0) {
       const file = result.rows[0];
       const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+      
+      // Enqueue high-priority job for missing thumbnail
+      if (file.mime_type.startsWith('video/')) {
+        await videoQueue.add('process-video', { mediaId: id, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
+      } else if (file.mime_type.startsWith('image/')) {
+        await thumbnailQueue.add('generate-thumbnail', { mediaId: id, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
+      }
+
       if (fs.existsSync(fullPath) && file.mime_type.startsWith('image/')) {
         reply.header('Content-Type', file.mime_type);
         reply.header('Cache-Control', 'public, max-age=30'); // Short cache so they upgrade to webp later
@@ -97,6 +107,14 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     if (result.rows.length > 0) {
       const file = result.rows[0];
       const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+      
+      // Enqueue high-priority job for missing preview
+      if (file.mime_type.startsWith('video/')) {
+        await videoQueue.add('process-video', { mediaId: id, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
+      } else if (file.mime_type.startsWith('image/')) {
+        await thumbnailQueue.add('generate-thumbnail', { mediaId: id, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
+      }
+
       if (fs.existsSync(fullPath) && file.mime_type.startsWith('image/')) {
         reply.header('Content-Type', file.mime_type);
         reply.header('Cache-Control', 'public, max-age=30'); // Short cache

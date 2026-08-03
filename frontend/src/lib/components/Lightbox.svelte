@@ -71,6 +71,48 @@
     if (e.key === 'ArrowLeft' && onprev) onprev();
   }
   
+  // --- Swipe management ---
+  
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchEndX = 0;
+  let touchEndY = 0;
+
+  function handleTouchStart(e: TouchEvent) {
+    onActivity();
+    touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
+  }
+
+  function handleTouchEnd(e: TouchEvent) {
+    onActivity();
+    touchEndX = e.changedTouches[0].screenX;
+    touchEndY = e.changedTouches[0].screenY;
+    handleSwipe();
+  }
+
+  function handleSwipe() {
+    const swipeThreshold = 50; // minimum distance in pixels
+    const deltaX = touchEndX - touchStartX;
+    const deltaY = touchEndY - touchStartY;
+
+    // Determine if it's mostly horizontal or vertical
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+      // Horizontal swipe
+      if (deltaX > swipeThreshold) {
+        if (onprev) onprev();
+      } else if (deltaX < -swipeThreshold) {
+        if (onnext) onnext();
+      }
+    } else {
+      // Vertical swipe
+      // Swipe up means negative deltaY
+      if (deltaY < -swipeThreshold) {
+        close();
+      }
+    }
+  }
+
   // --- Info / faces ---
 
   let faces: {person_id: string, bounding_box: any, name?: string}[] = $state([]);
@@ -148,7 +190,8 @@
 
 <div class="lightbox" style="opacity: 1;" onmousemove={onActivity} onmousedown={onActivity} ontouchstart={onActivity} onclick={close}>
   <div class="layout-wrapper">
-    <div class="main-area">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="main-area" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
       <div class="top-bar" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'} onclick={(e) => e.stopPropagation()}>
         {#if allowDownload}
           <button class="icon-btn" onclick={download} title="Download">
