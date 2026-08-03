@@ -61,7 +61,7 @@ jobs:
         run: docker build -t hellomyphotos/${{ matrix.image }} -f ${{ matrix.image }}/Dockerfile ${{ matrix.image }}
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: hellomyphotos/${{ matrix.image }}
           format: sarif
@@ -71,7 +71,7 @@ jobs:
           exit-code: '1'
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: success() || failure()
         with:
           sarif_file: trivy-results.sarif
