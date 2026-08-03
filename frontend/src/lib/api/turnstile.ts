@@ -9,7 +9,7 @@ export async function getTurnstileSitekey(): Promise<string> {
     if (!res.ok) return '';
     const data = await res.json();
     const sitekey: string = data.sitekey || '';
-    cachedSitekey = sitekey;
+    if (sitekey) cachedSitekey = sitekey;
     return sitekey;
   } catch {
     return '';
