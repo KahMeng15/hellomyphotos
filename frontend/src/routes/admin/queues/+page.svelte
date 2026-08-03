@@ -7,7 +7,6 @@
   let queues = $state<any>({});
   let executionMode = $state<'sequential' | 'concurrent'>('sequential');
   let settings = $state<any>({
-    maxCpuCores: 2,
     scanInterval: 3600000,
     scanSchedule: { type: 'off' },
     mlConfidenceThreshold: 0.6
@@ -66,7 +65,6 @@
       }
       if (sRes.ok) {
         const data = await sRes.json();
-        settings.maxCpuCores = data.maxCpuCores;
         settings.scanInterval = data.scanInterval;
         settings.scanSchedule = data.scanSchedule || { type: 'off' };
         settings.mlConfidenceThreshold = data.mlConfidenceThreshold;
@@ -93,7 +91,6 @@
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          maxCpuCores: Number(settings.maxCpuCores),
           scanInterval: Number(settings.scanInterval),
           scanSchedule: settings.scanSchedule,
           mlConfidenceThreshold: Number(settings.mlConfidenceThreshold)
@@ -362,12 +359,6 @@
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
       <div class="card">
         <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;"><Cpu size={18} color="#3b82f6"/> Hardware & Scans</h3>
-        <div class="form-group" style="margin-bottom: 1rem;">
-          <label style="display: block; font-size: 0.9rem; margin-bottom: 0.25rem;">Max CPU Cores (Concurrency)</label>
-          <!-- H-3 Note: This setting is read at startup from env vars. Changes take effect after a service restart. -->
-          <p style="font-size: 0.75rem; color: #a1a1aa; margin: 0 0 0.4rem 0;">⚠️ Requires service restart to take effect.</p>
-          <input type="number" bind:value={settings.maxCpuCores} min="1" max="32" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
-        </div>
         <div class="form-group">
           <label style="display: block; font-size: 0.9rem; margin-bottom: 0.25rem;">Auto-Scan Schedule</label>
           <select bind:value={settings.scanSchedule.type} style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; margin-bottom: 0.5rem;">
@@ -479,7 +470,7 @@
     </div>
 
     <div style="margin-top: 0.5rem;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+      <div class="pipeline-toolbar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
         <!-- D-1 Fix: was incorrectly labelled "7 Pipeline Queues" when there are 8 -->
         <h3 style="margin: 0; font-size: 1.25rem; color: #e4e4e7;">8 Pipeline Queues</h3>
         <div style="display: flex; gap: 0.5rem;">
@@ -730,4 +721,27 @@
   .btn.danger { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
   .btn.secondary { background: rgba(255, 255, 255, 0.05); color: #cbd5e1; border: 1px solid rgba(255, 255, 255, 0.1); }
   .btn:hover { filter: brightness(1.2); }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .pipeline-toolbar {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+    .pipeline-toolbar > div { flex-wrap: wrap; }
+    .q-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .q-actions { flex-wrap: wrap; }
+    .q-stats { flex-wrap: wrap; gap: 1rem; }
+    .card { padding: 1rem; }
+  }
 </style>

@@ -322,4 +322,16 @@
     border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 4rem auto;
   }
   @keyframes spin { 100% { transform: rotate(360deg); } }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .settings-grid { grid-template-columns: 1fr; }
+    .preset-btns { flex-wrap: wrap; }
+    .card-body { padding: 1.25rem; }
+  }
 </style>

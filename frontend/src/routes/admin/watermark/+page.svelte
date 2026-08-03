@@ -299,4 +299,11 @@
     border-radius: 6px;
     color: #34d399;
   }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .header { margin-bottom: 1.5rem; }
+    .card-header { padding: 14px 16px; }
+    .card-body { padding: 16px; }
+  }
 </style>

@@ -17,7 +17,7 @@ const __dirname = path.dirname(__filename);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-import { query } from './config/db';
+import { getContainerCpuCount } from './config/cpu';
 
 const start = async () => {
   try {
@@ -34,13 +34,7 @@ const start = async () => {
         logger.info(`API disabled via DISABLE_API=true. Running worker orchestrator only.`);
       }
       
-      let maxCpuCores = '2';
-      try {
-        const res = await query("SELECT value FROM admin_settings WHERE key = 'max_cpu_cores'");
-        if (res.rows.length > 0) maxCpuCores = String(res.rows[0].value);
-      } catch (err) {
-        console.error('Failed to load max_cpu_cores from DB:', err);
-      }
+      const maxCpuCores = String(getContainerCpuCount());
 
       let workerProc: ReturnType<typeof fork> | null = null;
       let isShuttingDown = false;

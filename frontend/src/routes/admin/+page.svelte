@@ -219,4 +219,10 @@
     font-size: 0.95rem;
     line-height: 1.4;
   }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .card { padding: 20px; }
+    .header { margin-bottom: 1.5rem; }
+  }
 </style>

@@ -269,4 +269,15 @@
   .btn.secondary:hover {
     background: rgba(255,255,255,0.2);
   }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .toolbar { flex-wrap: wrap; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px; }
+  }
 </style>

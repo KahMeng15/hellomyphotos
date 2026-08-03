@@ -417,4 +417,9 @@
     height: 18px;
     accent-color: #3b82f6;
   }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .glass-table { min-width: 720px; }
+  }
 </style>

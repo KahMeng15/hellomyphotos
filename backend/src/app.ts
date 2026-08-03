@@ -15,7 +15,8 @@ import { logger } from './utils/logger';
 import { getDbStatus } from './config/db';
 
 export const app = Fastify({
-  logger: true
+  logger: true,
+  trustProxy: true
 });
 
 app.addHook('onRequest', async (request) => {

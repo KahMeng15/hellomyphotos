@@ -9,6 +9,7 @@ import sharp from 'sharp';
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
 
 import { requireAuth, hasFolderAccess } from '../../utils/auth';
+import { getClientIp } from '../../utils/getIp';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
@@ -53,7 +54,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Security verification missing' });
     }
 
-    const ip = request.ip || (request.headers['x-forwarded-for'] as string) || request.socket.remoteAddress || '';
+    const ip = getClientIp(request);
     
     try {
       const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {

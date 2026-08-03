@@ -257,4 +257,18 @@
   :global(.user) { color: #10b981; margin-right: 0.5rem; }
   
   .muted { color: #71717a; font-style: italic; }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .header > div:last-child {
+      flex-wrap: wrap;
+      width: 100%;
+    }
+    .terminal-body { height: 60dvh; }
+  }
 </style>

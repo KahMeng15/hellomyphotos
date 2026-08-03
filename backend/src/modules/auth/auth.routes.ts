@@ -5,6 +5,7 @@ import { pool } from '../../config/db';
 import { redis } from '../../config/redis';
 import { logger } from '../../utils/logger';
 import { requireAuth } from '../../utils/auth';
+import { getClientIp } from '../../utils/getIp';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_please_change';
 const APP_DOMAIN = process.env.APP_DOMAIN || '';
@@ -25,7 +26,7 @@ export async function authRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Email and password required' });
     }
 
-    const ip = request.ip || (request.headers['x-forwarded-for'] as string) || request.socket.remoteAddress || 'unknown';
+    const ip = getClientIp(request);
 
     if (process.env.TURNSTILE_SECRET) {
       if (!turnstileToken) {
