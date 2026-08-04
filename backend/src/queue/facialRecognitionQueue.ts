@@ -59,9 +59,9 @@ if (process.env.IS_WORKER === 'true') {
       await scheduleRecluster();
     }
 
-    // Sequential mode: chain immediately to face-thumbnail for this specific media
+    // Pipeline mode: chain to face-thumbnail per-image after recognition.
     const mode = await getExecutionMode();
-    if (mode === 'sequential') {
+    if (mode === 'pipeline') {
       await faceThumbnailQueue.add('generate-face-thumbnails', { mediaId },
         { jobId: `face-thumb-${mediaId}-${Date.now()}` });
     }

@@ -21,9 +21,9 @@ if (process.env.IS_WORKER === 'true') {
     await MetadataService.extractMetadata(mediaId, fullPath, mimeType);
   }
 
-  // Sequential handoff
+  // Pipeline handoff: chain to next stage per-image
   const mode = await getExecutionMode();
-  if (mode === 'sequential') {
+  if (mode === 'pipeline') {
     if (mimeType && mimeType.startsWith('video/')) {
       await videoQueue.add('process-video', { mediaId, fullPath, mimeType });
     } else {

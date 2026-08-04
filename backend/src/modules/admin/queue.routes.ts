@@ -10,7 +10,8 @@ import {
   videoQueue,
   smartSearchQueue,
   faceDetectionQueue,
-  facialRecognitionQueue
+  facialRecognitionQueue,
+  faceThumbnailQueue
 } from '../../queue';
 import { query } from '../../config/db';
 import { redis } from '../../config/redis';
@@ -91,9 +92,9 @@ export async function queueRoutes(fastify: FastifyInstance) {
 
   // POST /api/admin/queues/mode
   fastify.post('/api/admin/queues/mode', async (request, reply) => {
-    const { mode } = request.body as { mode: 'sequential' | 'concurrent' };
-    if (mode !== 'sequential' && mode !== 'concurrent') {
-      return reply.status(400).send({ error: "Mode must be 'sequential' or 'concurrent'" });
+    const { mode } = request.body as { mode: 'pipeline' | 'batch' };
+    if (mode !== 'pipeline' && mode !== 'batch') {
+      return reply.status(400).send({ error: "Mode must be 'pipeline' or 'batch'" });
     }
     const updatedMode = await setExecutionMode(mode);
     return reply.send({ success: true, mode: updatedMode });
@@ -337,5 +338,146 @@ export async function queueRoutes(fastify: FastifyInstance) {
     }
 
     return reply.send({ success: true, message: `Triggered queue '${name}'` });
+  });
+
+  // POST /api/admin/queues/start-all-batch
+  // Batch mode: runs stages serially. Each stage must fully drain before the next begins.
+  // Stage order: metadata → (thumbnail + video) → smart-search → face-detection → facial-recognition → face-thumbnail
+  // Returns immediately; the chain runs in the background.
+  fastify.post('/api/admin/queues/start-all-batch', async (request, reply) => {
+    const BATCH_RUNNING_KEY = 'queue:batch:running';
+    const alreadyRunning = await redis.set(BATCH_RUNNING_KEY, '1', 'EX', 3600 * 12, 'NX');
+    if (!alreadyRunning) {
+      return reply.status(409).send({ error: 'A batch run is already in progress.' });
+    }
+
+    reply.send({ success: true, message: 'Batch processing started. Stages will run serially.' });
+
+    // Run the chain fully in the background so we don't block the HTTP response
+    setImmediate(async () => {
+      const mediaRoot = MEDIA_ROOT();
+      const toJob = (jobName: string) => (row: any) => ({
+        name: jobName,
+        data: { mediaId: row.id, fullPath: path.resolve(mediaRoot, row.folder_path || '', row.file_name), mimeType: row.mime_type },
+        opts: { removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } }
+      });
+
+      // Helper: wait until a queue has zero waiting + active jobs
+      async function drainWait(q: any, name: string): Promise<void> {
+        console.log(`[Batch] Waiting for ${name} to drain...`);
+        while (true) {
+          const counts = await q.getJobCounts('waiting', 'active');
+          if ((counts.waiting || 0) === 0 && (counts.active || 0) === 0) break;
+          await new Promise(res => setTimeout(res, 5000)); // poll every 5s
+        }
+        console.log(`[Batch] ${name} drained.`);
+      }
+
+      try {
+        // Stage 1: Scanner
+        console.log('[Batch] Stage 1: Scanner');
+        await scannerQueue.resume();
+        const { ScannerService } = await import('../scanner/scanner.service');
+        await ScannerService.scanAllDirectories('');
+        await drainWait(scannerQueue, 'scanner');
+
+        // Stage 2: Metadata
+        console.log('[Batch] Stage 2: Metadata');
+        await metadataQueue.resume();
+        const metaTotal = await streamEnqueue(
+          metadataQueue,
+          `SELECT COUNT(*)::text as count FROM media_files WHERE exif_json IS NULL`,
+          `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE exif_json IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
+          toJob('extract-metadata')
+        );
+        await recordEtaStart('metadata', metaTotal);
+        await drainWait(metadataQueue, 'metadata');
+
+        // Stage 3: Thumbnail + Video (run in parallel, both must drain)
+        console.log('[Batch] Stage 3: Thumbnails + Video (parallel)');
+        await thumbnailQueue.resume();
+        await videoQueue.resume();
+        const [thumbTotal, videoTotal] = await Promise.all([
+          streamEnqueue(
+            thumbnailQueue,
+            `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'image/%' AND (NOT has_1080p OR NOT has_480p)`,
+            `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' AND (NOT has_1080p OR NOT has_480p) ORDER BY id LIMIT $1 OFFSET $2`,
+            toJob('generate-thumbnail')
+          ),
+          streamEnqueue(
+            videoQueue,
+            `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL`,
+            `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
+            toJob('process-video')
+          )
+        ]);
+        await recordEtaStart('thumbnail', thumbTotal);
+        await recordEtaStart('video', videoTotal);
+        await Promise.all([drainWait(thumbnailQueue, 'thumbnail'), drainWait(videoQueue, 'video')]);
+
+        // Stage 4: Smart Search
+        console.log('[Batch] Stage 4: Smart Search');
+        await smartSearchQueue.resume();
+        const ssTotal = await streamEnqueue(
+          smartSearchQueue,
+          `SELECT COUNT(*)::text as count FROM media_files WHERE clip_embedding IS NULL`,
+          `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE clip_embedding IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
+          toJob('generate-smart-search')
+        );
+        await recordEtaStart('smart-search', ssTotal);
+        await drainWait(smartSearchQueue, 'smart-search');
+
+        // Stage 5: Face Detection
+        console.log('[Batch] Stage 5: Face Detection');
+        await faceDetectionQueue.resume();
+        const fdTotal = await streamEnqueue(
+          faceDetectionQueue,
+          `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'image/%' AND NOT EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.media_id = media_files.id)`,
+          `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' AND NOT EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.media_id = media_files.id) ORDER BY id LIMIT $1 OFFSET $2`,
+          toJob('detect-faces')
+        );
+        await recordEtaStart('face-detection', fdTotal);
+        await drainWait(faceDetectionQueue, 'face-detection');
+
+        // Stage 6: Facial Recognition (recluster all)
+        console.log('[Batch] Stage 6: Facial Recognition');
+        await facialRecognitionQueue.resume();
+        const frTotal = await streamEnqueue(
+          facialRecognitionQueue,
+          `SELECT COUNT(DISTINCT m.id)::text as count FROM media_files m JOIN face_embeddings fe ON fe.media_id = m.id WHERE fe.person_id IS NULL`,
+          `SELECT DISTINCT m.id, m.folder_path, m.file_name, m.mime_type FROM media_files m JOIN face_embeddings fe ON fe.media_id = m.id WHERE fe.person_id IS NULL ORDER BY m.id LIMIT $1 OFFSET $2`,
+          toJob('recognize-faces')
+        );
+        await recordEtaStart('facial-recognition', frTotal);
+        await drainWait(facialRecognitionQueue, 'facial-recognition');
+
+        // Stage 7: Face Thumbnails
+        console.log('[Batch] Stage 7: Face Thumbnails');
+        await faceThumbnailQueue.resume();
+        const people = await query(`SELECT DISTINCT fe.media_id FROM face_embeddings fe
+          JOIN people p ON p.id = fe.person_id WHERE fe.person_id IS NOT NULL LIMIT 5000`);
+        if (people.rows.length > 0) {
+          await faceThumbnailQueue.addBulk(people.rows.map(row => ({
+            name: 'generate-face-thumbnails',
+            data: { mediaId: row.media_id },
+            opts: { jobId: `face-thumb-${row.media_id}`, removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } }
+          })));
+        }
+        await drainWait(faceThumbnailQueue, 'face-thumbnail');
+
+        console.log('[Batch] All stages complete!');
+      } catch (err) {
+        console.error('[Batch] Batch processing failed:', err);
+      } finally {
+        await redis.del(BATCH_RUNNING_KEY);
+        await redis.del('queue:stats:cache');
+      }
+    });
+  });
+
+  // GET /api/admin/queues/batch-status — check if a batch run is in progress
+  fastify.get('/api/admin/queues/batch-status', async (request, reply) => {
+    const running = await redis.get('queue:batch:running');
+    return reply.send({ running: !!running });
   });
 }

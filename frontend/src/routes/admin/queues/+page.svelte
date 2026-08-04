@@ -5,7 +5,7 @@
   import Modal from '$lib/components/Modal.svelte';
 
   let queues = $state<any>({});
-  let executionMode = $state<'sequential' | 'concurrent'>('sequential');
+  let executionMode = $state<'pipeline' | 'batch'>('pipeline');
   let settings = $state<any>({
     scanInterval: 3600000,
     scanSchedule: { type: 'off' },
@@ -111,8 +111,9 @@
     }
   }
 
-  async function toggleExecutionMode(newMode: 'sequential' | 'concurrent') {
+  async function toggleExecutionMode(newMode: 'pipeline' | 'batch') {
     if (executionMode === newMode) return;
+    // Optimistic update — instant UI feedback before API responds
     executionMode = newMode;
     try {
       const res = await fetch(`${API_BASE}/api/admin/queues/mode`, {
@@ -124,10 +125,16 @@
       if (res.ok) {
         const data = await res.json();
         executionMode = data.mode;
+        const label = data.mode === 'pipeline' ? 'Pipeline' : 'Batch';
+        toast.success(`Switched to ${label} mode`);
+      } else {
+        // Roll back on failure
+        executionMode = newMode === 'pipeline' ? 'batch' : 'pipeline';
+        toast.error('Failed to change execution mode');
       }
-      await loadQueuesOnly();
     } catch (e) {
-      console.error('Failed to change queue execution mode:', e);
+      executionMode = newMode === 'pipeline' ? 'batch' : 'pipeline';
+      toast.error('Network error changing mode');
     }
   }
 
@@ -159,31 +166,62 @@
   });
 
   async function actionQueue(name: string, action: string) {
-    const res = await fetch(`${API_BASE}/api/admin/queues/${name}/${action}`, { 
-      method: 'POST', 
-      credentials: 'include' 
-    });
-    if (res.ok) await loadQueuesOnly();
-  }
-  
-  async function stopQueue(name: string) {
-    customConfirm('Stop Queue', `Are you sure you want to stop and cancel all pending jobs in the ${name} queue?`, true, async () => {
-      const res = await fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { 
+    const label = name.replace(/-/g, ' ');
+    const actionLabel = action === 'pause' ? 'Paused' : action === 'resume' ? 'Resumed' : action.charAt(0).toUpperCase() + action.slice(1) + 'ed';
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${name}/${action}`, { 
         method: 'POST', 
         credentials: 'include' 
       });
-      if (res.ok) await loadQueuesOnly();
+      if (res.ok) {
+        toast.success(`${actionLabel} ${label} queue`);
+        await loadQueuesOnly();
+      } else {
+        toast.error(`Failed to ${action} ${label} queue`);
+      }
+    } catch {
+      toast.error(`Network error on ${label} ${action}`);
+    }
+  }
+  
+  async function stopQueue(name: string) {
+    const label = name.replace(/-/g, ' ');
+    customConfirm('Stop Queue', `Stop and cancel all pending jobs in the ${label} queue?`, true, async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { 
+          method: 'POST', 
+          credentials: 'include' 
+        });
+        if (res.ok) {
+          toast.success(`Stopped ${label} queue`);
+          await loadQueuesOnly();
+        } else {
+          toast.error(`Failed to stop ${label} queue`);
+        }
+      } catch {
+        toast.error(`Network error stopping ${label}`);
+      }
     });
   }
   
   async function cleanQueue(name: string, type: string) {
-    const res = await fetch(`${API_BASE}/api/admin/queues/${name}/clean`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ type })
-    });
-    if (res.ok) await loadQueuesOnly();
+    const label = name.replace(/-/g, ' ');
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${name}/clean`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ type })
+      });
+      if (res.ok) {
+        toast.success(`Cleared ${type} jobs from ${label}`);
+        await loadQueuesOnly();
+      } else {
+        toast.error(`Failed to clean ${label}`);
+      }
+    } catch {
+      toast.error(`Network error cleaning ${label}`);
+    }
   }
 
   async function triggerResetEverything() {
@@ -275,56 +313,81 @@
   };
 
   async function triggerJob(name: string) {
+    const label = name.replace(/-/g, ' ');
     try {
       const res = await fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) {
+      if (res.ok) {
+        toast.success(`Started ${label} queue`);
+      } else {
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        customAlert('Error', `Failed to start ${name}: ${err.error || res.statusText}`);
+        toast.error(`Failed to start ${label}: ${err.error || res.statusText}`);
       }
     } catch (e: any) {
-      customAlert('Error', `Network error starting ${name}: ${e.message}`);
+      toast.error(`Network error starting ${label}: ${e.message}`);
     }
     await loadQueuesOnly();
   }
 
+  let batchRunning = $state(false);
+
   async function runAllJobs() {
-    // D-5 Fix: Fire all trigger requests concurrently instead of sequentially.
-    // Previously 8 sequential awaits could block the UI for several seconds.
-    try {
-      const results = await Promise.all(
-        queueNames.map(name =>
-          fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' })
-        )
-      );
-      
-      const failures = [];
-      for (let i = 0; i < results.length; i++) {
-        if (!results[i].ok) failures.push(queueNames[i]);
+    if (executionMode === 'batch') {
+      try {
+        batchRunning = true;
+        const res = await fetch(`${API_BASE}/api/admin/queues/start-all-batch`, { method: 'POST', credentials: 'include' });
+        if (res.status === 409) {
+          toast.info('A batch run is already in progress');
+        } else if (res.ok) {
+          toast.success('Batch processing started. Stages will run serially.');
+        } else {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          toast.error(`Failed to start batch: ${err.error}`);
+          batchRunning = false;
+        }
+      } catch (e: any) {
+        toast.error(`Network error: ${e.message}`);
+        batchRunning = false;
       }
-      
-      if (failures.length > 0) {
-        customAlert('Warning', `Failed to start some queues: ${failures.join(', ')}`);
+    } else {
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/queues/metadata/trigger`, { method: 'POST', credentials: 'include' });
+        if (res.ok) {
+          toast.success('Pipeline started. Photos will chain through all stages automatically.');
+        } else {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          toast.error(`Failed to start pipeline: ${err.error || res.statusText}`);
+        }
+      } catch (e: any) {
+        toast.error(`Network error starting pipeline: ${e.message}`);
       }
-    } catch (e: any) {
-      customAlert('Error', `Network error starting queues: ${e.message}`);
     }
     await loadQueuesOnly();
   }
 
   async function stopAllJobs() {
-    customConfirm('Stop All Jobs', 'Are you sure you want to stop and cancel all pending jobs across all queues?', true, async () => {
-      for (const name of queueNames) {
-        await fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { method: 'POST', credentials: 'include' });
+    customConfirm('Stop All Jobs', 'Stop and cancel all pending jobs across all queues?', true, async () => {
+      try {
+        await Promise.all(queueNames.map(name =>
+          fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { method: 'POST', credentials: 'include' })
+        ));
+        toast.success('All queues stopped');
+        await loadQueuesOnly();
+      } catch {
+        toast.error('Failed to stop all queues');
       }
-      await loadQueuesOnly();
     });
   }
 
   async function pauseAllJobs() {
-    for (const name of queueNames) {
-      await fetch(`${API_BASE}/api/admin/queues/${name}/pause`, { method: 'POST', credentials: 'include' });
+    try {
+      await Promise.all(queueNames.map(name =>
+        fetch(`${API_BASE}/api/admin/queues/${name}/pause`, { method: 'POST', credentials: 'include' })
+      ));
+      toast.success('All queues paused');
+      await loadQueuesOnly();
+    } catch {
+      toast.error('Failed to pause all queues');
     }
-    await loadQueuesOnly();
   }
 
   // Format seconds into a human-readable string like "2h 35min" or "45min 20s"
@@ -464,28 +527,28 @@
             <Layers size={20} color="#6366f1" /> Execution Mode Controls
           </h3>
           <p style="margin: 0; font-size: 0.85rem; color: #a1a1aa;">
-            {#if executionMode === 'sequential'}
-              <strong style="color: #6366f1;">Sequential Mode:</strong> Jobs execute in chained sequence (Scanner → Metadata → Thumbnail/Video → Smart Search → Face Detection → Facial Recognition).
+            {#if executionMode === 'pipeline'}
+              <strong style="color: #6366f1;">Pipeline Mode:</strong> Assembly line. Each photo flows through all stages in order (Metadata, Thumbnail, Smart Search, Face Detection, Recognition), while multiple photos are in-flight across different stages simultaneously.
             {:else}
-              <strong style="color: #10b981;">Concurrent Mode:</strong> Queues execute independently without awaiting predecessor queue completion.
+              <strong style="color: #10b981;">Batch Mode:</strong> Stage by stage. All photos complete one stage fully before the next stage begins. Only one queue type is active at a time, using lower memory. Ideal for large libraries.
             {/if}
           </p>
         </div>
 
         <div style="display: flex; background: rgba(0, 0, 0, 0.4); padding: 4px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
           <button 
-            class="mode-btn {executionMode === 'sequential' ? 'active-sequential' : ''}" 
-            onclick={() => toggleExecutionMode('sequential')}
+            class="mode-btn {executionMode === 'pipeline' ? 'active-sequential' : ''}" 
+            onclick={() => toggleExecutionMode('pipeline')}
             type="button"
           >
-            Sequential
+            Pipeline
           </button>
           <button 
-            class="mode-btn {executionMode === 'concurrent' ? 'active-concurrent' : ''}" 
-            onclick={() => toggleExecutionMode('concurrent')}
+            class="mode-btn {executionMode === 'batch' ? 'active-concurrent' : ''}" 
+            onclick={() => toggleExecutionMode('batch')}
             type="button"
           >
-            Concurrent
+            Batch
           </button>
         </div>
       </div>

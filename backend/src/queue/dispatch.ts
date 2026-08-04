@@ -13,7 +13,7 @@ export interface MediaJobData {
 
 export async function dispatchMediaFile(jobData: MediaJobData): Promise<void> {
   const mode = await getExecutionMode();
-  if (mode === 'sequential') {
+  if (mode === 'pipeline') {
     await metadataQueue.add('extract-metadata', jobData);
   } else {
     const isVideo = jobData.mimeType?.startsWith('video/');

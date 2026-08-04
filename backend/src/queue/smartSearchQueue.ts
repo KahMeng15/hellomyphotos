@@ -25,9 +25,9 @@ if (process.env.IS_WORKER === 'true') {
     }
   }
 
-  // Next handoff step:
+  // Pipeline handoff: chain to next stage per-image
   const mode = await getExecutionMode();
-  if (mode === 'sequential') {
+  if (mode === 'pipeline') {
     await faceDetectionQueue.add('detect-faces', { mediaId, fullPath, mimeType });
   }
 }, {

@@ -22,11 +22,10 @@ if (process.env.IS_WORKER === 'true') {
     }
   }
 
-  // Only trigger individual recognize-faces in sequential mode.
-  // In concurrent (bulk trigger) mode, facial-recognition is triggered separately
-  // as a full queue sweep, so per-image jobs here would create 100k duplicate triggers.
+  // Pipeline mode: chain to facial-recognition per-image.
+  // Batch mode: facial-recognition is triggered as a full queue sweep after face-detection finishes.
   const mode = await getExecutionMode();
-  if (mode === 'sequential') {
+  if (mode === 'pipeline') {
     await facialRecognitionQueue.add('recognize-faces', { mediaId, fullPath, mimeType },
       { removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } });
   }
