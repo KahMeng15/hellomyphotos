@@ -7,6 +7,7 @@ RUN set -eux; \
       *)     url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" ;; \
     esac; \
     apt-get update \
+      && apt-get upgrade -y \
       && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
       && rm -rf /var/lib/apt/lists/* \
       && curl -fsSL "$url" -o /tmp/ffmpeg.tar.xz \

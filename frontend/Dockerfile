@@ -17,7 +17,8 @@ FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
-RUN npm ci --omit=dev \
+RUN apk upgrade --no-cache \
+    && npm ci --omit=dev \
     && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=builder /app/build build/
 EXPOSE 3000

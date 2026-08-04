@@ -23,6 +23,10 @@ const start = async () => {
   try {
     if (process.env.IS_WORKER === 'true') {
       console.log('Background worker process initialized.');
+      import('sharp').then(sharp => {
+        sharp.default.cache(false);
+        console.log('Disabled sharp cache for worker to prevent memory leaks.');
+      }).catch(() => {});
       // Keep worker process alive
       process.on('SIGTERM', () => process.exit(0));
     } else {
