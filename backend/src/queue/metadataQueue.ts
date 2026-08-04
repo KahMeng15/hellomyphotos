@@ -32,7 +32,9 @@ if (process.env.IS_WORKER === 'true') {
   }
 }, {
   connection: redis,
-  concurrency: parseInt(process.env.METADATA_CONCURRENCY || '2', 10)
+  concurrency: parseInt(process.env.METADATA_CONCURRENCY || '2', 10),
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 86400 }
 });
 
   metadataWorker.on('failed', (job, err) => {

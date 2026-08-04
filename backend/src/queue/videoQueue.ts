@@ -28,13 +28,18 @@ if (process.env.IS_WORKER === 'true') {
   // Sequential handoff
   const mode = await getExecutionMode();
   if (mode === 'sequential') {
-    await smartSearchQueue.add('generate-smart-search', { mediaId, fullPath, mimeType });
+    await smartSearchQueue.add('generate-smart-search', { mediaId, fullPath, mimeType }, {
+      removeOnComplete: { age: 3600 },
+      removeOnFail: { age: 86400 }
+    });
   }
   
   return { action: actionTaken };
 }, {
   connection: redis,
-  concurrency: parseInt(process.env.VIDEO_CONCURRENCY || '1', 10)
+  concurrency: parseInt(process.env.VIDEO_CONCURRENCY || '1', 10),
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 86400 }
 });
 
   videoWorker.on('failed', (job, err) => {

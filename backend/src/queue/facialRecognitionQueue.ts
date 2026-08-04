@@ -7,17 +7,20 @@ import { getExecutionMode } from './mode';
 
 export const facialRecognitionQueue = new Queue('facial-recognition', { connection: redis });
 
-// C-4 Fix: Debounce recluster using BullMQ delayed jobs so the UI sees the active state.
+// C-4 Fix: Debounce recluster using a Redis key + delayed job so we avoid loading all jobs into memory.
+// Uses a Redis lock so only one debounce job is ever scheduled at a time.
 async function scheduleRecluster(): Promise<void> {
-  // Remove any existing delayed debounce job
-  const existingJobs = await facialRecognitionQueue.getJobs(['delayed', 'waiting']);
-  for (const j of existingJobs) {
-    if (j.id === 'debounce-recluster') {
-      await j.remove().catch(() => {});
-    }
+  const LOCK_KEY = 'queue:facial-recognition:recluster-pending';
+  // If a recluster is already scheduled, just extend the TTL to reset the debounce window
+  const already = await redis.set(LOCK_KEY, '1', 'EX', 35, 'NX');
+  if (!already) {
+    // Already pending — refresh TTL to extend debounce window
+    await redis.expire(LOCK_KEY, 35);
+    return;
   }
-  // Arm the debounce timer for 30 seconds
-  await facialRecognitionQueue.add('recluster-all', {}, { jobId: 'debounce-recluster', delay: 30000 });
+  // Arm the debounce timer for 30 seconds (lock TTL of 35s gives a 5s buffer)
+  await facialRecognitionQueue.add('recluster-all', {}, { jobId: 'debounce-recluster', delay: 30000,
+    removeOnComplete: true, removeOnFail: { age: 3600 } });
 }
 
 export let facialRecognitionWorker: Worker | undefined;
@@ -25,14 +28,19 @@ if (process.env.IS_WORKER === 'true') {
   facialRecognitionWorker = new Worker('facial-recognition', async (job) => {
     if (job.name === 'recluster-all') {
       console.log('[Facial Recognition Worker] Debounce settled — running DBSCAN recluster.');
+      // Clear the debounce lock so future triggers can schedule a new recluster
+      await redis.del('queue:facial-recognition:recluster-pending');
       await ClusterService.reclusterFaces();
 
-      // After clustering, queue face thumbnail regeneration for all people
+      // After clustering, queue face thumbnail regeneration in bulk (not one job per person)
       const people = await query(`SELECT DISTINCT fe.media_id FROM face_embeddings fe
-        JOIN people p ON p.id = fe.person_id WHERE fe.person_id IS NOT NULL`);
-      for (const row of people.rows) {
-        await faceThumbnailQueue.add('generate-face-thumbnails', { mediaId: row.media_id },
-          { jobId: `face-thumb-${row.media_id}-${Date.now()}` });
+        JOIN people p ON p.id = fe.person_id WHERE fe.person_id IS NOT NULL LIMIT 5000`);
+      if (people.rows.length > 0) {
+        await faceThumbnailQueue.addBulk(people.rows.map(row => ({
+          name: 'generate-face-thumbnails',
+          data: { mediaId: row.media_id },
+          opts: { jobId: `face-thumb-${row.media_id}`, removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } }
+        })));
       }
       return;
     }
@@ -59,7 +67,9 @@ if (process.env.IS_WORKER === 'true') {
     }
   }, {
     connection: redis,
-    concurrency: parseInt(process.env.FACIAL_RECOGNITION_CONCURRENCY || '1', 10)
+    concurrency: parseInt(process.env.FACIAL_RECOGNITION_CONCURRENCY || '1', 10),
+    removeOnComplete: { age: 3600 },
+    removeOnFail: { age: 86400 }
   });
 
   facialRecognitionWorker.on('failed', (job, err) => {

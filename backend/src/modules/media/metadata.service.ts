@@ -81,7 +81,6 @@ export class MetadataService {
               timestamp,
               width,
               height,
-              ...rawData,
             };
           }
         } catch (exifErr: any) {

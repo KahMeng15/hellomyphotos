@@ -29,7 +29,9 @@ if (process.env.IS_WORKER === 'true') {
   }
 }, {
   connection: redis,
-  concurrency: parseInt(process.env.THUMBNAIL_CONCURRENCY || '2', 10)
+  concurrency: parseInt(process.env.THUMBNAIL_CONCURRENCY || '2', 10),
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 86400 }
 });
 
   thumbnailWorker.on('failed', (job, err) => {

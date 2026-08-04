@@ -236,10 +236,12 @@ export async function queueRoutes(fastify: FastifyInstance) {
     const { name } = request.params as any;
     const q = queues[name];
     if (!q) return reply.status(404).send({ error: `Queue '${name}' not found` });
-    // M-2 Fix: Pause and drain. Do NOT resume — admin must explicitly click Resume to restart.
+    // Pause the queue so no new jobs are picked up
     await q.pause();
-    await q.drain(true);
-    await q.clean(0, 10000, 'active');
+    // drain(false) removes waiting jobs without waiting for active jobs to finish.
+    // This returns instantly even if workers are mid-job (they'll finish gracefully).
+    q.drain(false).catch(() => {});
+    await q.clean(0, 100000, 'active');
     await redis.del('queue:stats:cache');
     return reply.send({ success: true });
   });
