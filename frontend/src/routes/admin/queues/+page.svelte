@@ -133,10 +133,9 @@
 
   onMount(() => {
     loadData();
-    // D-2 Fix: Increased poll interval from 2s to 5s.
-    // Each poll fires 8+ DB queries; at 2s with multiple admin tabs this causes
-    // significant DB query rate. 5s is a reasonable balance for real-time feedback.
-    pollInterval = setInterval(loadQueuesOnly, 5000);
+    // Slowed from 5s to 10s — backend now caches stats for 6s, so 10s poll is safe
+    // and cuts the number of DB-hitting requests by 50%.
+    pollInterval = setInterval(loadQueuesOnly, 10000);
   });
 
   onDestroy(() => {
@@ -327,6 +326,29 @@
     }
     await loadQueuesOnly();
   }
+
+  // Format seconds into a human-readable string like "2h 35min" or "45min 20s"
+  function formatEta(seconds: number | null): string {
+    if (seconds === null || seconds <= 0) return '';
+    if (seconds < 60) return `${seconds}s`;
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}min`;
+    return `${m}min ${s}s`;
+  }
+
+  // Overall ETA: the max etaSeconds across all active queues (pipeline bottleneck)
+  const overallEta = $derived(() => {
+    let max = 0;
+    for (const name of queueNames) {
+      const q = queues[name];
+      if (q?.eta?.etaSeconds != null && q.eta.etaSeconds > max) max = q.eta.etaSeconds;
+    }
+    return max > 0 ? max : null;
+  });
+
+  const anyActive = $derived(() => queueNames.some(n => (queues[n]?.bullmq?.active || 0) > 0));
 </script>
 
 <div class="admin-container">
@@ -470,6 +492,16 @@
     </div>
 
     <div style="margin-top: 0.5rem;">
+      <!-- Overall ETA banner when any queue is active -->
+      {#if anyActive() && overallEta()}
+        <div style="background: linear-gradient(135deg, rgba(59,130,246,0.15), rgba(99,102,241,0.1)); border: 1px solid rgba(99,102,241,0.3); border-radius: 10px; padding: 0.75rem 1.25rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+          <Activity size={18} color="#6366f1" />
+          <span style="color: #e4e4e7; font-size: 0.9rem;">Overall estimated completion:</span>
+          <span style="font-size: 1rem; font-weight: 700; color: #6366f1;">~{formatEta(overallEta())}</span>
+          <span style="color: #a1a1aa; font-size: 0.8rem;">(based on slowest active queue)</span>
+        </div>
+      {/if}
+
       <div class="pipeline-toolbar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
         <!-- D-1 Fix: was incorrectly labelled "7 Pipeline Queues" when there are 8 -->
         <h3 style="margin: 0; font-size: 1.25rem; color: #e4e4e7;">8 Pipeline Queues</h3>
@@ -553,6 +585,23 @@
                       </div>
                     {/each}
                   </div>
+                </div>
+              {/if}
+
+              {#if q.eta?.etaSeconds != null || q.eta?.ratePerMin != null}
+                <div style="margin-top: 0.75rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+                  {#if q.eta.ratePerMin != null}
+                    <span style="font-size: 0.78rem; color: #a1a1aa; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2); padding: 2px 8px; border-radius: 20px;">
+                      ⚡ {q.eta.ratePerMin} items/min
+                    </span>
+                  {/if}
+                  {#if q.eta.etaSeconds != null && q.eta.etaSeconds > 0}
+                    <span style="font-size: 0.78rem; color: #10b981; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); padding: 2px 8px; border-radius: 20px;">
+                      ⏱ ~{formatEta(q.eta.etaSeconds)} remaining
+                    </span>
+                  {:else if q.eta.etaSeconds === 0}
+                    <span style="font-size: 0.78rem; color: #10b981;">✓ Done</span>
+                  {/if}
                 </div>
               {/if}
             </div>

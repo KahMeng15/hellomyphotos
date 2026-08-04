@@ -8,6 +8,11 @@ import { VideoService } from './video.service';
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 
+// Limit sharp's internal libvips cache and concurrency to prevent memory spikes.
+// BullMQ's THUMBNAIL_CONCURRENCY env var controls parallelism at the job level.
+sharp.cache({ memory: 64, files: 0, items: 20 });
+sharp.concurrency(1);
+
 // Ensure cache dirs exist
 fs.mkdirSync(path.join(CACHE_ROOT, '1080p'), { recursive: true });
 fs.mkdirSync(path.join(CACHE_ROOT, '480p'), { recursive: true });
