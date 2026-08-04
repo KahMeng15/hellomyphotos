@@ -27,5 +27,8 @@
 		"@lucide/svelte": "^1.26.0",
 		"@tanstack/svelte-virtual": "^3.13.34",
 		"blurhash": "^2.0.5"
+	},
+	"overrides": {
+		"cookie": "^0.7.0"
 	}
 }

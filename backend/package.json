@@ -44,6 +44,8 @@
   },
   "overrides": {
     "protobufjs": "^7.6.5",
-    "sharp": "$sharp"
+    "sharp": "$sharp",
+    "brace-expansion": "^5.0.9",
+    "cookie": "^0.7.0"
   }
 }
