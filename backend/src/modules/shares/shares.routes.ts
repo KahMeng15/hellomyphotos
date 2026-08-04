@@ -5,6 +5,9 @@ import path from 'path';
 import fs from 'fs';
 import { AnalyticsService } from '../analytics/analytics.service';
 import sharp from 'sharp';
+import { metadataQueue } from '../../queue/metadataQueue';
+import { thumbnailQueue } from '../../queue/thumbnailQueue';
+import { videoQueue } from '../../queue/videoQueue';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
 
@@ -140,6 +143,28 @@ export async function sharesRoutes(fastify: FastifyInstance) {
         WHERE f.person_id = $1
         ORDER BY m.created_at DESC
       `, [share.person_id]);
+      const files = fileRes.rows;
+      
+      const missingMetadata = files.filter((f: any) => f.exif_json == null);
+      const missingThumbs = files.filter((f: any) => !f.has_480p || !f.has_1080p);
+
+      Promise.all(missingMetadata.map((f: any) => 
+        metadataQueue.add('extract-metadata', { 
+          mediaId: f.id, 
+          fullPath: path.join(MEDIA_ROOT, f.folder_path || '', f.file_name), 
+          mimeType: f.mime_type 
+        }, { priority: 2 })
+      )).catch(err => console.error('Failed to queue metadata jobs', err));
+
+      Promise.all(missingThumbs.map((f: any) => {
+        const fPath = path.join(MEDIA_ROOT, f.folder_path || '', f.file_name);
+        if (f.mime_type.startsWith('video/')) {
+          return videoQueue.add('process-video', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
+        } else {
+          return thumbnailQueue.add('generate-thumbnail', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
+        }
+      })).catch(err => console.error('Failed to queue thumbnail jobs', err));
+
       // Get person info with cover
       const personRes = await query(`SELECT id, name, cover_media_id FROM people WHERE id = $1`, [share.person_id]);
       const person = personRes.rows[0] || null;
@@ -219,6 +244,27 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       `SELECT * FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
       [targetPath]
     );
+    const files = filesResult.rows;
+
+    const missingMetadata = files.filter((f: any) => f.exif_json == null);
+    const missingThumbs = files.filter((f: any) => !f.has_480p || !f.has_1080p);
+
+    Promise.all(missingMetadata.map((f: any) => 
+      metadataQueue.add('extract-metadata', { 
+        mediaId: f.id, 
+        fullPath: path.join(MEDIA_ROOT, f.folder_path || '', f.file_name), 
+        mimeType: f.mime_type 
+      }, { priority: 2 })
+    )).catch(err => console.error('Failed to queue metadata jobs', err));
+
+    Promise.all(missingThumbs.map((f: any) => {
+      const fPath = path.join(MEDIA_ROOT, f.folder_path || '', f.file_name);
+      if (f.mime_type.startsWith('video/')) {
+        return videoQueue.add('process-video', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
+      } else {
+        return thumbnailQueue.add('generate-thumbnail', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
+      }
+    })).catch(err => console.error('Failed to queue thumbnail jobs', err));
 
     const fullPath = path.join(MEDIA_ROOT, targetPath);
     let directories: { name: string, cover_id: string | null, blurhash: string | null }[] = [];
