@@ -69,17 +69,23 @@
         settings.scanSchedule = data.scanSchedule || { type: 'off' };
         settings.mlConfidenceThreshold = data.mlConfidenceThreshold;
       }
+    } catch (e) {
+      toast.error('API is offline');
     } finally {
       loading = false;
     }
   }
 
   async function loadQueuesOnly() {
-    const res = await fetch(`${API_BASE}/api/admin/queues`, { credentials: 'include' });
-    if (res.ok) {
-      const data = await res.json();
-      queues = data.queues || {};
-      if (data.mode) executionMode = data.mode;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        queues = data.queues || {};
+        if (data.mode) executionMode = data.mode;
+      }
+    } catch (e) {
+      toast.error('API is offline');
     }
   }
 
@@ -655,7 +661,7 @@
                 <div style="margin-top: 0.75rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
                   {#if q.eta.ratePerMin != null}
                     <span style="font-size: 0.78rem; color: #a1a1aa; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2); padding: 2px 8px; border-radius: 20px;">
-                      ⚡ {q.eta.ratePerMin} items/min
+                      {q.eta.ratePerMin} items/min
                     </span>
                   {/if}
                   {#if q.eta.etaSeconds != null && q.eta.etaSeconds > 0}
