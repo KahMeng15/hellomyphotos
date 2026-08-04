@@ -19,16 +19,28 @@ import path from 'path';
 const MEDIA_ROOT = () => process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
 const CACHE_ROOT = () => process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw');
 
-// Batch-add jobs to a BullMQ queue in chunks to avoid flooding Redis
-// with a single giant pipeline for 100k+ items.
-async function addBulkBatched(
-  queue: any,
-  jobs: { name: string; data: any; opts?: any }[],
-  batchSize = 500
-) {
-  for (let i = 0; i < jobs.length; i += batchSize) {
-    await queue.addBulk(jobs.slice(i, i + batchSize));
+const ENQUEUE_PAGE_SIZE = 500;
+
+// Stream DB rows in pages and add to BullMQ without ever holding all rows in memory.
+// Returns total count of jobs enqueued.
+async function streamEnqueue(
+  bullQueue: any,
+  countSql: string,
+  pageSql: string, // must accept $1=limit $2=offset
+  rowToJob: (row: any) => { name: string; data: any; opts?: any }
+): Promise<number> {
+  const countRes = await query(countSql);
+  const total = parseInt(countRes.rows[0].count ?? '0');
+  if (total === 0) return 0;
+
+  let offset = 0;
+  while (offset < total) {
+    const page = await query(pageSql, [ENQUEUE_PAGE_SIZE, offset]);
+    if (page.rows.length === 0) break;
+    await bullQueue.addBulk(page.rows.map(rowToJob));
+    offset += page.rows.length;
   }
+  return total;
 }
 
 // Record when processing was triggered so we can calculate throughput/ETA.
@@ -257,62 +269,69 @@ export async function queueRoutes(fastify: FastifyInstance) {
 
     const mediaRoot = MEDIA_ROOT();
 
+    const toJob = (jobName: string) => (row: any) => ({
+      name: jobName,
+      data: { mediaId: row.id, fullPath: path.resolve(mediaRoot, row.folder_path || '', row.file_name), mimeType: row.mime_type },
+      opts: { removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } }
+    });
+
     if (name === 'scanner') {
       const { ScannerService } = await import('../scanner/scanner.service');
       ScannerService.scanAllDirectories('').catch(console.error);
 
     } else if (name === 'metadata') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE exif_json IS NULL`);
-      await recordEtaStart(name, res.rows.length);
-      await addBulkBatched(metadataQueue, res.rows.map(row => ({
-        name: 'extract-metadata',
-        data: { mediaId: row.id, fullPath: path.resolve(mediaRoot, row.folder_path || '', row.file_name), mimeType: row.mime_type }
-      })));
+      const total = await streamEnqueue(
+        metadataQueue,
+        `SELECT COUNT(*)::text as count FROM media_files WHERE exif_json IS NULL`,
+        `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE exif_json IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
+        toJob('extract-metadata')
+      );
+      await recordEtaStart(name, total);
 
     } else if (name === 'thumbnail') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' AND (NOT has_1080p OR NOT has_480p)`);
-      await recordEtaStart(name, res.rows.length);
-      await addBulkBatched(thumbnailQueue, res.rows.map(row => ({
-        name: 'generate-thumbnail',
-        data: { mediaId: row.id, fullPath: path.resolve(mediaRoot, row.folder_path || '', row.file_name), mimeType: row.mime_type }
-      })));
+      const total = await streamEnqueue(
+        thumbnailQueue,
+        `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'image/%' AND (NOT has_1080p OR NOT has_480p)`,
+        `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' AND (NOT has_1080p OR NOT has_480p) ORDER BY id LIMIT $1 OFFSET $2`,
+        toJob('generate-thumbnail')
+      );
+      await recordEtaStart(name, total);
 
     } else if (name === 'video') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL`);
-      await recordEtaStart(name, res.rows.length);
-      await addBulkBatched(videoQueue, res.rows.map(row => ({
-        name: 'process-video',
-        data: { mediaId: row.id, fullPath: path.resolve(mediaRoot, row.folder_path || '', row.file_name), mimeType: row.mime_type }
-      })));
+      const total = await streamEnqueue(
+        videoQueue,
+        `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL`,
+        `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
+        toJob('process-video')
+      );
+      await recordEtaStart(name, total);
 
     } else if (name === 'smart-search') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files WHERE clip_embedding IS NULL`);
-      await recordEtaStart(name, res.rows.length);
-      await addBulkBatched(smartSearchQueue, res.rows.map(row => ({
-        name: 'generate-smart-search',
-        data: { mediaId: row.id, fullPath: path.resolve(mediaRoot, row.folder_path || '', row.file_name), mimeType: row.mime_type }
-      })));
+      const total = await streamEnqueue(
+        smartSearchQueue,
+        `SELECT COUNT(*)::text as count FROM media_files WHERE clip_embedding IS NULL`,
+        `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE clip_embedding IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
+        toJob('generate-smart-search')
+      );
+      await recordEtaStart(name, total);
 
     } else if (name === 'face-detection') {
-      const res = await query(`SELECT id, folder_path, file_name, mime_type FROM media_files
-        WHERE mime_type LIKE 'image/%'
-        AND NOT EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.media_id = media_files.id)`);
-      await recordEtaStart(name, res.rows.length);
-      await addBulkBatched(faceDetectionQueue, res.rows.map(row => ({
-        name: 'detect-faces',
-        data: { mediaId: row.id, fullPath: path.resolve(mediaRoot, row.folder_path || '', row.file_name), mimeType: row.mime_type }
-      })));
+      const total = await streamEnqueue(
+        faceDetectionQueue,
+        `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'image/%' AND NOT EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.media_id = media_files.id)`,
+        `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'image/%' AND NOT EXISTS (SELECT 1 FROM face_embeddings fe WHERE fe.media_id = media_files.id) ORDER BY id LIMIT $1 OFFSET $2`,
+        toJob('detect-faces')
+      );
+      await recordEtaStart(name, total);
 
     } else if (name === 'facial-recognition') {
-      const res = await query(`SELECT DISTINCT m.id, m.folder_path, m.file_name, m.mime_type
-        FROM media_files m
-        JOIN face_embeddings fe ON fe.media_id = m.id
-        WHERE fe.person_id IS NULL`);
-      await recordEtaStart(name, res.rows.length);
-      await addBulkBatched(facialRecognitionQueue, res.rows.map(row => ({
-        name: 'recognize-faces',
-        data: { mediaId: row.id, fullPath: path.resolve(mediaRoot, row.folder_path || '', row.file_name), mimeType: row.mime_type }
-      })));
+      const total = await streamEnqueue(
+        facialRecognitionQueue,
+        `SELECT COUNT(DISTINCT m.id)::text as count FROM media_files m JOIN face_embeddings fe ON fe.media_id = m.id WHERE fe.person_id IS NULL`,
+        `SELECT DISTINCT m.id, m.folder_path, m.file_name, m.mime_type FROM media_files m JOIN face_embeddings fe ON fe.media_id = m.id WHERE fe.person_id IS NULL ORDER BY m.id LIMIT $1 OFFSET $2`,
+        toJob('recognize-faces')
+      );
+      await recordEtaStart(name, total);
     }
 
     return reply.send({ success: true, message: `Triggered queue '${name}'` });
