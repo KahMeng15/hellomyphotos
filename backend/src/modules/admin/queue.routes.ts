@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import { QueueEvents } from 'bullmq';
 import { requireAuth } from '../../utils/auth';
 import {
   queues,
@@ -362,14 +363,48 @@ export async function queueRoutes(fastify: FastifyInstance) {
         opts: { removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } }
       });
 
-      // Helper: wait until a queue has zero waiting + active jobs
+      // Helper: wait until a queue has zero waiting + active jobs.
+      // Uses QueueEvents (Redis subscriber) so it fires on each job completion
+      // rather than polling every 5s — no persistent timers accumulating in the
+      // backend process.
       async function drainWait(q: any, name: string): Promise<void> {
-        console.log(`[Batch] Waiting for ${name} to drain...`);
-        while (true) {
+        // Check immediately — may already be empty
+        const checkDrained = async () => {
           const counts = await q.getJobCounts('waiting', 'active');
-          if ((counts.waiting || 0) === 0 && (counts.active || 0) === 0) break;
-          await new Promise(res => setTimeout(res, 5000)); // poll every 5s
-        }
+          return (counts.waiting || 0) === 0 && (counts.active || 0) === 0;
+        };
+        if (await checkDrained()) return;
+        console.log(`[Batch] Waiting for ${name} to drain...`);
+
+        const queueEvents = new QueueEvents(q.name, {
+          connection: { host: process.env.REDIS_HOST || 'redis', port: parseInt(process.env.REDIS_PORT || '6379'), password: process.env.REDIS_PASSWORD }
+        });
+
+        await new Promise<void>((resolve, reject) => {
+          // Safety timeout: if nothing happens for 30 minutes assume stuck
+          const timeout = setTimeout(() => {
+            queueEvents.close().catch(() => {});
+            resolve();
+          }, 30 * 60 * 1000);
+
+          const check = async () => {
+            try {
+              if (await checkDrained()) {
+                clearTimeout(timeout);
+                await queueEvents.close();
+                resolve();
+              }
+            } catch (err) {
+              clearTimeout(timeout);
+              await queueEvents.close().catch(() => {});
+              reject(err);
+            }
+          };
+
+          queueEvents.on('completed', check);
+          queueEvents.on('failed', check);
+        });
+
         console.log(`[Batch] ${name} drained.`);
       }
 
@@ -454,15 +489,17 @@ export async function queueRoutes(fastify: FastifyInstance) {
         // Stage 7: Face Thumbnails
         console.log('[Batch] Stage 7: Face Thumbnails');
         await faceThumbnailQueue.resume();
-        const people = await query(`SELECT DISTINCT fe.media_id FROM face_embeddings fe
-          JOIN people p ON p.id = fe.person_id WHERE fe.person_id IS NOT NULL LIMIT 5000`);
-        if (people.rows.length > 0) {
-          await faceThumbnailQueue.addBulk(people.rows.map(row => ({
+        const ftTotal = await streamEnqueue(
+          faceThumbnailQueue,
+          `SELECT COUNT(DISTINCT fe.media_id)::text as count FROM face_embeddings fe JOIN people p ON p.id = fe.person_id WHERE fe.person_id IS NOT NULL`,
+          `SELECT DISTINCT fe.media_id FROM face_embeddings fe JOIN people p ON p.id = fe.person_id WHERE fe.person_id IS NOT NULL ORDER BY fe.media_id LIMIT $1 OFFSET $2`,
+          (row) => ({
             name: 'generate-face-thumbnails',
             data: { mediaId: row.media_id },
             opts: { jobId: `face-thumb-${row.media_id}`, removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } }
-          })));
-        }
+          })
+        );
+        await recordEtaStart('face-thumbnail', ftTotal);
         await drainWait(faceThumbnailQueue, 'face-thumbnail');
 
         console.log('[Batch] All stages complete!');
