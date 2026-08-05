@@ -400,6 +400,13 @@ export async function queueRoutes(fastify: FastifyInstance) {
 
           interval = setInterval(async () => {
             try {
+              if (!(await redis.get(BATCH_RUNNING_KEY))) {
+                clearInterval(interval);
+                clearTimeout(timeout);
+                reject(new Error('Batch aborted by user'));
+                return;
+              }
+
               if (await checkDrained()) {
                 clearInterval(interval);
                 clearTimeout(timeout);

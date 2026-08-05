@@ -194,6 +194,7 @@
     const label = name.replace(/-/g, ' ');
     customConfirm('Stop Queue', `Stop and cancel all pending jobs in the ${label} queue?`, true, async () => {
       try {
+        toast.info(`Stopping ${label} queue... Please wait`);
         const res = await fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { 
           method: 'POST', 
           credentials: 'include' 
@@ -354,6 +355,7 @@
   async function stopAllJobs() {
     customConfirm('Stop All Jobs', 'Stop and cancel all pending jobs across all queues?', true, async () => {
       try {
+        toast.info('Stopping all jobs... Please wait');
         await Promise.all(queueNames.map(name =>
           fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { method: 'POST', credentials: 'include' })
         ));
