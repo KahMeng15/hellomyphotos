@@ -42,6 +42,30 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null, request.user!.id]);
     
+    // Automatically prioritize processing for all unprocessed items in the shared folder
+    if (folderPath) {
+      setImmediate(async () => {
+        try {
+          const files = await query(`
+            SELECT id, file_name, mime_type, folder_path 
+            FROM media_files 
+            WHERE folder_path = $1 AND (has_480p = false OR has_1080p = false)
+          `, [folderPath]);
+          
+          for (const f of files.rows) {
+            const fullPath = path.join(MEDIA_ROOT, f.folder_path, f.file_name);
+            if (f.mime_type.startsWith('video/')) {
+              await videoQueue.add('process-video', { mediaId: f.id, fullPath, mimeType: f.mime_type, skipCascade: true }, { priority: 1 }).catch(() => {});
+            } else if (f.mime_type.startsWith('image/')) {
+              await thumbnailQueue.add('generate-thumbnail', { mediaId: f.id, fullPath, mimeType: f.mime_type, skipCascade: true }, { priority: 1 }).catch(() => {});
+            }
+          }
+        } catch (err) {
+          console.error('[Shares] Failed to prioritize folder processing:', err);
+        }
+      });
+    }
+
     return reply.send({ shareToken });
   });
 

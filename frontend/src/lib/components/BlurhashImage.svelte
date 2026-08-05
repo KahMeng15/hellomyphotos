@@ -55,10 +55,10 @@
     // Decode blurhash only when visible
     if (visible && hash && canvas) {
       try {
-        const pixels = decode(hash, 32, 32);
+        const pixels = decode(hash, 16, 16);
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          const imageData = ctx.createImageData(32, 32);
+          const imageData = ctx.createImageData(16, 16);
           imageData.data.set(pixels);
           ctx.putImageData(imageData, 0, 0);
         }
@@ -97,7 +97,7 @@
   <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'}; aspect-ratio: {objectFit === 'cover' ? (square ? 1 : aspectRatio) : aspectRatio};">
     <div class="zoom-wrapper {visible ? '' : 'skeleton'}" style="animation-delay: -{randomDelay}s;">
       {#if visible}
-        <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
+        <canvas bind:this={canvas} width="16" height="16" class:loaded={imgLoaded}></canvas>
         <img {src} {alt} onload={handleLoad} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox && transformString ? `transform: ${transformString};` : ''}" />
       {/if}
     </div>
@@ -115,7 +115,7 @@
     overflow: hidden;
     position: relative;
     border-radius: 0;
-    /* transition: transform ... was here */
+    content-visibility: auto;
   }
   
   .grid-item:hover .zoom-wrapper {
