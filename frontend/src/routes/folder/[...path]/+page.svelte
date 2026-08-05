@@ -1119,7 +1119,7 @@
     color: #d4d4d8;
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .dir-grid.folder-mode-list .dir-card:not(:hover) .dir-info {
       background: transparent;
     }
@@ -1180,7 +1180,7 @@
     cursor: pointer;
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .dir-card:hover {
       filter: brightness(1.2);
     }
@@ -1255,7 +1255,7 @@
     padding: 8px;
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .dir-card:hover .dir-actions-overlay {
       opacity: 1;
     }

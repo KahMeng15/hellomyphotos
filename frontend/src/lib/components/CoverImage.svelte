@@ -14,7 +14,9 @@
   let loaded = $state(false);
 </script>
 
-<img {src} class="header-bg" class:loaded onload={() => loaded = true} fetchpriority="high" {alt} style="object-position: {objectPosition};" />
+{#key src}
+  <img {src} class="header-bg" class:loaded onload={() => loaded = true} fetchpriority="low" loading="lazy" {alt} style="object-position: {objectPosition};" />
+{/key}
 
 <style>
   .header-bg {

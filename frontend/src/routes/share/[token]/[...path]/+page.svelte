@@ -753,8 +753,10 @@
     animation: fadeIn 0.35s ease both;
   }
 
-  .dir-card:hover {
-    filter: brightness(1.2);
+  @media (hover: hover) and (pointer: fine) {
+    .dir-card:hover {
+      filter: brightness(1.2);
+    }
   }
 
   .dir-cover {

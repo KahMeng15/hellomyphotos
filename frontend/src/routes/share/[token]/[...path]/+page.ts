@@ -51,7 +51,10 @@ export const load: PageLoad = async ({ params, fetch }) => {
       personCoverImgWidth: data.personCoverImgWidth || null,
       personCoverImgHeight: data.personCoverImgHeight || null
     };
-  } catch (error) {
-    return { error: 'Invalid or expired share link', files: [] };
+  } catch (error: any) {
+    if (error.message === 'Share not found') {
+      return { error: 'Invalid or expired share link', files: [] };
+    }
+    return { error: 'Failed to find share link', files: [] };
   }
 };

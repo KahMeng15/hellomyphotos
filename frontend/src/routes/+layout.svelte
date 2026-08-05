@@ -527,14 +527,22 @@
   }
 
   .nav-loading-bar {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 2px;
+    overflow: hidden;
+    z-index: 9999;
+  }
+
+  .nav-loading-bar::after {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
     background: linear-gradient(90deg, transparent 0%, var(--accent-color, #6366f1) 50%, transparent 100%);
     animation: navBarSlide 1s ease infinite;
-    z-index: 200;
   }
 
   @keyframes navBarSlide {

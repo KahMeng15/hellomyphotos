@@ -35,7 +35,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     
     if (fs.existsSync(filePath)) {
       reply.header('Content-Type', 'image/webp');
-      reply.header('Cache-Control', 'public, max-age=31536000');
+      reply.header('Cache-Control', 'public, max-age=3600');
       return sendThrottled(request, reply, fs.createReadStream(filePath));
     }
     
@@ -91,7 +91,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         const buffer = await WatermarkService.addWatermarkToStream(filePath);
         return sendThrottled(request, reply, buffer);
       } else {
-        reply.header('Cache-Control', 'public, max-age=31536000');
+        reply.header('Cache-Control', 'public, max-age=3600');
         return sendThrottled(request, reply, fs.createReadStream(filePath));
       }
     }
