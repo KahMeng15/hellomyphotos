@@ -52,27 +52,28 @@ async function recordEtaStart(name: string, pendingCount: number) {
 }
 
 // Compute ETA in seconds given current stats. Returns null if not enough data yet.
-async function computeEta(name: string, remaining: number): Promise<{ etaSeconds: number | null; ratePerMin: number | null }> {
+async function computeEta(name: string, remaining: number): Promise<{ etaSeconds: number | null; ratePerMin: number | null; elapsedSeconds: number | null }> {
   try {
     const [startTimeStr, startPendingStr] = await Promise.all([
       redis.get(`queue:eta:start_time:${name}`),
       redis.get(`queue:eta:start_pending:${name}`)
     ]);
-    if (!startTimeStr || !startPendingStr) return { etaSeconds: null, ratePerMin: null };
+    if (!startTimeStr || !startPendingStr) return { etaSeconds: null, ratePerMin: null, elapsedSeconds: null };
 
     const elapsed = (Date.now() - parseInt(startTimeStr)) / 1000; // seconds
-    if (elapsed < 30) return { etaSeconds: null, ratePerMin: null }; // too early for a stable estimate
+    const elapsedSeconds = Math.round(elapsed);
+    if (elapsed < 30) return { etaSeconds: null, ratePerMin: null, elapsedSeconds };
 
     const startPending = parseInt(startPendingStr);
     const processedSinceStart = startPending - remaining;
-    if (processedSinceStart <= 0) return { etaSeconds: null, ratePerMin: null };
+    if (processedSinceStart <= 0) return { etaSeconds: null, ratePerMin: null, elapsedSeconds };
 
     const ratePerSec = processedSinceStart / elapsed;
     const ratePerMin = Math.round(ratePerSec * 60);
     const etaSeconds = remaining > 0 ? Math.round(remaining / ratePerSec) : 0;
-    return { etaSeconds, ratePerMin };
+    return { etaSeconds, ratePerMin, elapsedSeconds };
   } catch {
-    return { etaSeconds: null, ratePerMin: null };
+    return { etaSeconds: null, ratePerMin: null, elapsedSeconds: null };
   }
 }
 
@@ -184,11 +185,11 @@ export async function queueRoutes(fastify: FastifyInstance) {
       const active = (bullmqCounts.active || 0) + (bullmqCounts.delayed || 0);
       const failed = bullmqCounts.failed || 0;
       const remaining = Math.max(0, db.total - db.completed);
-      const waiting = Math.max(0, remaining - active);
+      const waiting = Math.max(0, remaining - active - failed);
       const progress = db.total > 0 ? Math.round((db.completed / db.total) * 100) : 0;
 
       // ETA calculation
-      const { etaSeconds, ratePerMin } = await computeEta(name, remaining);
+      const { etaSeconds, ratePerMin, elapsedSeconds } = await computeEta(name, remaining);
 
       // Active job targets — use data.fullPath directly; only fall back to DB for mediaId-only jobs
       const activeJobs = activeJobsRaw.map((j: any) => {
@@ -203,7 +204,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
         activeJobs,
         progress,
         extra: (q as any).extraStats,
-        eta: { etaSeconds, ratePerMin },
+        eta: { etaSeconds, ratePerMin, elapsedSeconds },
       };
     }));
 
@@ -244,6 +245,14 @@ export async function queueRoutes(fastify: FastifyInstance) {
     // This returns instantly even if workers are mid-job (they'll finish gracefully).
     q.drain(false).catch(() => {});
     await q.clean(0, 100000, 'active');
+    
+    // Clear ETA timers so UI stops thinking it is running
+    await redis.del(`queue:eta:start_time:${name}`);
+    await redis.del(`queue:eta:start_pending:${name}`);
+    
+    // If we stop any queue, we should probably clear the batch running state to be safe
+    await redis.del('queue:batch:running');
+    
     await redis.del('queue:stats:cache');
     return reply.send({ success: true });
   });
@@ -364,51 +373,55 @@ export async function queueRoutes(fastify: FastifyInstance) {
       });
 
       // Helper: wait until a queue has zero waiting + active jobs.
-      // Uses QueueEvents (Redis subscriber) so it fires on each job completion
-      // rather than polling every 5s — no persistent timers accumulating in the
-      // backend process.
+      // Uses a standard polling interval. The previous memory leak was
+      // caused by enqueueing thousands of jobs at once, NOT by setInterval.
+      // QueueEvents was spamming getJobCounts on every job completion causing SIGABRT.
       async function drainWait(q: any, name: string): Promise<void> {
-        // Check immediately — may already be empty
         const checkDrained = async () => {
           const counts = await q.getJobCounts('waiting', 'active');
           return (counts.waiting || 0) === 0 && (counts.active || 0) === 0;
         };
-        if (await checkDrained()) return;
+
+        if (await checkDrained()) {
+          await redis.del(`queue:eta:start_time:${name}`);
+          await redis.del(`queue:eta:start_pending:${name}`);
+          return;
+        }
         console.log(`[Batch] Waiting for ${name} to drain...`);
 
-        const queueEvents = new QueueEvents(q.name, {
-          connection: { host: process.env.REDIS_HOST || 'redis', port: parseInt(process.env.REDIS_PORT || '6379'), password: process.env.REDIS_PASSWORD }
-        });
-
-        await new Promise<void>((resolve, reject) => {
-          // Safety timeout: if nothing happens for 30 minutes assume stuck
+        return new Promise<void>((resolve, reject) => {
+          let interval: NodeJS.Timeout;
+          
           const timeout = setTimeout(() => {
-            queueEvents.close().catch(() => {});
+            clearInterval(interval);
+            console.log(`[Batch] ${name} drain timeout reached.`);
             resolve();
           }, 30 * 60 * 1000);
 
-          const check = async () => {
+          interval = setInterval(async () => {
             try {
               if (await checkDrained()) {
+                clearInterval(interval);
                 clearTimeout(timeout);
-                await queueEvents.close();
+                await redis.del(`queue:eta:start_time:${name}`);
+                await redis.del(`queue:eta:start_pending:${name}`);
+                console.log(`[Batch] ${name} drained.`);
                 resolve();
               }
             } catch (err) {
+              clearInterval(interval);
               clearTimeout(timeout);
-              await queueEvents.close().catch(() => {});
               reject(err);
             }
-          };
-
-          queueEvents.on('completed', check);
-          queueEvents.on('failed', check);
+          }, 3000);
         });
-
-        console.log(`[Batch] ${name} drained.`);
       }
 
       try {
+        // Pause all queues upfront so they visually display as QUEUED (BATCH) in the UI
+        await Promise.all(Object.values(queues).map(q => q.pause()));
+        await redis.del('queue:stats:cache');
+
         // Stage 1: Scanner
         console.log('[Batch] Stage 1: Scanner');
         await scannerQueue.resume();

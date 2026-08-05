@@ -210,25 +210,6 @@
     });
   }
   
-  async function cleanQueue(name: string, type: string) {
-    const label = name.replace(/-/g, ' ');
-    try {
-      const res = await fetch(`${API_BASE}/api/admin/queues/${name}/clean`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ type })
-      });
-      if (res.ok) {
-        toast.success(`Cleared ${type} jobs from ${label}`);
-        await loadQueuesOnly();
-      } else {
-        toast.error(`Failed to clean ${label}`);
-      }
-    } catch {
-      toast.error(`Network error cleaning ${label}`);
-    }
-  }
 
   async function triggerResetEverything() {
     customConfirm(
@@ -308,14 +289,14 @@
   ];
 
   const queueTitles: Record<string, string> = {
-    'scanner': '1. Directory Discovery (Scanner)',
-    'metadata': '2. EXIF Metadata Extraction (Metadata)',
-    'thumbnail': '3. Image Thumbnail & Blurhash (Thumbnail)',
-    'video': '4. Video Transcoding & Frames (Video)',
-    'smart-search': '5. Smart Search & Embeddings (Smart Search)',
-    'face-detection': '6. Face Detection (Face Detection)',
-    'facial-recognition': '7. Facial Recognition (Facial Recognition)',
-    'face-thumbnail': '8. Face Thumbnail Generation (Face Thumbnail)'
+    'scanner': '1. Directory Discovery',
+    'metadata': '2. EXIF Metadata Extraction',
+    'thumbnail': '3. Image Thumbnail & Blurhash',
+    'video': '4. Video Transcoding & Frames',
+    'smart-search': '5. Smart Search & Embeddings',
+    'face-detection': '6. Face Detection',
+    'facial-recognition': '7. Facial Recognition',
+    'face-thumbnail': '8. Face Thumbnail Generation'
   };
 
   async function triggerJob(name: string) {
@@ -563,11 +544,10 @@
     <div style="margin-top: 0.5rem;">
       <!-- Overall ETA banner when any queue is active -->
       {#if anyActive() && overallEta()}
-        <div style="background: linear-gradient(135deg, rgba(59,130,246,0.15), rgba(99,102,241,0.1)); border: 1px solid rgba(99,102,241,0.3); border-radius: 10px; padding: 0.75rem 1.25rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
-          <Activity size={18} color="#6366f1" />
-          <span style="color: #e4e4e7; font-size: 0.9rem;">Overall estimated completion:</span>
-          <span style="font-size: 1rem; font-weight: 700; color: #6366f1;">~{formatEta(overallEta())}</span>
-          <span style="color: #a1a1aa; font-size: 0.8rem;">(based on slowest active queue)</span>
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 0.75rem 1.25rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+          <span style="color: #e4e4e7; font-size: 0.9rem; font-weight: 500;">Overall estimated completion:</span>
+          <span style="font-size: 1rem; font-weight: 600; color: #a1a1aa;">{formatEta(overallEta())}</span>
+          <span style="color: #71717a; font-size: 0.8rem;">(based on slowest active queue)</span>
         </div>
       {/if}
 
@@ -589,37 +569,49 @@
             {@const pCompleted = total > 0 ? (counts.completed / total) * 100 : 0}
             {@const pActive = total > 0 ? (counts.active / total) * 100 : 0}
             {@const pWaiting = total > 0 ? (counts.waiting / total) * 100 : 0}
-            {@const isRunning = (q.bullmq?.active || 0) > 0}
-
+            {@const pFailed = total > 0 ? (counts.failed / total) * 100 : 0}
+            {@const isRunning = (q.bullmq?.active || 0) > 0 || (q.eta?.elapsedSeconds != null)}
             {@const isWaiting = !isRunning && counts.waiting > 0}
+            {@const isCompleted = !isRunning && !isWaiting && (counts.waiting === 0 && counts.active === 0) && (counts.completed > 0 || total === 0)}
 
             <div class="card queue-card" style="margin: 0;">
               <div class="q-header">
                 <h3 style="display: flex; align-items: center; gap: 0.5rem;">
                   {queueTitles[name] || name}
-                  {#if q.isPaused}
-                    <span style="background: #6b7280; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">PAUSED</span>
-                  {:else if isRunning}
+                  {#if isRunning}
                     <span style="background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">RUNNING</span>
-                  {:else if counts.waiting > 0}
-                    <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">WAITING</span>
-                  {:else if counts.total > 0}
+                  {:else if q.isPaused}
+                    <span style="background: #4b5563; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">{executionMode === 'batch' ? 'QUEUED (BATCH)' : 'PAUSED'}</span>
+                  {:else if pCompleted === 100}
                     <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">COMPLETED</span>
+                  {:else if counts.failed > 0 && counts.waiting === 0}
+                    <span style="background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">COMPLETED (W/ ERRORS)</span>
+                  {:else if counts.completed > 0 && counts.waiting > 0}
+                    <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">PARTIALLY COMPLETED</span>
+                  {:else if isWaiting}
+                    <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">WAITING</span>
+                  {:else}
+                    <span style="background: #4b5563; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">IDLE</span>
                   {/if}
                 </h3>
                 <div class="q-actions">
-                  <button class="btn success sm" disabled={isRunning || isWaiting} style={(isRunning || isWaiting) ? 'opacity: 0.5; cursor: not-allowed;' : ''} onclick={() => triggerJob(name)} title="Force Run Queue"><Play size={14}/> Start</button>
+                  <button class="icon-btn success" disabled={isRunning || (executionMode === 'batch' && anyActive())} onclick={() => triggerJob(name)} title="Start / Resume Queue">
+                    <Play size={18}/>
+                  </button>
                   
-                  {#if q.isPaused}
-                    <button class="btn success sm" onclick={() => actionQueue(name, 'resume')}><Play size={14}/> Resume</button>
-                  {:else if !isRunning}
-                    <button class="btn warning sm" disabled style="opacity: 0.5; cursor: not-allowed;"><Pause size={14}/> Pause</button>
+                  {#if isRunning && !q.isPaused}
+                    <button class="icon-btn warning" onclick={() => actionQueue(name, 'pause')} title="Pause Queue">
+                      <Pause size={18}/>
+                    </button>
                   {:else}
-                    <button class="btn warning sm" onclick={() => actionQueue(name, 'pause')}><Pause size={14}/> Pause</button>
+                    <button class="icon-btn warning" disabled title="Pause Queue (Not Running)">
+                      <Pause size={18}/>
+                    </button>
                   {/if}
 
-                  <button class="btn danger sm" disabled={!isRunning} style={!isRunning ? 'opacity: 0.5; cursor: not-allowed;' : ''} onclick={() => stopQueue(name)} title="Stop & Cancel Pending"><Square size={14}/> Stop</button>
-                  <button class="btn secondary sm" onclick={() => cleanQueue(name, 'failed')} title="Clear Failed"><Trash2 size={14}/></button>
+                  <button class="icon-btn danger" disabled={!isRunning} onclick={() => stopQueue(name)} title="Stop & Cancel Pending">
+                    <Square size={18}/>
+                  </button>
                 </div>
               </div>
               
@@ -627,6 +619,7 @@
                 {#if pCompleted > 0}<div class="progress-bar completed" style="width: {pCompleted}%; background: #10b981;" title="Completed: {counts.completed}/{total}"></div>{/if}
                 {#if pActive > 0}<div class="progress-bar active" style="width: {pActive}%; background: #3b82f6;" title="Active: {counts.active}/{total}"></div>{/if}
                 {#if pWaiting > 0}<div class="progress-bar waiting" style="width: {pWaiting}%; background: #f59e0b;" title="Waiting: {counts.waiting}/{total}"></div>{/if}
+                {#if pFailed > 0}<div class="progress-bar failed" style="width: {pFailed}%; background: #ef4444;" title="Failed: {counts.failed}/{total}"></div>{/if}
               </div>
               
               <div class="q-stats">
@@ -657,19 +650,30 @@
                 </div>
               {/if}
 
-              {#if q.eta?.etaSeconds != null || q.eta?.ratePerMin != null}
+              {#if q.eta?.etaSeconds != null || q.eta?.ratePerMin != null || (q.eta?.elapsedSeconds != null && isRunning)}
                 <div style="margin-top: 0.75rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+                  {#if q.eta.elapsedSeconds != null && isRunning}
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      {formatEta(q.eta.elapsedSeconds)} elapsed
+                    </span>
+                  {/if}
                   {#if q.eta.ratePerMin != null}
-                    <span style="font-size: 0.78rem; color: #a1a1aa; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2); padding: 2px 8px; border-radius: 20px;">
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
                       {q.eta.ratePerMin} items/min
+                    </span>
+                  {:else if isRunning}
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      Calculating ETA...
                     </span>
                   {/if}
                   {#if q.eta.etaSeconds != null && q.eta.etaSeconds > 0}
-                    <span style="font-size: 0.78rem; color: #10b981; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); padding: 2px 8px; border-radius: 20px;">
-                      ⏱ ~{formatEta(q.eta.etaSeconds)} remaining
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      {formatEta(q.eta.etaSeconds)} remaining
                     </span>
                   {:else if q.eta.etaSeconds === 0}
-                    <span style="font-size: 0.78rem; color: #10b981;">✓ Done</span>
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      Done
+                    </span>
                   {/if}
                 </div>
               {/if}
@@ -798,6 +802,30 @@
     overflow: hidden;
     margin-bottom: 1.5rem;
   }
+
+  .icon-btn {
+    background: transparent;
+    border: none;
+    color: #a1a1aa;
+    padding: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    border-radius: 6px;
+  }
+  .icon-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+  }
+  .icon-btn:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+  }
+  .icon-btn.success:hover:not(:disabled) { color: #10b981; }
+  .icon-btn.warning:hover:not(:disabled) { color: #f59e0b; }
+  .icon-btn.danger:hover:not(:disabled) { color: #ef4444; }
   .progress-bar {
     height: 100%;
     transition: width 0.3s ease;
