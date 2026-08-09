@@ -114,7 +114,7 @@ export class MLService {
       });
       const imageBlob = new Blob(chunks, { type: 'image/webp' });
       const formData = new FormData();
-      formData.append('entries', new Blob([entriesJson], { type: 'application/json' }));
+      formData.append('entries', entriesJson);
       formData.append('image', imageBlob, 'image.webp');
 
       const response = await fetch(`${ML_URL}/predict`, {
