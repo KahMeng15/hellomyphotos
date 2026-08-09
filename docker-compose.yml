@@ -1,5 +1,6 @@
 services:
   frontend:
+    restart: unless-stopped
     image: ghcr.io/kahmeng15/hellomyphotos/frontend:latest
     build:
       context: ./frontend
@@ -13,6 +14,7 @@ services:
       - backend
 
   backend:
+    restart: unless-stopped
     image: ghcr.io/kahmeng15/hellomyphotos/backend:latest
     build:
       context: ./backend
@@ -28,6 +30,7 @@ services:
       - ./volumes/cache_rw:/app/cache:rw
 
   backend-worker:
+    restart: unless-stopped
     image: ghcr.io/kahmeng15/hellomyphotos/backend:latest
     build:
       context: ./backend
@@ -43,6 +46,7 @@ services:
       - ./volumes/cache_rw:/app/cache:rw
 
   postgres:
+    restart: unless-stopped
     image: ankane/pgvector:v0.5.1
     env_file: .env
     volumes:
@@ -50,6 +54,7 @@ services:
       - ./volumes/pg_init:/docker-entrypoint-initdb.d
 
   redis:
+    restart: unless-stopped
     image: redis:7-alpine
     env_file: .env
     volumes:
@@ -58,6 +63,7 @@ services:
       - "8003:6379"
 
   machine-learning:
+    restart: unless-stopped
     image: ghcr.io/immich-app/immich-machine-learning:release
     env_file: .env
     ports:
