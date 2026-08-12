@@ -78,6 +78,7 @@ const SCHEMA_STATEMENTS = [
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
   `CREATE INDEX IF NOT EXISTS idx_face_embeddings_person ON face_embeddings(person_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_face_embeddings_media ON face_embeddings(media_id)`,
   `CREATE INDEX IF NOT EXISTS idx_face_embeddings_embedding ON face_embeddings USING hnsw (embedding vector_cosine_ops)`,
 
   `CREATE TABLE IF NOT EXISTS shared_folders (

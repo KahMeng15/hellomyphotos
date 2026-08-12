@@ -324,9 +324,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
         FROM face_embeddings fe
         JOIN media_files m ON m.id = fe.media_id
         WHERE fe.person_id = $1
-        ORDER BY (
-          SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe.media_id
-        ) ASC, m.created_at DESC
+        ORDER BY m.created_at DESC
         LIMIT 1
       `, [id]);
 
