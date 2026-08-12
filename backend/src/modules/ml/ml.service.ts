@@ -58,25 +58,40 @@ function parseBoundingBox(box: any): { left: number; top: number; width: number;
 export class MLService {
   static async detectFaces(mediaId: string, fullPath?: string) {
     try {
-      let imagePath = fullPath || '';
-      if (!imagePath || !fs.existsSync(imagePath)) {
-        const cache480 = path.join(CACHE_ROOT, '480p', `${mediaId}.webp`);
-        const cache1080 = path.join(CACHE_ROOT, '1080p', `${mediaId}.webp`);
-        if (fs.existsSync(cache480)) {
-          imagePath = cache480;
-        } else if (fs.existsSync(cache1080)) {
-          imagePath = cache1080;
-        } else {
-          // Look up media file path in DB
-          const dbRes = await query(`SELECT folder_path, file_name FROM media_files WHERE id = $1`, [mediaId]);
-          if (dbRes.rows.length > 0) {
-            const mediaRoot = process.env.MEDIA_ROOT || '/app/media';
-            const candidate = path.join(mediaRoot, dbRes.rows[0].folder_path, dbRes.rows[0].file_name);
-            if (fs.existsSync(candidate)) {
+      const cache480 = path.join(CACHE_ROOT, '480p', `${mediaId}.webp`);
+      const cache1080 = path.join(CACHE_ROOT, '1080p', `${mediaId}.webp`);
+
+      let imagePath = '';
+      if (fs.existsSync(cache480)) {
+        imagePath = cache480;
+      } else if (fs.existsSync(cache1080)) {
+        imagePath = cache1080;
+      } else if (fullPath && fs.existsSync(fullPath)) {
+        const ext = path.extname(fullPath).toLowerCase();
+        const supportedNatively = ['.jpg', '.jpeg', '.png', '.webp', '.tiff', '.bmp', '.gif'];
+        if (supportedNatively.includes(ext)) {
+          imagePath = fullPath;
+        }
+      }
+
+      if (!imagePath) {
+        // Fallback to db lookup if nothing else is available
+        const dbRes = await query(`SELECT folder_path, file_name FROM media_files WHERE id = $1`, [mediaId]);
+        if (dbRes.rows.length > 0) {
+          const mediaRoot = process.env.MEDIA_ROOT || '/app/media';
+          const candidate = path.join(mediaRoot, dbRes.rows[0].folder_path, dbRes.rows[0].file_name);
+          if (fs.existsSync(candidate)) {
+            const ext = path.extname(candidate).toLowerCase();
+            const supportedNatively = ['.jpg', '.jpeg', '.png', '.webp', '.tiff', '.bmp', '.gif'];
+            if (supportedNatively.includes(ext)) {
               imagePath = candidate;
             }
           }
         }
+      }
+
+      if (!imagePath) {
+        throw new Error(`Thumbnail not yet available for media ID: ${mediaId}`);
       }
 
       if (!imagePath || !fs.existsSync(imagePath)) {

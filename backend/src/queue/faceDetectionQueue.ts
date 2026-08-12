@@ -1,4 +1,4 @@
-import { Queue, Worker } from 'bullmq';
+import { Queue, Worker, DelayedError } from 'bullmq';
 import { redis } from '../config/redis';
 import { query } from '../config/db';
 import { MLService } from '../modules/ml/ml.service';
@@ -18,7 +18,17 @@ if (process.env.IS_WORKER === 'true') {
     if (existing.rows.length > 0) {
       console.log(`[Face Detection Worker] Skipping ${mediaId}, faces already detected`);
     } else {
-      await MLService.detectFaces(mediaId, fullPath);
+      try {
+        await MLService.detectFaces(mediaId, fullPath);
+      } catch (err: any) {
+        if (err.message.includes('Thumbnail not yet available')) {
+          console.log(`[Face Detection Worker] Thumbnail not ready for ${mediaId}, delaying job for 10 seconds...`);
+          await job.moveToDelayed(Date.now() + 10000, job.token);
+          throw new DelayedError();
+        }
+        console.error(`[Face Detection Worker] Face detection error for ${mediaId}:`, err.message);
+        throw err;
+      }
     }
   }
 

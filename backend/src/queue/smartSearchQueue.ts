@@ -1,4 +1,4 @@
-import { Queue, Worker } from 'bullmq';
+import { Queue, Worker, DelayedError } from 'bullmq';
 import { redis } from '../config/redis';
 import { query } from '../config/db';
 import { SmartSearchService } from '../modules/ml/smartSearch.service';
@@ -20,6 +20,11 @@ if (process.env.IS_WORKER === 'true') {
     try {
       await SmartSearchService.processAndSaveMediaEmbedding(mediaId, fullPath);
     } catch (err: any) {
+      if (err.message.includes('Thumbnail not yet available')) {
+        console.log(`[Smart Search Worker] Thumbnail not ready for ${mediaId}, delaying job for 10 seconds...`);
+        await job.moveToDelayed(Date.now() + 10000, job.token);
+        throw new DelayedError();
+      }
       console.error(`[Smart Search Worker] Embedding error for ${mediaId}:`, err.message);
       throw err;
     }

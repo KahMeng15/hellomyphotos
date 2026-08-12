@@ -120,11 +120,15 @@ export class SmartSearchService {
     } else if (fs.existsSync(cachedPreview)) {
       targetFile = cachedPreview;
     } else if (fullPath && fs.existsSync(fullPath)) {
-      targetFile = fullPath;
+      const ext = path.extname(fullPath).toLowerCase();
+      const supportedNatively = ['.jpg', '.jpeg', '.png', '.webp', '.tiff', '.bmp', '.gif'];
+      if (supportedNatively.includes(ext)) {
+        targetFile = fullPath;
+      }
     }
 
     if (!targetFile) {
-      throw new Error(`No accessible image file found for media ID: ${mediaId}`);
+      throw new Error(`Thumbnail not yet available for media ID: ${mediaId}`);
     }
 
     const embedding = await this.generateImageEmbedding(targetFile);
