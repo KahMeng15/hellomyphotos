@@ -30,14 +30,37 @@ export class MediaService {
       const out1080 = path.join(dir1080, `${mediaId}.webp`);
       const out480 = path.join(dir480, `${mediaId}.webp`);
 
+      let sharpInput: string = fullPath;
+      let cleanupTmp = false;
+      const tmpPngPath = path.join(CACHE_ROOT, `tmp_${mediaId}.png`);
+
+      try {
+        await sharp(fullPath).metadata();
+      } catch (err: any) {
+        if (err.message?.includes('Security limit exceeded') || err.message?.includes('heif: Invalid input')) {
+          console.warn(`[MediaService] Sharp failed for ${fullPath} due to HEIF limits. Falling back to FFmpeg...`);
+          const { execFile } = await import('child_process');
+          await new Promise<void>((resolve, reject) => {
+            execFile('ffmpeg', ['-i', fullPath, '-vframes', '1', '-c:v', 'png', '-y', tmpPngPath], (error) => {
+              if (error) reject(error);
+              else resolve();
+            });
+          });
+          sharpInput = tmpPngPath;
+          cleanupTmp = true;
+        } else {
+          throw err;
+        }
+      }
+
       // 1. Generate 1080p WebP preview (max 1920x1080, quality 80)
-      await sharp(fullPath)
+      await sharp(sharpInput)
         .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 80 })
         .toFile(out1080);
 
       // 2. Generate 480p WebP thumbnail (max 854x480, quality 65)
-      const buffer480 = await sharp(fullPath)
+      const buffer480 = await sharp(sharpInput)
         .resize({ width: 854, height: 480, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 65 })
         .toBuffer();
@@ -65,6 +88,10 @@ export class MediaService {
          WHERE id = $2`,
         [bHash, mediaId]
       );
+
+      if (cleanupTmp) {
+        fs.unlink(tmpPngPath, () => {});
+      }
 
       return { blurhash: bHash, has1080p: true, has480p: true };
 
