@@ -68,6 +68,22 @@
     }
     return [...named, ...unnamed];
   });
+  let visibleCount = $state(50);
+  let visibleFaces = $derived(sortedFaces.slice(0, visibleCount));
+
+  function loadMore() {
+    visibleCount += 50;
+  }
+
+  function infiniteScroll(node: HTMLElement) {
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        loadMore();
+      }
+    }, { rootMargin: '400px' });
+    observer.observe(node);
+    return { destroy: () => observer.disconnect() };
+  }
 </script>
 
 <div class="header">
@@ -90,7 +106,7 @@
 </div>
 
 <div class="grid">
-  {#each sortedFaces as face, i}
+  {#each visibleFaces as face, i}
     <div class="face-card">
       <a href="/people/{face.person_id}" class="grid-item">
         <BlurhashImage 
@@ -126,6 +142,10 @@
     </div>
   {/each}
 </div>
+
+{#if visibleCount < sortedFaces.length}
+  <div use:infiniteScroll style="height: 20px; width: 100%;"></div>
+{/if}
 
 <style>
   .header {

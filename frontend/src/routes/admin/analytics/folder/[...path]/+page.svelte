@@ -715,4 +715,13 @@
     border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 4rem auto;
   }
   @keyframes spin { 100% { transform: rotate(360deg); } }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .tables-grid { grid-template-columns: 1fr; }
+    .tables-grid .card { overflow-x: auto; }
+    .stats-grid { gap: 1rem; }
+    .card { padding: 1rem; }
+    .card h3 { font-size: 1rem; }
+  }
 </style>

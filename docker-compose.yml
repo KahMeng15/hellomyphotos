@@ -1,5 +1,6 @@
 services:
   frontend:
+    restart: unless-stopped
     image: ghcr.io/kahmeng15/hellomyphotos/frontend:latest
     build:
       context: ./frontend
@@ -11,8 +12,14 @@ services:
       - BACKEND_PROXY_URL=http://backend:3000
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   backend:
+    restart: unless-stopped
     image: ghcr.io/kahmeng15/hellomyphotos/backend:latest
     build:
       context: ./backend
@@ -26,8 +33,19 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   backend-worker:
+    restart: unless-stopped
     image: ghcr.io/kahmeng15/hellomyphotos/backend:latest
     build:
       context: ./backend
@@ -41,26 +59,48 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
 
   postgres:
+    restart: unless-stopped
     image: ankane/pgvector:v0.5.1
     env_file: .env
     volumes:
       - ./volumes/pg_data:/var/lib/postgresql/data
       - ./volumes/pg_init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
+    restart: unless-stopped
     image: redis:7-alpine
     env_file: .env
     volumes:
       - ./volumes/redis_data:/data
     ports:
       - "8003:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   machine-learning:
+    restart: unless-stopped
     image: ghcr.io/immich-app/immich-machine-learning:release
     env_file: .env
     ports:
       - "8004:3003"
     volumes:
       - ./volumes/ml_cache:/cache
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3003/ping > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

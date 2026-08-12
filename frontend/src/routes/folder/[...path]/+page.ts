@@ -34,7 +34,8 @@ export const load: PageLoad = async ({ params, fetch }) => {
       files: data.files,
       directories: data.directories,
       scanning: data.scanning,
-      isProcessing: data.isProcessing
+      isProcessing: data.isProcessing,
+      hostError: data.hostError
     };
   } catch (error) {
     console.error('Failed to load folder:', error);

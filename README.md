@@ -38,7 +38,7 @@ Edit `.env` and at minimum set:
 - `APP_DOMAIN` / `PUBLIC_APP_DOMAIN` — the URL you use to reach the app (e.g. `http://localhost:8000` locally, `https://photos.mydomain.com` in production).
 - `DB_PASS` / `POSTGRES_PASSWORD` — change the default database password.
 - `JWT_SECRET` and `COOKIE_SECRET` — add long random strings (not in the example, but strongly recommended).
-- `PUBLIC_TURNSTILE_SITEKEY` / `TURNSTILE_SECRET` — your Cloudflare Turnstile pair (the defaults are Cloudflare's *always-pass* test keys).
+- `TURNSTILE_SITEKEY` / `TURNSTILE_SECRET` — your Cloudflare Turnstile pair (the defaults are Cloudflare's *always-pass* test keys). The site key is served to the frontend at runtime, so no key is baked into any image.
 
 ### 4. Add your photos
 The scanner reads directly from `./volumes/media_ro` (mounted read-only — your originals are never modified).

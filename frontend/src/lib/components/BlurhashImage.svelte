@@ -10,7 +10,8 @@
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
   let observer: IntersectionObserver;
-  let visible = $state(priority); // If priority, it is visible immediately during SSR
+  // `visible`: card is scrolled into view — decode blurhash and start loading the image.
+  let visible = $state(priority); // If priority, is visible immediately during SSR
   let container: HTMLDivElement | undefined = $state();
   
   let aspectRatio = $state(initialAspectRatio ?? 1.5);
@@ -54,10 +55,10 @@
     // Decode blurhash only when visible
     if (visible && hash && canvas) {
       try {
-        const pixels = decode(hash, 32, 32);
+        const pixels = decode(hash, 16, 16);
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          const imageData = ctx.createImageData(32, 32);
+          const imageData = ctx.createImageData(16, 16);
           imageData.data.set(pixels);
           ctx.putImageData(imageData, 0, 0);
         }
@@ -71,16 +72,19 @@
 
     // Lazy load image using Intersection Observer ONLY if it's not a priority image
     if (!priority) {
+      // Stage 2: when actually in view, decode the blurhash and load the real image
       observer = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting) {
           visible = true;
           observer.disconnect();
         }
       }, { rootMargin: '800px' });
-      
-      if (container) {
-        observer.observe(container);
-      }
+
+      if (container) observer.observe(container);
+
+      return () => {
+        if (observer) observer.disconnect();
+      };
     }
 
     return () => {
@@ -91,9 +95,9 @@
 
 <div class="grid-item {square ? 'is-square' : ''}" style="{!square ? `flex-grow: ${aspectRatio}; flex-basis: ${targetHeight * aspectRatio}px;` : ''}" {onclick}>
   <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'}; aspect-ratio: {objectFit === 'cover' ? (square ? 1 : aspectRatio) : aspectRatio};">
-    <div class="zoom-wrapper skeleton" style="animation-delay: -{randomDelay}s;">
+    <div class="zoom-wrapper {visible ? '' : 'skeleton'}" style="animation-delay: -{randomDelay}s;">
       {#if visible}
-        <canvas bind:this={canvas} width="32" height="32" class:loaded={imgLoaded}></canvas>
+        <canvas bind:this={canvas} width="16" height="16" class:loaded={imgLoaded}></canvas>
         <img {src} {alt} onload={handleLoad} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox && transformString ? `transform: ${transformString};` : ''}" />
       {/if}
     </div>
@@ -111,7 +115,7 @@
     overflow: hidden;
     position: relative;
     border-radius: 0;
-    /* transition: transform ... was here */
+    content-visibility: auto;
   }
   
   .grid-item:hover .zoom-wrapper {

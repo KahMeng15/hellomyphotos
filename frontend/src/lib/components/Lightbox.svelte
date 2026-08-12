@@ -7,7 +7,7 @@
   import { createShare } from '$lib/api/shares';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import BlurhashImage from './BlurhashImage.svelte';
-  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check } from '@lucide/svelte';
+  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { formatDate } from '$lib/utils/date';
 
@@ -27,6 +27,7 @@
     isSharedView?: boolean, 
     token?: string,
     baseFolderPath?: string,
+    folderCoverId?: string | null,
     onclose?: () => void,
     onnext?: () => void,
     onprev?: () => void,
@@ -71,6 +72,50 @@
     if (e.key === 'ArrowLeft' && onprev) onprev();
   }
   
+  // --- Swipe management ---
+  
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchEndX = 0;
+  let touchEndY = 0;
+
+  function handleTouchStart(e: TouchEvent) {
+    onActivity();
+    if (currentZoom > 1.05) return;
+    touchStartX = e.changedTouches[0].screenX;
+    touchStartY = e.changedTouches[0].screenY;
+  }
+
+  function handleTouchEnd(e: TouchEvent) {
+    onActivity();
+    if (currentZoom > 1.05) return;
+    touchEndX = e.changedTouches[0].screenX;
+    touchEndY = e.changedTouches[0].screenY;
+    handleSwipe();
+  }
+
+  function handleSwipe() {
+    const swipeThreshold = 50; // minimum distance in pixels
+    const deltaX = touchEndX - touchStartX;
+    const deltaY = touchEndY - touchStartY;
+
+    // Determine if it's mostly horizontal or vertical
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+      // Horizontal swipe
+      if (deltaX > swipeThreshold) {
+        if (onprev) onprev();
+      } else if (deltaX < -swipeThreshold) {
+        if (onnext) onnext();
+      }
+    } else {
+      // Vertical swipe
+      // Swipe up means negative deltaY
+      if (deltaY < -swipeThreshold) {
+        close();
+      }
+    }
+  }
+
   // --- Info / faces ---
 
   let faces: {person_id: string, bounding_box: any, name?: string}[] = $state([]);
@@ -92,6 +137,79 @@
       });
     }
   });
+
+  // --- Zoom logic ---
+  let pzInstance: any = $state(null);
+  let currentZoom = $state(1);
+  let showZoomSlider = $state(false);
+
+  function initPanzoom(node: HTMLElement) {
+    if (media.mime_type.startsWith('video/')) return;
+    
+    import('panzoom').then(({ default: panzoom }) => {
+      pzInstance = panzoom(node, {
+        maxZoom: 5,
+        minZoom: 1,
+        bounds: true,
+        boundsPadding: 0.1,
+      });
+
+      pzInstance.on('transform', () => {
+        const transform = pzInstance.getTransform();
+        currentZoom = transform.scale;
+        if (currentZoom > 1.05) {
+          showZoomSlider = true;
+        } else {
+          showZoomSlider = false;
+          if (Math.abs(transform.x) > 0.1 || Math.abs(transform.y) > 0.1) {
+            pzInstance.moveTo(0, 0);
+          }
+        }
+      });
+    });
+
+    return {
+      destroy() {
+        if (pzInstance) {
+          pzInstance.dispose();
+          pzInstance = null;
+        }
+      }
+    };
+  }
+
+  function toggleZoomIcon() {
+    if (pzInstance) {
+      const el = document.querySelector('.media-element') as HTMLElement;
+      if (el) {
+        el.style.transition = 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+        setTimeout(() => {
+          if (el) el.style.transition = 'none';
+        }, 300);
+      }
+
+      if (showZoomSlider || currentZoom > 1.05) {
+        pzInstance.zoomAbs(window.innerWidth / 2, window.innerHeight / 2, 1);
+        pzInstance.moveTo(0, 0);
+        showZoomSlider = false;
+      } else {
+        pzInstance.zoomAbs(window.innerWidth / 2, window.innerHeight / 2, 2);
+        showZoomSlider = true;
+      }
+    }
+  }
+
+  function handleZoomSlider(e: Event) {
+    const targetZoom = parseFloat((e.target as HTMLInputElement).value);
+    if (pzInstance) {
+      const centerX = window.innerWidth / 2;
+      const centerY = window.innerHeight / 2;
+      pzInstance.zoomAbs(centerX, centerY, targetZoom);
+      if (targetZoom === 1) {
+        pzInstance.moveTo(0, 0);
+      }
+    }
+  }
 
   // --- Download, share, cover ---
 
@@ -148,7 +266,8 @@
 
 <div class="lightbox" style="opacity: 1;" onmousemove={onActivity} onmousedown={onActivity} ontouchstart={onActivity} onclick={close}>
   <div class="layout-wrapper">
-    <div class="main-area">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="main-area" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
       <div class="top-bar" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'} onclick={(e) => e.stopPropagation()}>
         {#if allowDownload}
           <button class="icon-btn" onclick={download} title="Download">
@@ -163,6 +282,19 @@
               <Share2 size={20} strokeWidth={2} />
             {/if}
           </button>
+        {/if}
+        {#if !media.mime_type.startsWith('video/')}
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="icon-btn {showZoomSlider ? 'active' : ''}" onclick={toggleZoomIcon} title="Zoom">
+              <ZoomIn size={20} strokeWidth={2} />
+            </button>
+            {#if showZoomSlider}
+              <div transition:fade={{ duration: 150 }} style="background: rgba(0,0,0,0.5); padding: 8px 12px; border-radius: 22px; display: flex; align-items: center; gap: 8px;" onclick={(e) => e.stopPropagation()}>
+                <input type="range" min="1" max="5" step="0.1" bind:value={currentZoom} oninput={handleZoomSlider} style="width: 100px; accent-color: white;" />
+                <span style="color: white; font-size: 0.75rem; min-width: 3ch; text-align: right;">{currentZoom.toFixed(1)}x</span>
+              </div>
+            {/if}
+          </div>
         {/if}
         <button class="icon-btn {showInfo ? 'active' : ''}" onclick={toggleInfo} title="Info">
           <Info size={20} strokeWidth={2} />
@@ -195,7 +327,7 @@
             Your browser does not support the video tag.
           </video>
         {:else}
-          <img src={getPreviewUrl(media.id, false, token)} alt={media.file_name} class="media-element" />
+          <img src={getPreviewUrl(media.id, false, token)} alt={media.file_name} class="media-element" draggable="false" use:initPanzoom />
         {/if}
       </div>
       
@@ -218,11 +350,9 @@
           <div class="info-section">
             <h4>SOURCE</h4>
             <div class="album-info">
-              {#if media.folder_cover_id}
-                <div class="album-cover">
-                  <BlurhashImage hash={''} src={getThumbnailUrl(media.folder_cover_id)} objectFit="cover" square={true} />
-                </div>
-              {/if}
+              <div class="album-cover">
+                <BlurhashImage hash={''} src={getThumbnailUrl(folderCoverId || media.folder_cover_id || media.id)} objectFit="cover" square={true} />
+              </div>
               <div class="album-details">
                 {#if pathSegments.length > 1}
                   <div class="breadcrumb-path">

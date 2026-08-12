@@ -22,14 +22,16 @@ if (process.env.IS_WORKER === 'true') {
     }
   }
 
-  // Sequential handoff
+  // Pipeline handoff: chain to next stage per-image
   const mode = await getExecutionMode();
-  if (mode === 'sequential' && !skipCascade) {
+  if (mode === 'pipeline' && !skipCascade) {
     await smartSearchQueue.add('generate-smart-search', { mediaId, fullPath, mimeType });
   }
 }, {
   connection: redis,
-  concurrency: parseInt(process.env.THUMBNAIL_CONCURRENCY || '2', 10)
+  concurrency: parseInt(process.env.THUMBNAIL_CONCURRENCY || '2', 10),
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 86400 }
 });
 
   thumbnailWorker.on('failed', (job, err) => {

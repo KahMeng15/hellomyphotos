@@ -3,6 +3,7 @@ import { redis } from '../config/redis';
 import { query } from '../config/db';
 import { MLService } from '../modules/ml/ml.service';
 import { facialRecognitionQueue } from './facialRecognitionQueue';
+import { getExecutionMode } from './mode';
 
 export const faceDetectionQueue = new Queue('face-detection', { connection: redis });
 
@@ -21,11 +22,18 @@ if (process.env.IS_WORKER === 'true') {
     }
   }
 
-  // Always trigger reclustering after detection completes
-  await facialRecognitionQueue.add('recognize-faces', { mediaId, fullPath, mimeType });
+  // Pipeline mode: chain to facial-recognition per-image.
+  // Batch mode: facial-recognition is triggered as a full queue sweep after face-detection finishes.
+  const mode = await getExecutionMode();
+  if (mode === 'pipeline') {
+    await facialRecognitionQueue.add('recognize-faces', { mediaId, fullPath, mimeType },
+      { removeOnComplete: { age: 3600 }, removeOnFail: { age: 86400 } });
+  }
 }, {
   connection: redis,
-  concurrency: parseInt(process.env.FACE_DETECTION_CONCURRENCY || '1', 10)
+  concurrency: parseInt(process.env.FACE_DETECTION_CONCURRENCY || '1', 10),
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 86400 }
 });
 
   faceDetectionWorker.on('failed', (job, err) => {

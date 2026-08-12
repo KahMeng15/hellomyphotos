@@ -124,9 +124,12 @@ async function runTests() {
   // Test 4: Execution Mode & Handoff Configuration
   console.log('\n--- Test 4: Queue Execution Mode ---');
   try {
-    await setExecutionMode('sequential');
+    await setExecutionMode('pipeline');
     const mode = await getExecutionMode();
-    assert(mode === 'sequential', `Queue execution mode is correctly set to '${mode}'`);
+    if (mode !== 'pipeline') {
+      throw new Error(`Execution mode check failed: expected pipeline, got ${mode}`);
+    }
+    assert(mode === 'pipeline', `Queue execution mode is correctly set to '${mode}'`);
   } catch (err: any) {
     assert(false, `Execution mode check threw error: ${err.message}`);
   }

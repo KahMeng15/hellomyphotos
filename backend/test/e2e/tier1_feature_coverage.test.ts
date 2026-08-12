@@ -52,21 +52,21 @@ export async function runTier1Tests(): Promise<{ passed: number; failed: number;
     }
   });
 
-  await test('T1.03: Execution mode GET and SET APIs (sequential & concurrent toggle)', async () => {
+  await test('T1.03: Execution mode GET and SET APIs (pipeline & batch toggle)', async () => {
     const resGet = await fetch(`${url}/api/admin/queues/mode`, { headers });
     if (!resGet.ok) throw new Error('GET mode failed');
 
     const resSet = await fetch(`${url}/api/admin/queues/mode`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ mode: 'concurrent' })
+      body: JSON.stringify({ mode: 'batch' })
     });
     if (!resSet.ok) throw new Error('POST mode failed');
     const setMode = (await resSet.json()).mode;
-    if (setMode !== 'concurrent') throw new Error(`Expected mode concurrent, got ${setMode}`);
+    if (setMode !== 'batch') throw new Error(`Expected mode batch, got ${setMode}`);
 
-    // Revert back to sequential default
-    await setExecutionMode('sequential');
+    // Revert back to pipeline default
+    await setExecutionMode('pipeline');
   });
 
   await test('T1.04: Queue pause, resume, stop, and clean lifecycle endpoints', async () => {
@@ -152,7 +152,7 @@ export async function runTier1Tests(): Promise<{ passed: number; failed: number;
   });
 
   await test('T1.10: Sequential queue handoffs propagate through media processing chain', async () => {
-    await setExecutionMode('sequential');
+    await setExecutionMode('pipeline');
     const sampleImgPath = await createTestImage('handoff_test.jpg');
     const mediaRes = await query(
       `INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes) VALUES ('e2e_test_dir', 'handoff_test.jpg', 'image/jpeg', 1200) RETURNING id`

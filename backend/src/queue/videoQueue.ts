@@ -25,16 +25,21 @@ if (process.env.IS_WORKER === 'true') {
     }
   }
 
-  // Sequential handoff
+  // Pipeline handoff: chain to next stage per-image
   const mode = await getExecutionMode();
-  if (mode === 'sequential') {
-    await smartSearchQueue.add('generate-smart-search', { mediaId, fullPath, mimeType });
+  if (mode === 'pipeline') {
+    await smartSearchQueue.add('generate-smart-search', { mediaId, fullPath, mimeType }, {
+      removeOnComplete: { age: 3600 },
+      removeOnFail: { age: 86400 }
+    });
   }
   
   return { action: actionTaken };
 }, {
   connection: redis,
-  concurrency: parseInt(process.env.VIDEO_CONCURRENCY || '1', 10)
+  concurrency: parseInt(process.env.VIDEO_CONCURRENCY || '1', 10),
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 86400 }
 });
 
   videoWorker.on('failed', (job, err) => {

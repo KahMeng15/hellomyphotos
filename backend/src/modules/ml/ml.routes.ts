@@ -12,6 +12,65 @@ const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.c
 const FACE_THUMB_SIZE = 300;
 const FACE_PADDING = 0.5;
 
+class Semaphore {
+  private tasks: (() => void)[] = [];
+  constructor(private count: number) {}
+  async acquire(): Promise<void> {
+    if (this.count > 0) {
+      this.count--;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      this.tasks.push(resolve);
+    });
+  }
+  release(): void {
+    if (this.tasks.length > 0) {
+      const next = this.tasks.shift();
+      if (next) next();
+    } else {
+      this.count++;
+    }
+  }
+}
+// Limit concurrent on-the-fly sharp extractions to avoid OOM
+const faceThumbSemaphore = new Semaphore(4);
+
+const currentlyGeneratingFaceThumbs = new Set<string>();
+
+async function generateFaceThumbnailAsync(personId: string, face: any, fullPath: string, cachedPath: string) {
+  if (currentlyGeneratingFaceThumbs.has(personId)) return;
+  currentlyGeneratingFaceThumbs.add(personId);
+  try {
+    await faceThumbSemaphore.acquire();
+    if (fs.existsSync(cachedPath)) return;
+    const crop = parseBoundingBox(face.bounding_box);
+    const meta = await sharp(fullPath).metadata();
+    const imgW = meta.width || 1;
+    const imgH = meta.height || 1;
+    crop.left = Math.min(crop.left, imgW - 1);
+    crop.top = Math.min(crop.top, imgH - 1);
+    crop.width = Math.min(crop.width, imgW - crop.left);
+    crop.height = Math.min(crop.height, imgH - crop.top);
+    await sharp(fullPath)
+      .extract(crop)
+      .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
+      .webp({ quality: 75 })
+      .toFile(cachedPath);
+  } catch (err: any) {
+    console.error(`[Face Thumbnail Async] Failed for ${personId}:`, err.message);
+  } finally {
+    currentlyGeneratingFaceThumbs.delete(personId);
+    faceThumbSemaphore.release();
+  }
+}
+
+function sendDefaultAvatar(reply: any) {
+  reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  reply.header('Content-Type', 'image/svg+xml');
+  return reply.send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300"><rect width="300" height="300" fill="#f0f0f0"/><circle cx="150" cy="120" r="60" fill="#bdbdbd"/><path d="M50 300 Q 150 180 250 300" fill="#bdbdbd"/></svg>`);
+}
+
 function parseBoundingBox(box: any): { left: number; top: number; width: number; height: number } {
   if (box && box.x1 !== undefined && box.y1 !== undefined && box.x2 !== undefined && box.y2 !== undefined) {
     const w = box.x2 - box.x1;
@@ -236,6 +295,9 @@ export async function mlRoutes(fastify: FastifyInstance) {
 
     // Check for explicitly set cover first, then fall back to best solo photo
     const coverResult = await query(`SELECT cover_media_id FROM people WHERE id = $1 AND cover_media_id IS NOT NULL`, [id]);
+    let faceToUse: any = null;
+    let fullPathToUse: string | null = null;
+
     if (coverResult.rows.length > 0 && coverResult.rows[0].cover_media_id) {
       const mediaResult = await query(`
         SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name
@@ -249,80 +311,42 @@ export async function mlRoutes(fastify: FastifyInstance) {
         const face = mediaResult.rows[0];
         const fullPath = path.join(MEDIA_ROOT, face.folder_path, face.file_name);
         if (fs.existsSync(fullPath)) {
-          try {
-            const crop = parseBoundingBox(face.bounding_box);
-            const meta = await sharp(fullPath).metadata();
-            const imgW = meta.width || 1;
-            const imgH = meta.height || 1;
-            crop.left = Math.min(crop.left, imgW - 1);
-            crop.top = Math.min(crop.top, imgH - 1);
-            crop.width = Math.min(crop.width, imgW - crop.left);
-            crop.height = Math.min(crop.height, imgH - crop.top);
-            await sharp(fullPath)
-              .extract(crop)
-              .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
-              .webp({ quality: 75 })
-              .toFile(cachedPath);
-            const mtime = fs.statSync(cachedPath).mtimeMs;
-            reply.header('ETag', `"${id}-${Math.floor(mtime)}"`);
-            reply.header('Content-Type', 'image/webp');
-            reply.header('Cache-Control', 'no-cache, must-revalidate');
-            return reply.send(fs.createReadStream(cachedPath));
-          } catch (err: any) {
-            console.error(`[Face Thumbnail] Failed to generate from cover for ${id}:`, err.message);
-          }
+          faceToUse = face;
+          fullPathToUse = fullPath;
         }
       }
     }
 
-    // Fall back to best solo photo (fewest other faces)
-    const repResult = await query(`
-      SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name
-      FROM face_embeddings fe
-      JOIN media_files m ON m.id = fe.media_id
-      WHERE fe.person_id = $1
-      ORDER BY (
-        SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe.media_id
-      ) ASC, m.created_at DESC
-      LIMIT 1
-    `, [id]);
+    if (!faceToUse) {
+      // Fall back to best solo photo (fewest other faces)
+      const repResult = await query(`
+        SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name
+        FROM face_embeddings fe
+        JOIN media_files m ON m.id = fe.media_id
+        WHERE fe.person_id = $1
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      `, [id]);
 
-    if (repResult.rows.length === 0) {
-      return reply.status(404).send({ error: 'No face found for this person' });
+      if (repResult.rows.length > 0) {
+        const face = repResult.rows[0];
+        const fullPath = path.join(MEDIA_ROOT, face.folder_path, face.file_name);
+        if (fs.existsSync(fullPath)) {
+          faceToUse = face;
+          fullPathToUse = fullPath;
+        }
+      }
     }
 
-    const face = repResult.rows[0];
-    const fullPath = path.join(MEDIA_ROOT, face.folder_path, face.file_name);
-
-    if (!fs.existsSync(fullPath)) {
-      return reply.status(404).send({ error: 'Source image not found' });
+    if (!faceToUse || !fullPathToUse) {
+      return sendDefaultAvatar(reply);
     }
 
-    try {
-      const crop = parseBoundingBox(face.bounding_box);
-      const meta = await sharp(fullPath).metadata();
-      const imgW = meta.width || 1;
-      const imgH = meta.height || 1;
-      crop.left = Math.min(crop.left, imgW - 1);
-      crop.top = Math.min(crop.top, imgH - 1);
-      crop.width = Math.min(crop.width, imgW - crop.left);
-      crop.height = Math.min(crop.height, imgH - crop.top);
+    // Fire and forget async generation
+    generateFaceThumbnailAsync(id, faceToUse, fullPathToUse, cachedPath).catch(console.error);
 
-      await sharp(fullPath)
-        .extract(crop)
-        .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
-        .webp({ quality: 75 })
-        .toFile(cachedPath);
-
-      const mtime = fs.statSync(cachedPath).mtimeMs;
-      reply.header('ETag', `"${id}-${Math.floor(mtime)}"`);
-      reply.header('Content-Type', 'image/webp');
-      reply.header('Cache-Control', 'no-cache, must-revalidate');
-      return reply.send(fs.createReadStream(cachedPath));
-    } catch (err: any) {
-      console.error(`[Face Thumbnail] Failed to generate for ${id}:`, err.message);
-      return reply.status(500).send({ error: 'Failed to generate face thumbnail' });
-    }
+    // Immediately return default avatar to prevent blocking the browser connection
+    return sendDefaultAvatar(reply);
   });
 
   // Get all faces in a specific media file

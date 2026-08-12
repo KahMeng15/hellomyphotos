@@ -249,7 +249,6 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.get('/api/admin/settings', async (request, reply) => {
     const { rows } = await query('SELECT key, value FROM admin_settings');
     const settings: any = {
-      maxCpuCores: 2,
       scanInterval: 3600000,
       scanSchedule: { type: 'off' },
       mlConfidenceThreshold: 0.6,
@@ -275,7 +274,6 @@ export async function adminRoutes(fastify: FastifyInstance) {
     };
     
     for (const r of rows) {
-      if (r.key === 'max_cpu_cores') settings.maxCpuCores = r.value;
       if (r.key === 'scan_interval') settings.scanInterval = r.value;
       if (r.key === 'scan_schedule') settings.scanSchedule = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
       if (r.key === 'ml_confidence') settings.mlConfidenceThreshold = r.value;
@@ -305,12 +303,9 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.put('/api/admin/settings', async (request, reply) => {
-    const { maxCpuCores, scanInterval, scanSchedule, mlConfidenceThreshold, throttleAuthGlobal, throttlePublicGlobal, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal, defaultViewMode, defaultSortMode, defaultFolderViewMode, defaultShareViewMode, defaultShareSortMode, defaultShareFolderViewMode, analyticsFilterBots, analyticsFilterSpam } = request.body as any;
+    const { scanInterval, scanSchedule, mlConfidenceThreshold, throttleAuthGlobal, throttlePublicGlobal, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal, defaultViewMode, defaultSortMode, defaultFolderViewMode, defaultShareViewMode, defaultShareSortMode, defaultShareFolderViewMode, analyticsFilterBots, analyticsFilterSpam } = request.body as any;
     
     const updates = [];
-    // H-3 Note: maxCpuCores is persisted here but worker concurrency is set at startup from env vars.
-    // Changing this setting takes effect only after a service restart. Consider documenting this in the UI.
-    if (maxCpuCores !== undefined) updates.push({ k: 'max_cpu_cores', v: maxCpuCores });
     if (scanInterval !== undefined) updates.push({ k: 'scan_interval', v: scanInterval });
     if (scanSchedule !== undefined) updates.push({ k: 'scan_schedule', v: scanSchedule });
     if (mlConfidenceThreshold !== undefined) updates.push({ k: 'ml_confidence', v: mlConfidenceThreshold });

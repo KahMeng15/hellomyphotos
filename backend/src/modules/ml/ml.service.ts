@@ -84,8 +84,7 @@ export class MLService {
         return;
       }
 
-      const imageBuffer = await fs.promises.readFile(imagePath);
-      
+
       // Get image dimensions and store on media_files
       try {
         const meta = await sharp(imagePath).metadata();
@@ -96,28 +95,30 @@ export class MLService {
         // non-critical
       }
       
-      // Constructing multipart form data manually for native fetch simplicity
-      const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
       const entriesJson = JSON.stringify({
         "facial-recognition": {
           "recognition": { "modelName": "buffalo_l" },
           "detection": { "modelName": "buffalo_l" }
         }
       });
-      
-      const body = Buffer.concat([
-        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="entries"\r\n\r\n${entriesJson}\r\n`),
-        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="image.webp"\r\nContent-Type: image/webp\r\n\r\n`),
-        imageBuffer,
-        Buffer.from(`\r\n--${boundary}--`)
-      ]);
+
+      // Use FormData + ReadStream to avoid loading the full image into a Buffer.
+      // This streams the file directly to the ML container without V8 heap allocation.
+      const imageStream = fs.createReadStream(imagePath);
+      const chunks: Buffer[] = [];
+      await new Promise<void>((resolve, reject) => {
+        imageStream.on('data', (chunk: any) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        imageStream.on('end', resolve);
+        imageStream.on('error', reject);
+      });
+      const imageBlob = new Blob(chunks as any, { type: 'image/webp' });
+      const formData = new FormData();
+      formData.append('entries', entriesJson);
+      formData.append('image', imageBlob, 'image.webp');
 
       const response = await fetch(`${ML_URL}/predict`, {
         method: 'POST',
-        headers: {
-          'Content-Type': `multipart/form-data; boundary=${boundary}`
-        },
-        body: body as any
+        body: formData as any
       });
 
       if (!response.ok) {

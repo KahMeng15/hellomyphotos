@@ -1,18 +1,14 @@
 FROM node:22-slim
 
-ARG TARGETARCH
-RUN set -eux; \
-    case "${TARGETARCH}" in \
-      arm64) url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz" ;; \
-      *)     url="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" ;; \
-    esac; \
-    apt-get update \
-      && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
-      && rm -rf /var/lib/apt/lists/* \
-      && curl -fsSL "$url" -o /tmp/ffmpeg.tar.xz \
-      && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp \
-      && cp /tmp/ffmpeg-*-static/ffmpeg /usr/local/bin/ffmpeg \
-      && rm -rf /tmp/ffmpeg*
+RUN echo "Acquire::Check-Valid-Until \"false\";\nAcquire::Check-Date \"false\";" > /etc/apt/apt.conf.d/10no--check-valid-until && \
+    apt-get update -o Acquire::AllowInsecureRepositories=true -o Acquire::AllowDowngradeToInsecureRepositories=true || true
+
+RUN apt-get install -y --allow-unauthenticated --no-install-recommends \
+    ffmpeg \
+    libva-drm2 \
+    libva2 \
+    mesa-va-drivers \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package*.json ./

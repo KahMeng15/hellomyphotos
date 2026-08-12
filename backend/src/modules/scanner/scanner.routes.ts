@@ -5,10 +5,18 @@ import sharp from 'sharp';
 import { redis } from '../../config/redis';
 import { scannerQueue } from '../../queue/scannerQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
+import { metadataQueue } from '../../queue/metadataQueue';
+import { thumbnailQueue } from '../../queue/thumbnailQueue';
+import { videoQueue } from '../../queue/videoQueue';
 import { query } from '../../config/db';
 import { requireAuth, hasFolderAccess, canBrowseFolder } from '../../utils/auth';
+import { logger } from '../../utils/logger';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
+
+function profileLabel(folderPath: string, step: string) {
+  return `[FOLDER_PROFILE] ${JSON.stringify(folderPath)} :: ${step}`;
+}
 
 export async function scannerRoutes(fastify: FastifyInstance) {
   
@@ -106,14 +114,20 @@ export async function scannerRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { '*': string } }>('/api/folder/*', { preHandler: requireAuth }, async (request, reply) => {
     // URL decode the path param and sanitize
     const folderPath = decodeURIComponent(request.params['*'] || '');
+    const t0 = performance.now();
     
     if (!canBrowseFolder(request.user!, folderPath)) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
     }
+
+    const mark = (name: string) => {
+      logger.info(profileLabel(folderPath, name), { ms: Math.round(performance.now() - t0) });
+    };
     
     // 1. Query Redis for Cooldown
     const cooldownKey = `scan_cooldown:${folderPath}`;
     const exists = await redis.exists(cooldownKey);
+    mark('1_redis_cooldown');
     
     if (!exists) {
       // 2. Set Cooldown & Push Job
@@ -131,16 +145,38 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     let files = result.rows;
     if (!hasFolderAccess(request.user!, folderPath)) {
       files = []; // Cannot see files in ancestor folders
+    } else {
+      // Prioritize processing for files in this actively navigated folder
+      const missingMetadata = files.filter(f => f.exif_json == null);
+      const missingThumbs = files.filter(f => !f.has_480p || !f.has_1080p);
+
+      Promise.all(missingMetadata.map(f => 
+        metadataQueue.add('extract-metadata', { 
+          mediaId: f.id, 
+          fullPath: path.join(MEDIA_ROOT, f.folder_path || '', f.file_name), 
+          mimeType: f.mime_type 
+        }, { priority: 2 })
+      )).catch(err => logger.error('Failed to queue high-priority metadata jobs', err));
+
+      Promise.all(missingThumbs.map(f => {
+        const fullPath = path.join(MEDIA_ROOT, f.folder_path || '', f.file_name);
+        if (f.mime_type.startsWith('video/')) {
+          return videoQueue.add('process-video', { mediaId: f.id, fullPath, mimeType: f.mime_type }, { priority: 2 });
+        } else {
+          return thumbnailQueue.add('generate-thumbnail', { mediaId: f.id, fullPath, mimeType: f.mime_type }, { priority: 2 });
+        }
+      })).catch(err => logger.error('Failed to queue high-priority thumbnail jobs', err));
     }
+    mark('2_db_files');
 
     // 4. Dynamically list subdirectories and find their cover images
     const fullPath = path.join(MEDIA_ROOT, folderPath);
     let directories: { name: string, cover_id: string | null, blurhash: string | null }[] = [];
+    let hostError: string | null = null;
     try {
-      if (fs.existsSync(fullPath)) {
-        const items = await fs.promises.readdir(fullPath, { withFileTypes: true });
-        
-        const dirNames = items.filter(item => item.isDirectory()).map(item => item.name);
+      const items = await fs.promises.readdir(fullPath, { withFileTypes: true });
+      
+      const dirNames = items.filter(item => item.isDirectory()).map(item => item.name);
         
         let validDirNames = dirNames.filter(name => {
           const subPath = folderPath ? `${folderPath}/${name}` : name;
@@ -233,10 +269,13 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         }));
         
         directories.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e: any) {
+      if (e.code !== 'ENOENT') {
+        console.error(`Failed to read directory: ${fullPath}`, e);
+        hostError = `Storage access error: ${e.message}`;
       }
-    } catch (e) {
-      console.error(`Failed to read directory: ${fullPath}`, e);
     }
+    mark('3_directories');
 
     // 5. Get current folder's custom cover (if any) and description
     let folderCoverId = null;
@@ -254,6 +293,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         folderDescription = currentFolderSettingsRes.rows[0].description || '';
       }
     }
+    mark('4_folder_settings');
 
     if (!folderCoverId) {
       // Check if processing is active for the current folder
@@ -328,6 +368,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         }
       }
     }
+    mark('5_folder_cover');
 
     const defaultsRes = await query("SELECT key, value FROM admin_settings WHERE key = ANY($1)", [
       ['default_view_mode', 'default_sort_mode', 'default_folder_view_mode']
@@ -349,6 +390,8 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       WHERE (folder_path = $1 OR folder_path LIKE $1 || '/%') AND (exif_json IS NULL OR blurhash IS NULL)
     `, [folderPath || '']);
     const isProcessing = parseInt(processingRes.rows[0].count) > 0;
+    mark('6_processing_count');
+    mark('total');
 
     return reply.send({
       folderPath,
@@ -361,6 +404,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       scanning: !exists, // Indicate if a scan was just triggered
       files,
       directories,
+      hostError,
       defaultViewMode: defaults.defaultViewMode,
       defaultSortMode: defaults.defaultSortMode,
       defaultFolderViewMode: defaults.defaultFolderViewMode

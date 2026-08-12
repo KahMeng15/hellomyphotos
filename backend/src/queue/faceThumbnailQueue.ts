@@ -13,7 +13,9 @@ if (process.env.IS_WORKER === 'true') {
     await MLService.generateFaceThumbnails(mediaId);
   }, {
     connection: redis,
-    concurrency: parseInt(process.env.FACE_THUMBNAIL_CONCURRENCY || '2', 10)
+    concurrency: parseInt(process.env.FACE_THUMBNAIL_CONCURRENCY || '2', 10),
+    removeOnComplete: { age: 3600 },
+    removeOnFail: { age: 86400 }
   });
 
   faceThumbnailWorker.on('failed', (job, err) => {

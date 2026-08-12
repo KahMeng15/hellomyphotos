@@ -3,7 +3,7 @@
   import { login } from '$lib/api/auth';
   import { currentUser } from '$lib/stores/auth';
   import { ShieldAlert } from '@lucide/svelte';
-  import { PUBLIC_TURNSTILE_SITEKEY } from '$env/static/public';
+  import { getTurnstileSitekey } from '$lib/api/turnstile';
   import { onMount, onDestroy } from 'svelte';
 
   let email = $state('');
@@ -14,17 +14,22 @@
   let widgetContainer: HTMLElement;
   let turnstileWidgetId: string | null = null;
 
-  onMount(() => {
+  let sitekey = $state('');
+
+  if (typeof window !== 'undefined') {
     (window as any).onTurnstileLoad = () => {
-      if ((window as any).turnstile && widgetContainer && !turnstileWidgetId) {
+      if ((window as any).turnstile && widgetContainer && !turnstileWidgetId && sitekey) {
         turnstileWidgetId = (window as any).turnstile.render(widgetContainer, {
-          sitekey: PUBLIC_TURNSTILE_SITEKEY,
+          sitekey,
           theme: 'dark',
           action: 'turnstile-spin-v2',
         });
       }
     };
+  }
 
+  onMount(async () => {
+    sitekey = await getTurnstileSitekey();
     if ((window as any).turnstile) {
       (window as any).onTurnstileLoad();
     }

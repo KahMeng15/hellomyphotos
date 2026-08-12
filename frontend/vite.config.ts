@@ -20,18 +20,10 @@ export default defineConfig({
 		SvelteKitPWA({
 			registerType: 'autoUpdate',
 			manifest: {
-				name: 'Hello My Photos',
-				short_name: 'Photos',
+				name: 'hellomyphotos',
+				short_name: 'hellomyphotos',
 				description: 'Your beautiful photo gallery',
-				theme_color: '#ffffff',
-				icons: [
-					{
-						src: 'icon.svg',
-						sizes: '192x192 512x512',
-						type: 'image/svg+xml',
-						purpose: 'any maskable'
-					}
-				]
+				theme_color: '#ffffff'
 			}
 		})
 	],
@@ -42,5 +34,8 @@ export default defineConfig({
 				changeOrigin: true
 			}
 		}
+	},
+	optimizeDeps: {
+		include: ['panzoom']
 	}
 });

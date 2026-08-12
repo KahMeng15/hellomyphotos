@@ -1,13 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Layers, Image, RefreshCw, Video } from '@lucide/svelte';
+  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Layers, Image, RefreshCw, Video, AlertCircle } from '@lucide/svelte';
   import Modal from '$lib/components/Modal.svelte';
 
   let queues = $state<any>({});
-  let executionMode = $state<'sequential' | 'concurrent'>('sequential');
+  let executionMode = $state<'pipeline' | 'batch'>('pipeline');
   let settings = $state<any>({
-    maxCpuCores: 2,
     scanInterval: 3600000,
     scanSchedule: { type: 'off' },
     mlConfidenceThreshold: 0.6
@@ -40,6 +39,96 @@
   let confirmDanger = $state(false);
   let confirmAction: (() => void) | null = $state(null);
 
+  let failedJobsModal = $state(false);
+  let failedJobsQueueName = $state('');
+  let failedJobsList = $state<any[]>([]);
+  let failedJobsLoading = $state(false);
+
+  let healthResults = $state<Record<string, any>>({});
+  let healthLoading = $state<Record<string, boolean>>({});
+  let systemStatusModal = $state(false);
+
+  async function viewFailedJobs(name: string) {
+    failedJobsQueueName = name;
+    failedJobsList = [];
+    failedJobsLoading = true;
+    failedJobsModal = true;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${name}/failed-jobs`, { credentials: 'include' });
+      if (res.ok) {
+        failedJobsList = await res.json();
+      }
+    } catch (e) {
+      toast.error('Failed to load error logs');
+    } finally {
+      failedJobsLoading = false;
+    }
+  }
+
+  async function retryFailedJobs() {
+    if (!failedJobsQueueName) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${failedJobsQueueName}/retry-failed`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Retried ${data.count || 0} failed jobs`);
+        failedJobsModal = false;
+        loadQueuesOnly();
+      }
+    } catch (e) {
+      toast.error('Failed to retry jobs');
+    }
+  }
+
+  async function clearFailedJobs() {
+    if (!failedJobsQueueName) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${failedJobsQueueName}/failed-jobs`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        toast.success('Cleared all failed jobs');
+        failedJobsModal = false;
+        loadQueuesOnly();
+      }
+    } catch (e) {
+      toast.error('Failed to clear jobs');
+    }
+  }
+
+  async function checkHealth(type: string) {
+    healthLoading[type] = true;
+    healthLoading = { ...healthLoading };
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/health/${type}`, { credentials: 'include' });
+      const data = await res.json();
+      healthResults[type] = data;
+      healthResults = { ...healthResults };
+      if (type === 'system') {
+        systemStatusModal = true;
+      }
+      if (data.status === 'ok' || data.available === true || data.dbConnected === true || data.testPassed === true) {
+        toast.success(`${type.toUpperCase()} check passed`);
+      } else {
+        toast.error(`${type.toUpperCase()} check FAILED: ${data.message || 'Unknown error'}`);
+      }
+    } catch (e: any) {
+      toast.error(`Health check error: ${e.message}`);
+    } finally {
+      healthLoading[type] = false;
+      healthLoading = { ...healthLoading };
+    }
+  }
+
+  function formatMB(bytes: number | undefined): string {
+    if (!bytes) return 'N/A';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
   function customConfirm(title: string, message: string, danger: boolean, action: () => void) {
     confirmTitle = title;
     confirmMessage = message;
@@ -66,22 +155,27 @@
       }
       if (sRes.ok) {
         const data = await sRes.json();
-        settings.maxCpuCores = data.maxCpuCores;
         settings.scanInterval = data.scanInterval;
         settings.scanSchedule = data.scanSchedule || { type: 'off' };
         settings.mlConfidenceThreshold = data.mlConfidenceThreshold;
       }
+    } catch (e) {
+      toast.error('API is offline');
     } finally {
       loading = false;
     }
   }
 
   async function loadQueuesOnly() {
-    const res = await fetch(`${API_BASE}/api/admin/queues`, { credentials: 'include' });
-    if (res.ok) {
-      const data = await res.json();
-      queues = data.queues || {};
-      if (data.mode) executionMode = data.mode;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        queues = data.queues || {};
+        if (data.mode) executionMode = data.mode;
+      }
+    } catch (e) {
+      toast.error('API is offline');
     }
   }
 
@@ -93,7 +187,6 @@
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          maxCpuCores: Number(settings.maxCpuCores),
           scanInterval: Number(settings.scanInterval),
           scanSchedule: settings.scanSchedule,
           mlConfidenceThreshold: Number(settings.mlConfidenceThreshold)
@@ -114,8 +207,9 @@
     }
   }
 
-  async function toggleExecutionMode(newMode: 'sequential' | 'concurrent') {
+  async function toggleExecutionMode(newMode: 'pipeline' | 'batch') {
     if (executionMode === newMode) return;
+    // Optimistic update — instant UI feedback before API responds
     executionMode = newMode;
     try {
       const res = await fetch(`${API_BASE}/api/admin/queues/mode`, {
@@ -127,19 +221,24 @@
       if (res.ok) {
         const data = await res.json();
         executionMode = data.mode;
+        const label = data.mode === 'pipeline' ? 'Pipeline' : 'Batch';
+        toast.success(`Switched to ${label} mode`);
+      } else {
+        // Roll back on failure
+        executionMode = newMode === 'pipeline' ? 'batch' : 'pipeline';
+        toast.error('Failed to change execution mode');
       }
-      await loadQueuesOnly();
     } catch (e) {
-      console.error('Failed to change queue execution mode:', e);
+      executionMode = newMode === 'pipeline' ? 'batch' : 'pipeline';
+      toast.error('Network error changing mode');
     }
   }
 
   onMount(() => {
     loadData();
-    // D-2 Fix: Increased poll interval from 2s to 5s.
-    // Each poll fires 8+ DB queries; at 2s with multiple admin tabs this causes
-    // significant DB query rate. 5s is a reasonable balance for real-time feedback.
-    pollInterval = setInterval(loadQueuesOnly, 5000);
+    // Slowed from 5s to 10s — backend now caches stats for 6s, so 10s poll is safe
+    // and cuts the number of DB-hitting requests by 50%.
+    pollInterval = setInterval(loadQueuesOnly, 10000);
   });
 
   onDestroy(() => {
@@ -163,32 +262,45 @@
   });
 
   async function actionQueue(name: string, action: string) {
-    const res = await fetch(`${API_BASE}/api/admin/queues/${name}/${action}`, { 
-      method: 'POST', 
-      credentials: 'include' 
-    });
-    if (res.ok) await loadQueuesOnly();
-  }
-  
-  async function stopQueue(name: string) {
-    customConfirm('Stop Queue', `Are you sure you want to stop and cancel all pending jobs in the ${name} queue?`, true, async () => {
-      const res = await fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { 
+    const label = name.replace(/-/g, ' ');
+    const actionLabel = action === 'pause' ? 'Paused' : action === 'resume' ? 'Resumed' : action.charAt(0).toUpperCase() + action.slice(1) + 'ed';
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${name}/${action}`, { 
         method: 'POST', 
         credentials: 'include' 
       });
-      if (res.ok) await loadQueuesOnly();
+      if (res.ok) {
+        toast.success(`${actionLabel} ${label} queue`);
+        await loadQueuesOnly();
+      } else {
+        toast.error(`Failed to ${action} ${label} queue`);
+      }
+    } catch {
+      toast.error(`Network error on ${label} ${action}`);
+    }
+  }
+  
+  async function stopQueue(name: string) {
+    const label = name.replace(/-/g, ' ');
+    customConfirm('Stop Queue', `Stop and cancel all pending jobs in the ${label} queue?`, true, async () => {
+      try {
+        toast.info(`Stopping ${label} queue... Please wait`);
+        const res = await fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { 
+          method: 'POST', 
+          credentials: 'include' 
+        });
+        if (res.ok) {
+          toast.success(`Stopped ${label} queue`);
+          await loadQueuesOnly();
+        } else {
+          toast.error(`Failed to stop ${label} queue`);
+        }
+      } catch {
+        toast.error(`Network error stopping ${label}`);
+      }
     });
   }
   
-  async function cleanQueue(name: string, type: string) {
-    const res = await fetch(`${API_BASE}/api/admin/queues/${name}/clean`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ type })
-    });
-    if (res.ok) await loadQueuesOnly();
-  }
 
   async function triggerResetEverything() {
     customConfirm(
@@ -268,68 +380,117 @@
   ];
 
   const queueTitles: Record<string, string> = {
-    'scanner': '1. Directory Discovery (Scanner)',
-    'metadata': '2. EXIF Metadata Extraction (Metadata)',
-    'thumbnail': '3. Image Thumbnail & Blurhash (Thumbnail)',
-    'video': '4. Video Transcoding & Frames (Video)',
-    'smart-search': '5. Smart Search & Embeddings (Smart Search)',
-    'face-detection': '6. Face Detection (Face Detection)',
-    'facial-recognition': '7. Facial Recognition (Facial Recognition)',
-    'face-thumbnail': '8. Face Thumbnail Generation (Face Thumbnail)'
+    'scanner': '1. Directory Discovery',
+    'metadata': '2. EXIF Metadata Extraction',
+    'thumbnail': '3. Image Thumbnail & Blurhash',
+    'video': '4. Video Transcoding & Frames',
+    'smart-search': '5. Smart Search & Embeddings',
+    'face-detection': '6. Face Detection',
+    'facial-recognition': '7. Facial Recognition',
+    'face-thumbnail': '8. Face Thumbnail Generation'
   };
 
   async function triggerJob(name: string) {
+    const label = name.replace(/-/g, ' ');
     try {
       const res = await fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' });
-      if (!res.ok) {
+      if (res.ok) {
+        toast.success(`Started ${label} queue`);
+      } else {
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        customAlert('Error', `Failed to start ${name}: ${err.error || res.statusText}`);
+        toast.error(`Failed to start ${label}: ${err.error || res.statusText}`);
       }
     } catch (e: any) {
-      customAlert('Error', `Network error starting ${name}: ${e.message}`);
+      toast.error(`Network error starting ${label}: ${e.message}`);
     }
     await loadQueuesOnly();
   }
 
+  let batchRunning = $state(false);
+
   async function runAllJobs() {
-    // D-5 Fix: Fire all trigger requests concurrently instead of sequentially.
-    // Previously 8 sequential awaits could block the UI for several seconds.
-    try {
-      const results = await Promise.all(
-        queueNames.map(name =>
-          fetch(`${API_BASE}/api/admin/queues/${name}/trigger`, { method: 'POST', credentials: 'include' })
-        )
-      );
-      
-      const failures = [];
-      for (let i = 0; i < results.length; i++) {
-        if (!results[i].ok) failures.push(queueNames[i]);
+    if (executionMode === 'batch') {
+      try {
+        batchRunning = true;
+        const res = await fetch(`${API_BASE}/api/admin/queues/start-all-batch`, { method: 'POST', credentials: 'include' });
+        if (res.status === 409) {
+          toast.info('A batch run is already in progress');
+        } else if (res.ok) {
+          toast.success('Batch processing started. Stages will run serially.');
+        } else {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          toast.error(`Failed to start batch: ${err.error}`);
+          batchRunning = false;
+        }
+      } catch (e: any) {
+        toast.error(`Network error: ${e.message}`);
+        batchRunning = false;
       }
-      
-      if (failures.length > 0) {
-        customAlert('Warning', `Failed to start some queues: ${failures.join(', ')}`);
+    } else {
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/queues/metadata/trigger`, { method: 'POST', credentials: 'include' });
+        if (res.ok) {
+          toast.success('Pipeline started. Photos will chain through all stages automatically.');
+        } else {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          toast.error(`Failed to start pipeline: ${err.error || res.statusText}`);
+        }
+      } catch (e: any) {
+        toast.error(`Network error starting pipeline: ${e.message}`);
       }
-    } catch (e: any) {
-      customAlert('Error', `Network error starting queues: ${e.message}`);
     }
     await loadQueuesOnly();
   }
 
   async function stopAllJobs() {
-    customConfirm('Stop All Jobs', 'Are you sure you want to stop and cancel all pending jobs across all queues?', true, async () => {
-      for (const name of queueNames) {
-        await fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { method: 'POST', credentials: 'include' });
+    customConfirm('Stop All Jobs', 'Stop and cancel all pending jobs across all queues?', true, async () => {
+      try {
+        toast.info('Stopping all jobs... Please wait');
+        await Promise.all(queueNames.map(name =>
+          fetch(`${API_BASE}/api/admin/queues/${name}/stop`, { method: 'POST', credentials: 'include' })
+        ));
+        toast.success('All queues stopped');
+        await loadQueuesOnly();
+      } catch {
+        toast.error('Failed to stop all queues');
       }
-      await loadQueuesOnly();
     });
   }
 
   async function pauseAllJobs() {
-    for (const name of queueNames) {
-      await fetch(`${API_BASE}/api/admin/queues/${name}/pause`, { method: 'POST', credentials: 'include' });
+    try {
+      await Promise.all(queueNames.map(name =>
+        fetch(`${API_BASE}/api/admin/queues/${name}/pause`, { method: 'POST', credentials: 'include' })
+      ));
+      toast.success('All queues paused');
+      await loadQueuesOnly();
+    } catch {
+      toast.error('Failed to pause all queues');
     }
-    await loadQueuesOnly();
   }
+
+  // Format seconds into a human-readable string like "2h 35min" or "45min 20s"
+  function formatEta(seconds: number | null): string {
+    if (seconds === null || seconds <= 0) return '';
+    if (seconds < 60) return `${seconds}s`;
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}min`;
+    return `${m}min ${s}s`;
+  }
+
+  // Overall ETA: the max etaSeconds across all active queues (pipeline bottleneck)
+  const overallEta = $derived(() => {
+    let max = 0;
+    for (const name of queueNames) {
+      const q = queues[name];
+      if (q?.eta?.etaSeconds != null && q.eta.etaSeconds > max) max = q.eta.etaSeconds;
+    }
+    return max > 0 ? max : null;
+  });
+
+  const anyActive = $derived(() => queueNames.some(n => (queues[n]?.bullmq?.active || 0) > 0));
 </script>
 
 <div class="admin-container">
@@ -362,12 +523,6 @@
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
       <div class="card">
         <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;"><Cpu size={18} color="#3b82f6"/> Hardware & Scans</h3>
-        <div class="form-group" style="margin-bottom: 1rem;">
-          <label style="display: block; font-size: 0.9rem; margin-bottom: 0.25rem;">Max CPU Cores (Concurrency)</label>
-          <!-- H-3 Note: This setting is read at startup from env vars. Changes take effect after a service restart. -->
-          <p style="font-size: 0.75rem; color: #a1a1aa; margin: 0 0 0.4rem 0;">⚠️ Requires service restart to take effect.</p>
-          <input type="number" bind:value={settings.maxCpuCores} min="1" max="32" style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px;" />
-        </div>
         <div class="form-group">
           <label style="display: block; font-size: 0.9rem; margin-bottom: 0.25rem;">Auto-Scan Schedule</label>
           <select bind:value={settings.scanSchedule.type} style="width: 100%; padding: 0.5rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; margin-bottom: 0.5rem;">
@@ -451,35 +606,65 @@
             <Layers size={20} color="#6366f1" /> Execution Mode Controls
           </h3>
           <p style="margin: 0; font-size: 0.85rem; color: #a1a1aa;">
-            {#if executionMode === 'sequential'}
-              <strong style="color: #6366f1;">Sequential Mode:</strong> Jobs execute in chained sequence (Scanner → Metadata → Thumbnail/Video → Smart Search → Face Detection → Facial Recognition).
+            {#if executionMode === 'pipeline'}
+              <strong style="color: #6366f1;">Pipeline Mode:</strong> Assembly line. Each photo flows through all stages in order (Metadata, Thumbnail, Smart Search, Face Detection, Recognition), while multiple photos are in-flight across different stages simultaneously.
             {:else}
-              <strong style="color: #10b981;">Concurrent Mode:</strong> Queues execute independently without awaiting predecessor queue completion.
+              <strong style="color: #10b981;">Batch Mode:</strong> Stage by stage. All photos complete one stage fully before the next stage begins. Only one queue type is active at a time, using lower memory. Ideal for large libraries.
             {/if}
           </p>
         </div>
 
         <div style="display: flex; background: rgba(0, 0, 0, 0.4); padding: 4px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);">
           <button 
-            class="mode-btn {executionMode === 'sequential' ? 'active-sequential' : ''}" 
-            onclick={() => toggleExecutionMode('sequential')}
+            class="mode-btn {executionMode === 'pipeline' ? 'active-sequential' : ''}" 
+            onclick={() => toggleExecutionMode('pipeline')}
             type="button"
           >
-            Sequential
+            Pipeline
           </button>
           <button 
-            class="mode-btn {executionMode === 'concurrent' ? 'active-concurrent' : ''}" 
-            onclick={() => toggleExecutionMode('concurrent')}
+            class="mode-btn {executionMode === 'batch' ? 'active-concurrent' : ''}" 
+            onclick={() => toggleExecutionMode('batch')}
             type="button"
           >
-            Concurrent
+            Batch
           </button>
         </div>
       </div>
     </div>
 
+    <!-- Health Check Card -->
+    <div class="card" style="margin-top: 0.5rem;">
+      <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; color: #fff;">
+        <Activity size={20} color="#10b981" /> System Health Check
+      </h3>
+      <div style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
+        <button class="btn secondary" onclick={() => checkHealth('ml')} disabled={healthLoading['ml']}>
+          {healthLoading['ml'] ? 'Testing ML...' : 'Test ML (Face Detection)'}
+        </button>
+        <button class="btn secondary" onclick={() => checkHealth('ffmpeg')} disabled={healthLoading['ffmpeg']}>
+          {healthLoading['ffmpeg'] ? 'Testing FFmpeg...' : 'Test FFmpeg'}
+        </button>
+        <button class="btn secondary" onclick={() => checkHealth('vaapi')} disabled={healthLoading['vaapi']}>
+          {healthLoading['vaapi'] ? 'Testing VAAPI...' : 'Test VAAPI (GPU)'}
+        </button>
+        <button class="btn primary" onclick={() => checkHealth('system')} disabled={healthLoading['system']}>
+          {healthLoading['system'] ? 'Checking System...' : 'System Status'}
+        </button>
+      </div>
+    </div>
+
     <div style="margin-top: 0.5rem;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+      <!-- Overall ETA banner when any queue is active -->
+      {#if anyActive() && overallEta()}
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 0.75rem 1.25rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+          <span style="color: #e4e4e7; font-size: 0.9rem; font-weight: 500;">Overall estimated completion:</span>
+          <span style="font-size: 1rem; font-weight: 600; color: #a1a1aa;">{formatEta(overallEta())}</span>
+          <span style="color: #71717a; font-size: 0.8rem;">(based on slowest active queue)</span>
+        </div>
+      {/if}
+
+      <div class="pipeline-toolbar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
         <!-- D-1 Fix: was incorrectly labelled "7 Pipeline Queues" when there are 8 -->
         <h3 style="margin: 0; font-size: 1.25rem; color: #e4e4e7;">8 Pipeline Queues</h3>
         <div style="display: flex; gap: 0.5rem;">
@@ -497,37 +682,53 @@
             {@const pCompleted = total > 0 ? (counts.completed / total) * 100 : 0}
             {@const pActive = total > 0 ? (counts.active / total) * 100 : 0}
             {@const pWaiting = total > 0 ? (counts.waiting / total) * 100 : 0}
-            {@const isRunning = (q.bullmq?.active || 0) > 0}
-
+            {@const pFailed = total > 0 ? (counts.failed / total) * 100 : 0}
+            {@const isRunning = (q.bullmq?.active || 0) > 0 || (q.eta?.elapsedSeconds != null)}
             {@const isWaiting = !isRunning && counts.waiting > 0}
+            {@const isCompleted = !isRunning && !isWaiting && (counts.waiting === 0 && counts.active === 0) && (counts.completed > 0 || total === 0)}
 
             <div class="card queue-card" style="margin: 0;">
               <div class="q-header">
                 <h3 style="display: flex; align-items: center; gap: 0.5rem;">
                   {queueTitles[name] || name}
-                  {#if q.isPaused}
-                    <span style="background: #6b7280; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">PAUSED</span>
-                  {:else if isRunning}
+                  {#if isRunning}
                     <span style="background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">RUNNING</span>
-                  {:else if counts.waiting > 0}
-                    <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">WAITING</span>
-                  {:else if counts.total > 0}
+                  {:else if q.isPaused}
+                    <span style="background: #4b5563; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">{executionMode === 'batch' ? 'QUEUED (BATCH)' : 'PAUSED'}</span>
+                  {:else if pCompleted === 100}
                     <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">COMPLETED</span>
+                  {:else if counts.failed > 0 && counts.waiting === 0}
+                    <span style="background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">COMPLETED (W/ ERRORS)</span>
+                  {:else if counts.completed > 0 && counts.waiting > 0}
+                    <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">PARTIALLY COMPLETED</span>
+                  {:else if isWaiting}
+                    <span style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">WAITING</span>
+                  {:else}
+                    <span style="background: #4b5563; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; letter-spacing: 0.5px;">IDLE</span>
                   {/if}
                 </h3>
                 <div class="q-actions">
-                  <button class="btn success sm" disabled={isRunning || isWaiting} style={(isRunning || isWaiting) ? 'opacity: 0.5; cursor: not-allowed;' : ''} onclick={() => triggerJob(name)} title="Force Run Queue"><Play size={14}/> Start</button>
+                  <button class="icon-btn success" disabled={isRunning || (executionMode === 'batch' && anyActive())} onclick={() => triggerJob(name)} title="Start / Resume Queue">
+                    <Play size={18}/>
+                  </button>
                   
-                  {#if q.isPaused}
-                    <button class="btn success sm" onclick={() => actionQueue(name, 'resume')}><Play size={14}/> Resume</button>
-                  {:else if !isRunning}
-                    <button class="btn warning sm" disabled style="opacity: 0.5; cursor: not-allowed;"><Pause size={14}/> Pause</button>
+                  {#if isRunning && !q.isPaused}
+                    <button class="icon-btn warning" onclick={() => actionQueue(name, 'pause')} title="Pause Queue">
+                      <Pause size={18}/>
+                    </button>
                   {:else}
-                    <button class="btn warning sm" onclick={() => actionQueue(name, 'pause')}><Pause size={14}/> Pause</button>
+                    <button class="icon-btn warning" disabled title="Pause Queue (Not Running)">
+                      <Pause size={18}/>
+                    </button>
                   {/if}
 
-                  <button class="btn danger sm" disabled={!isRunning} style={!isRunning ? 'opacity: 0.5; cursor: not-allowed;' : ''} onclick={() => stopQueue(name)} title="Stop & Cancel Pending"><Square size={14}/> Stop</button>
-                  <button class="btn secondary sm" onclick={() => cleanQueue(name, 'failed')} title="Clear Failed"><Trash2 size={14}/></button>
+                  <button class="icon-btn danger" disabled={!isRunning} onclick={() => stopQueue(name)} title="Stop & Cancel Pending">
+                    <Square size={18}/>
+                  </button>
+
+                  <button class="icon-btn" onclick={() => viewFailedJobs(name)} title="View Failed Jobs" disabled={counts.failed === 0}>
+                    <AlertCircle size={18}/>
+                  </button>
                 </div>
               </div>
               
@@ -535,6 +736,7 @@
                 {#if pCompleted > 0}<div class="progress-bar completed" style="width: {pCompleted}%; background: #10b981;" title="Completed: {counts.completed}/{total}"></div>{/if}
                 {#if pActive > 0}<div class="progress-bar active" style="width: {pActive}%; background: #3b82f6;" title="Active: {counts.active}/{total}"></div>{/if}
                 {#if pWaiting > 0}<div class="progress-bar waiting" style="width: {pWaiting}%; background: #f59e0b;" title="Waiting: {counts.waiting}/{total}"></div>{/if}
+                {#if pFailed > 0}<div class="progress-bar failed" style="width: {pFailed}%; background: #ef4444;" title="Failed: {counts.failed}/{total}"></div>{/if}
               </div>
               
               <div class="q-stats">
@@ -562,6 +764,34 @@
                       </div>
                     {/each}
                   </div>
+                </div>
+              {/if}
+
+              {#if q.eta?.etaSeconds != null || q.eta?.ratePerMin != null || (q.eta?.elapsedSeconds != null && isRunning)}
+                <div style="margin-top: 0.75rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+                  {#if q.eta.elapsedSeconds != null && isRunning}
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      {formatEta(q.eta.elapsedSeconds)} elapsed
+                    </span>
+                  {/if}
+                  {#if q.eta.ratePerMin != null}
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      {q.eta.ratePerMin} items/min
+                    </span>
+                  {:else if isRunning}
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      Calculating ETA...
+                    </span>
+                  {/if}
+                  {#if q.eta.etaSeconds != null && q.eta.etaSeconds > 0}
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      {formatEta(q.eta.etaSeconds)} remaining
+                    </span>
+                  {:else if q.eta.etaSeconds === 0}
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      Done
+                    </span>
+                  {/if}
                 </div>
               {/if}
             </div>
@@ -618,6 +848,122 @@
       {#if confirmDanger}<Trash2 size={18} />{/if}
       Confirm
     </button>
+  </div>
+</Modal>
+
+<Modal bind:show={failedJobsModal} id="failed-jobs-modal" title="Failed Jobs: {failedJobsQueueName}">
+  {#if failedJobsLoading}
+    <p style="color: #a1a1aa; text-align: center; padding: 1.5rem 0;">Loading failed jobs...</p>
+  {:else if failedJobsList.length === 0}
+    <p style="color: #a1a1aa; text-align: center; padding: 1.5rem 0;">No failed jobs found for {failedJobsQueueName}.</p>
+  {:else}
+    <div style="max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; padding-right: 0.5rem;">
+      {#each failedJobsList as job}
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px; padding: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <span style="font-weight: 600; color: #ef4444; font-size: 0.9rem;">
+              Job #{job.id || 'N/A'}: {job.name || 'Job'}
+            </span>
+            {#if job.timestamp}
+              <span style="font-size: 0.75rem; color: #71717a;">
+                {new Date(job.timestamp).toLocaleString()}
+              </span>
+            {/if}
+          </div>
+          {#if job.failedReason}
+            <div style="margin-bottom: 0.5rem; font-size: 0.85rem; color: #f87171; background: rgba(239, 68, 68, 0.1); padding: 0.5rem; border-radius: 4px; word-break: break-all;">
+              <strong>Reason:</strong> {job.failedReason}
+            </div>
+          {/if}
+          {#if job.data}
+            <div style="font-size: 0.8rem; color: #a1a1aa;">
+              <strong>Data:</strong>
+              <pre style="background: rgba(0,0,0,0.4); padding: 0.5rem; border-radius: 4px; overflow-x: auto; margin-top: 0.25rem; font-family: monospace; color: #e4e4e7;">{JSON.stringify(job.data, null, 2)}</pre>
+            </div>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  {/if}
+  <div class="modal-actions" style="margin-top: 24px; display: flex; justify-content: flex-end; gap: 12px;">
+    {#if failedJobsList.length > 0}
+      <button class="btn danger" onclick={clearFailedJobs}>Clear All</button>
+      <button class="btn primary" onclick={retryFailedJobs}>Retry All</button>
+    {/if}
+    <button class="btn secondary" onclick={() => failedJobsModal = false}>Close</button>
+  </div>
+</Modal>
+
+<Modal bind:show={systemStatusModal} id="system-status-modal" title="System Status Diagnostics">
+  {#if healthResults.system}
+    {@const sys = healthResults.system}
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 0.5rem;">
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem;">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #a1a1aa;">Memory Usage</h4>
+        <div style="font-size: 0.85rem; color: #e4e4e7; display: flex; flex-direction: column; gap: 0.25rem;">
+          <div>RSS: <strong style="color: #60a5fa;">{formatMB(sys.memory?.rss)}</strong></div>
+          <div>Heap Used: <strong style="color: #c084fc;">{formatMB(sys.memory?.heapUsed)}</strong></div>
+          <div>Heap Total: <strong style="color: #a1a1aa;">{formatMB(sys.memory?.heapTotal)}</strong></div>
+        </div>
+      </div>
+
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem;">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #a1a1aa;">Database & Cache</h4>
+        <div style="font-size: 0.85rem; color: #e4e4e7; display: flex; flex-direction: column; gap: 0.4rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>PostgreSQL:</span>
+            {#if sys.dbConnected}
+              <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">CONNECTED</span>
+            {:else}
+              <span style="background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">DISCONNECTED</span>
+            {/if}
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Redis Cache:</span>
+            {#if sys.redisConnected}
+              <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">CONNECTED</span>
+            {:else}
+              <span style="background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">DISCONNECTED</span>
+            {/if}
+          </div>
+        </div>
+      </div>
+
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem;">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #a1a1aa;">Media Directory</h4>
+        <div style="font-size: 0.8rem; color: #e4e4e7; word-break: break-all; margin-bottom: 0.5rem;">
+          {sys.mediaDir?.path || 'N/A'}
+        </div>
+        <div style="display: flex; gap: 0.5rem; font-size: 0.75rem;">
+          <span style="background: {sys.mediaDir?.exists ? '#10b981' : '#ef4444'}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+            {sys.mediaDir?.exists ? 'EXISTS' : 'MISSING'}
+          </span>
+          <span style="background: {sys.mediaDir?.readable ? '#10b981' : '#ef4444'}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+            {sys.mediaDir?.readable ? 'READABLE' : 'UNREADABLE'}
+          </span>
+        </div>
+      </div>
+
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem;">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #a1a1aa;">Cache Directory</h4>
+        <div style="font-size: 0.8rem; color: #e4e4e7; word-break: break-all; margin-bottom: 0.5rem;">
+          {sys.cacheDir?.path || 'N/A'}
+        </div>
+        <div style="display: flex; gap: 0.5rem; font-size: 0.75rem;">
+          <span style="background: {sys.cacheDir?.exists ? '#10b981' : '#ef4444'}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+            {sys.cacheDir?.exists ? 'EXISTS' : 'MISSING'}
+          </span>
+          <span style="background: {sys.cacheDir?.writable ? '#10b981' : '#ef4444'}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+            {sys.cacheDir?.writable ? 'WRITABLE' : 'UNWRITABLE'}
+          </span>
+        </div>
+      </div>
+    </div>
+  {:else}
+    <p style="color: #a1a1aa; text-align: center; padding: 1.5rem 0;">No system health data available.</p>
+  {/if}
+  <div class="modal-actions" style="margin-top: 24px; display: flex; justify-content: flex-end;">
+    <button class="btn secondary" onclick={() => systemStatusModal = false}>Close</button>
   </div>
 </Modal>
 
@@ -689,6 +1035,30 @@
     overflow: hidden;
     margin-bottom: 1.5rem;
   }
+
+  .icon-btn {
+    background: transparent;
+    border: none;
+    color: #a1a1aa;
+    padding: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    border-radius: 6px;
+  }
+  .icon-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+  }
+  .icon-btn:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+  }
+  .icon-btn.success:hover:not(:disabled) { color: #10b981; }
+  .icon-btn.warning:hover:not(:disabled) { color: #f59e0b; }
+  .icon-btn.danger:hover:not(:disabled) { color: #ef4444; }
   .progress-bar {
     height: 100%;
     transition: width 0.3s ease;
@@ -730,4 +1100,27 @@
   .btn.danger { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
   .btn.secondary { background: rgba(255, 255, 255, 0.05); color: #cbd5e1; border: 1px solid rgba(255, 255, 255, 0.1); }
   .btn:hover { filter: brightness(1.2); }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .pipeline-toolbar {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+    .pipeline-toolbar > div { flex-wrap: wrap; }
+    .q-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .q-actions { flex-wrap: wrap; }
+    .q-stats { flex-wrap: wrap; gap: 1rem; }
+    .card { padding: 1rem; }
+  }
 </style>

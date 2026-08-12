@@ -5,6 +5,7 @@
   import { page, navigating } from '$app/stores';
   import { goto, afterNavigate } from '$app/navigation';
   import { logout } from '$lib/api/auth';
+  import { BackendError } from '$lib/api/auth';
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
   import { LogOut } from '@lucide/svelte';
   import { frontendLogger } from '$lib/utils/frontendLogger';
@@ -22,6 +23,7 @@
     }
   });
   import Toast from '$lib/components/Toast.svelte';
+  import { toast } from '$lib/stores/toast';
   
   const initialSidebarState = () => {
     if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') return false;
@@ -110,12 +112,26 @@
   onMount(async () => {
     try {
       const user = await loadAuthUser();
-      if (!user && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login' && $page.url.pathname !== '/') {
-        goto('/login');
+      const path = $page.url.pathname;
+      if (user) {
+        // Authenticated user on root → send straight to the folder browser
+        if (path === '/') goto('/folder');
+      } else {
+        // Not logged in — redirect protected routes to login
+        if (!path.startsWith('/share/') && path !== '/login' && path !== '/') {
+          goto('/login');
+        }
       }
-    } catch (err) {
-      if (!$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login' && $page.url.pathname !== '/') {
-        goto('/login');
+    } catch (err: any) {
+      const path = $page.url.pathname;
+      if (err instanceof BackendError) {
+        // Backend is unreachable — stay on the current page but warn the user
+        toast.error(`Backend unreachable: ${err.message}`);
+      } else {
+        // Unknown error — fall back to redirecting to login for protected routes
+        if (!path.startsWith('/share/') && path !== '/login' && path !== '/') {
+          goto('/login');
+        }
       }
     }
     isAuthChecking = false;
@@ -527,14 +543,22 @@
   }
 
   .nav-loading-bar {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 2px;
+    overflow: hidden;
+    z-index: 9999;
+  }
+
+  .nav-loading-bar::after {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
     background: linear-gradient(90deg, transparent 0%, var(--accent-color, #6366f1) 50%, transparent 100%);
     animation: navBarSlide 1s ease infinite;
-    z-index: 200;
   }
 
   @keyframes navBarSlide {

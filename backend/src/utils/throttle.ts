@@ -7,6 +7,11 @@ class TokenBucket {
   private tokens: number = 0;
   private lastRefill: number = Date.now();
 
+  constructor(rate: number = 0) {
+    this.rate = rate;
+    this.tokens = rate;
+  }
+
   setRate(rate: number) {
     if (this.rate !== rate) {
       this.rate = rate;

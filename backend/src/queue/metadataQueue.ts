@@ -21,9 +21,9 @@ if (process.env.IS_WORKER === 'true') {
     await MetadataService.extractMetadata(mediaId, fullPath, mimeType);
   }
 
-  // Sequential handoff
+  // Pipeline handoff: chain to next stage per-image
   const mode = await getExecutionMode();
-  if (mode === 'sequential') {
+  if (mode === 'pipeline') {
     if (mimeType && mimeType.startsWith('video/')) {
       await videoQueue.add('process-video', { mediaId, fullPath, mimeType });
     } else {
@@ -32,7 +32,9 @@ if (process.env.IS_WORKER === 'true') {
   }
 }, {
   connection: redis,
-  concurrency: parseInt(process.env.METADATA_CONCURRENCY || '2', 10)
+  concurrency: parseInt(process.env.METADATA_CONCURRENCY || '2', 10),
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 86400 }
 });
 
   metadataWorker.on('failed', (job, err) => {

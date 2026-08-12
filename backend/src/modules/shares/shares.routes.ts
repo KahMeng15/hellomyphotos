@@ -5,10 +5,14 @@ import path from 'path';
 import fs from 'fs';
 import { AnalyticsService } from '../analytics/analytics.service';
 import sharp from 'sharp';
+import { metadataQueue } from '../../queue/metadataQueue';
+import { thumbnailQueue } from '../../queue/thumbnailQueue';
+import { videoQueue } from '../../queue/videoQueue';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
 
 import { requireAuth, hasFolderAccess } from '../../utils/auth';
+import { getClientIp } from '../../utils/getIp';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
@@ -38,6 +42,30 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null, request.user!.id]);
     
+    // Automatically prioritize processing for all unprocessed items in the shared folder
+    if (folderPath) {
+      setImmediate(async () => {
+        try {
+          const files = await query(`
+            SELECT id, file_name, mime_type, folder_path 
+            FROM media_files 
+            WHERE folder_path = $1 AND (has_480p = false OR has_1080p = false)
+          `, [folderPath]);
+          
+          for (const f of files.rows) {
+            const fullPath = path.join(MEDIA_ROOT, f.folder_path, f.file_name);
+            if (f.mime_type.startsWith('video/')) {
+              await videoQueue.add('process-video', { mediaId: f.id, fullPath, mimeType: f.mime_type, skipCascade: true }, { priority: 1 }).catch(() => {});
+            } else if (f.mime_type.startsWith('image/')) {
+              await thumbnailQueue.add('generate-thumbnail', { mediaId: f.id, fullPath, mimeType: f.mime_type, skipCascade: true }, { priority: 1 }).catch(() => {});
+            }
+          }
+        } catch (err) {
+          console.error('[Shares] Failed to prioritize folder processing:', err);
+        }
+      });
+    }
+
     return reply.send({ shareToken });
   });
 
@@ -53,7 +81,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Security verification missing' });
     }
 
-    const ip = request.ip || (request.headers['x-forwarded-for'] as string) || request.socket.remoteAddress || '';
+    const ip = getClientIp(request);
     
     try {
       const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
@@ -139,6 +167,28 @@ export async function sharesRoutes(fastify: FastifyInstance) {
         WHERE f.person_id = $1
         ORDER BY m.created_at DESC
       `, [share.person_id]);
+      const files = fileRes.rows;
+      
+      const missingMetadata = files.filter((f: any) => f.exif_json == null);
+      const missingThumbs = files.filter((f: any) => !f.has_480p || !f.has_1080p);
+
+      Promise.all(missingMetadata.map((f: any) => 
+        metadataQueue.add('extract-metadata', { 
+          mediaId: f.id, 
+          fullPath: path.join(MEDIA_ROOT, f.folder_path || '', f.file_name), 
+          mimeType: f.mime_type 
+        }, { priority: 2 })
+      )).catch(err => console.error('Failed to queue metadata jobs', err));
+
+      Promise.all(missingThumbs.map((f: any) => {
+        const fPath = path.join(MEDIA_ROOT, f.folder_path || '', f.file_name);
+        if (f.mime_type.startsWith('video/')) {
+          return videoQueue.add('process-video', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
+        } else {
+          return thumbnailQueue.add('generate-thumbnail', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
+        }
+      })).catch(err => console.error('Failed to queue thumbnail jobs', err));
+
       // Get person info with cover
       const personRes = await query(`SELECT id, name, cover_media_id FROM people WHERE id = $1`, [share.person_id]);
       const person = personRes.rows[0] || null;
@@ -218,6 +268,27 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       `SELECT * FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
       [targetPath]
     );
+    const files = filesResult.rows;
+
+    const missingMetadata = files.filter((f: any) => f.exif_json == null);
+    const missingThumbs = files.filter((f: any) => !f.has_480p || !f.has_1080p);
+
+    Promise.all(missingMetadata.map((f: any) => 
+      metadataQueue.add('extract-metadata', { 
+        mediaId: f.id, 
+        fullPath: path.join(MEDIA_ROOT, f.folder_path || '', f.file_name), 
+        mimeType: f.mime_type 
+      }, { priority: 2 })
+    )).catch(err => console.error('Failed to queue metadata jobs', err));
+
+    Promise.all(missingThumbs.map((f: any) => {
+      const fPath = path.join(MEDIA_ROOT, f.folder_path || '', f.file_name);
+      if (f.mime_type.startsWith('video/')) {
+        return videoQueue.add('process-video', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
+      } else {
+        return thumbnailQueue.add('generate-thumbnail', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
+      }
+    })).catch(err => console.error('Failed to queue thumbnail jobs', err));
 
     const fullPath = path.join(MEDIA_ROOT, targetPath);
     let directories: { name: string, cover_id: string | null, blurhash: string | null }[] = [];

@@ -13,6 +13,7 @@ Welcome to the comprehensive technical documentation for **hellomyphotos**, a di
 - [8. Development Checklist](#8-development-checklist)
 - [9. Pre-Deployment Checklist](#9-pre-deployment-checklist)
 - [10. Docker Compose Production Runbook](#10-docker-compose-production-runbook)
+- [11. Stress Testing & Reliability](#11-stress-testing--reliability)
 
 ---
 
@@ -477,3 +478,27 @@ Terminate TLS on a host reverse proxy (Caddy, Nginx, Traefik) and proxy only the
 - [ ] Keep Redis (`8003`) and ML (`8004`) ports firewalled off / bound to localhost only.
 - [ ] Change the default admin password after first login.
 - [ ] Mount your primary media volume strictly `:ro` so originals can never be modified.
+
+---
+
+## 11. Stress Testing & Reliability
+
+To verify the backend API's memory limits, Queue/Redis coordination, and the BullMQ worker stability, a 100k-record stress test script is provided.
+
+This script injects 100,000 dummy records into the PostgreSQL database. Because the physical files do not exist, the workers will immediately fail the jobs upon processing. This acts as the ultimate worst-case scenario load test, proving that the system can handle extreme queueing and rapid-fire event completion without crashing the Node.js event loop or running out of memory.
+
+**To run the stress test:**
+1. Execute the seeding script inside the backend container:
+   ```bash
+   docker compose exec backend npx tsx scripts/stress_test_100k.ts
+   ```
+2. Open the Admin Queues UI (`/admin/queues`).
+3. Ensure **Batch Mode** is active.
+4. Click **Start All**.
+5. The backend will stream 100k jobs into Redis (without loading them into RAM), and the workers will rapidly process (and fail) them. The backend container should remain perfectly stable throughout.
+
+**To clean up after testing:**
+A cleanup script is provided to remove all mock database entries and clear the failed queues automatically:
+```bash
+docker compose exec backend npx tsx scripts/cleanup_stress_test.ts
+```

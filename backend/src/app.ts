@@ -12,14 +12,29 @@ import cookie from '@fastify/cookie';
 import './queue';
 
 import { logger } from './utils/logger';
+import { getDbStatus } from './config/db';
 
 export const app = Fastify({
-  logger: true
+  logger: true,
+  trustProxy: true
 });
 
 app.addHook('onRequest', async (request) => {
   if (request.url === '/api/log') return;
+  (request as any).startTime = performance.now();
   logger.info(`${request.method} ${request.url}`, { ip: request.ip });
+});
+
+app.addHook('onResponse', async (request, reply) => {
+  if (request.url === '/api/log') return;
+  const start = (request as any).startTime;
+  if (typeof start !== 'number') return;
+  const durationMs = (performance.now() - start).toFixed(2);
+  logger.info(`[RESPONSE] ${request.method} ${request.url} -> ${reply.statusCode} (${durationMs}ms)`, {
+    ip: request.ip,
+    statusCode: reply.statusCode,
+    durationMs: parseFloat(durationMs)
+  });
 });
 
 // Enable CORS for frontend client-side requests
@@ -60,7 +75,19 @@ app.post('/api/log', async (request, reply) => {
   return reply.send({ ok: true });
 });
 
+// Public Turnstile config. The frontend fetches the sitekey at runtime instead of
+// having it baked into the image at build time.
+app.get('/api/turnstile/sitekey', async () => {
+  return { sitekey: process.env.TURNSTILE_SITEKEY || '' };
+});
+
 // Health check
 app.get('/health', async () => {
   return { status: 'ok' };
+});
+
+// DB bootstrap status: lists tables so schema initialization can be verified
+// without needing psql access to the database host (it may live in another stack).
+app.get('/api/db/status', async () => {
+  return getDbStatus();
 });

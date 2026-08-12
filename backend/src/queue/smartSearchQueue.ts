@@ -25,14 +25,16 @@ if (process.env.IS_WORKER === 'true') {
     }
   }
 
-  // Next handoff step:
+  // Pipeline handoff: chain to next stage per-image
   const mode = await getExecutionMode();
-  if (mode === 'sequential') {
+  if (mode === 'pipeline') {
     await faceDetectionQueue.add('detect-faces', { mediaId, fullPath, mimeType });
   }
 }, {
   connection: redis,
-  concurrency: parseInt(process.env.SMART_SEARCH_CONCURRENCY || '1', 10)
+  concurrency: parseInt(process.env.SMART_SEARCH_CONCURRENCY || '1', 10),
+  removeOnComplete: { age: 3600 },
+  removeOnFail: { age: 86400 }
 });
 
   smartSearchWorker.on('failed', (job, err) => {

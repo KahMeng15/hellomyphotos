@@ -740,4 +740,15 @@
     margin: 2rem auto;
   }
   @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+  @media (max-width: 900px) {
+    h2 { font-size: 1.5rem; }
+    .header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .header > div:last-child { flex-wrap: wrap; }
+    .card { padding: 1rem; }
+  }
 </style>

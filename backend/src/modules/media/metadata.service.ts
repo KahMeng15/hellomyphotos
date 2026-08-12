@@ -49,6 +49,8 @@ export class MetadataService {
             const iso = rawData.ISO || rawData.Iso || rawData.iso || null;
             const aperture = rawData.FNumber || rawData.ApertureValue || rawData.aperture || null;
             const focalLength = rawData.FocalLength || rawData.focalLength || null;
+            const exposureTime = rawData.ExposureTime || rawData.exposureTime || null;
+            const lensModel = rawData.LensModel || rawData.lensModel || null;
             
             let gps: { latitude: number; longitude: number } | null = null;
             let latitude: number | null = null;
@@ -72,8 +74,11 @@ export class MetadataService {
               camera,
               make,
               model,
+              lensModel,
               iso,
               aperture,
+              fNumber: aperture,
+              exposureTime,
               focalLength,
               gps,
               latitude,
@@ -81,7 +86,6 @@ export class MetadataService {
               timestamp,
               width,
               height,
-              ...rawData,
             };
           }
         } catch (exifErr: any) {

@@ -27,7 +27,8 @@
   // Share Modal State
   let shareAllowDownloadImages = $state(true);
   let shareAllowDownloadFolder = $state(true);
-  let shareExpiryDays = $state(7);
+  let shareExpiryValue = $state(7);
+  let shareExpiryUnit = $state('days');
   let activeShares: ShareData[] = $state([]);
   let isCreatingShare = $state(false);
   let newlyCreatedShareToken = $state<string | null>(null);
@@ -36,15 +37,24 @@
 
   // Initialize input state when data changes
   let previousPath = $state(data.folderPath);
+  let hasShownHostError = $state(false);
   $effect(() => {
     folderDescInput = data.folderDescription || '';
     if (data.folderPath !== previousPath) {
       localCoverOverride = null;
+      visibleCount = 50; // Reset scroll on path change
       previousPath = data.folderPath;
+      hasShownHostError = false;
       toast.clear();
-      if (data.isProcessing) {
+      if (data.hostError) {
+        toast.error(`Storage Error: ${data.hostError}`);
+        hasShownHostError = true;
+      } else if (data.isProcessing) {
         toast.info('This folder is still being processed. Some items might be missing or slow to load. Feel free to come back later!', 8000);
       }
+    } else if (data.hostError && !hasShownHostError) {
+      toast.error(`Storage Error: ${data.hostError}`);
+      hasShownHostError = true;
     }
   });
 
@@ -67,9 +77,17 @@
     try {
       isCreatingShare = true;
       let expiresAt: string | null = null;
-      if (shareExpiryDays > 0) {
+      if (shareExpiryUnit !== 'never' && shareExpiryValue > 0) {
         const date = new Date();
-        date.setDate(date.getDate() + shareExpiryDays);
+        if (shareExpiryUnit === 'hours') {
+          date.setHours(date.getHours() + shareExpiryValue);
+        } else if (shareExpiryUnit === 'days') {
+          date.setDate(date.getDate() + shareExpiryValue);
+        } else if (shareExpiryUnit === 'months') {
+          date.setMonth(date.getMonth() + shareExpiryValue);
+        } else if (shareExpiryUnit === 'years') {
+          date.setFullYear(date.getFullYear() + shareExpiryValue);
+        }
         expiresAt = date.toISOString();
       }
       
@@ -294,6 +312,23 @@
     if (sortMode === 'z-a') return b.file_name.localeCompare(a.file_name);
     return 0;
   }));
+
+  let visibleCount = $state(50);
+  let visibleFiles = $derived(sortedFiles.slice(0, visibleCount));
+
+  function loadMore() {
+    visibleCount += 50;
+  }
+
+  function infiniteScroll(node: HTMLElement) {
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        loadMore();
+      }
+    }, { rootMargin: '800px' });
+    observer.observe(node);
+    return { destroy: () => observer.disconnect() };
+  }
   
   let selectedMediaIndex: number | null = $state(null);
 
@@ -692,7 +727,7 @@
 
 {#key data.folderPath}
 <div class="grid {viewMode}">
-  {#each sortedFiles as file, i}
+  {#each visibleFiles as file, i}
     <BlurhashImage 
       hash={file.blurhash || ''} 
       src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
@@ -707,6 +742,9 @@
     />
   {/each}
 </div>
+{#if visibleCount < sortedFiles.length}
+  <div use:infiniteScroll style="height: 20px; width: 100%;"></div>
+{/if}
 {/key}
 
 {#if selectedMediaIndex !== null}
@@ -746,12 +784,18 @@
     
     <div class="form-group" style="margin-bottom: 16px;">
       <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Expiration</label>
-      <select bind:value={shareExpiryDays} style="width: 100%; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;">
-        <option value={1}>1 Day</option>
-        <option value={7}>7 Days</option>
-        <option value={30}>30 Days</option>
-        <option value={0}>Never Expires</option>
-      </select>
+      <div style="display: flex; gap: 8px;">
+        {#if shareExpiryUnit !== 'never'}
+          <input type="number" bind:value={shareExpiryValue} min="1" style="width: 80px; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;" />
+        {/if}
+        <select bind:value={shareExpiryUnit} style="flex: 1; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;">
+          <option value="hours">Hours</option>
+          <option value="days">Days</option>
+          <option value="months">Months</option>
+          <option value="years">Years</option>
+          <option value="never">Never Expires</option>
+        </select>
+      </div>
     </div>
     
     <div class="form-group" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
@@ -1119,7 +1163,7 @@
     color: #d4d4d8;
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .dir-grid.folder-mode-list .dir-card:not(:hover) .dir-info {
       background: transparent;
     }
@@ -1180,7 +1224,7 @@
     cursor: pointer;
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .dir-card:hover {
       filter: brightness(1.2);
     }
@@ -1255,7 +1299,7 @@
     padding: 8px;
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .dir-card:hover .dir-actions-overlay {
       opacity: 1;
     }

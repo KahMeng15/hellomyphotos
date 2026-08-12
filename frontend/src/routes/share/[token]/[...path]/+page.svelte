@@ -12,7 +12,7 @@
   import type { PageData } from './$types';
   import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder, AlertCircle } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
-  import { PUBLIC_TURNSTILE_SITEKEY } from '$env/static/public';
+  import { getTurnstileSitekey } from '$lib/api/turnstile';
   import { API_BASE } from '$lib/api/media';
   
   let { data }: { data: PageData } = $props();
@@ -155,7 +155,9 @@
     }
   }
 
-  onMount(() => {
+  let sitekey = $state('');
+
+  if (typeof window !== 'undefined') {
     (window as any).onTurnstileSuccess = async (token: string) => {
       verifyingTurnstile = true;
       turnstileError = '';
@@ -180,16 +182,22 @@
     };
 
     (window as any).onTurnstileLoad = () => {
-      if ((window as any).turnstile && widgetContainer && !turnstileWidgetId) {
+      if ((window as any).turnstile && widgetContainer && !turnstileWidgetId && sitekey) {
         turnstileWidgetId = (window as any).turnstile.render(widgetContainer, {
-          sitekey: PUBLIC_TURNSTILE_SITEKEY,
+          sitekey,
           theme: 'dark',
           action: 'share-gate',
-          size: 'invisible',
+          execution: 'execute',
+          appearance: 'execute',
           callback: (window as any).onTurnstileSuccess
         });
+        (window as any).turnstile.execute(turnstileWidgetId);
       }
     };
+  }
+
+  onMount(async () => {
+    sitekey = await getTurnstileSitekey();
 
     if ((window as any).turnstile) {
       (window as any).onTurnstileLoad();
@@ -750,8 +758,10 @@
     animation: fadeIn 0.35s ease both;
   }
 
-  .dir-card:hover {
-    filter: brightness(1.2);
+  @media (hover: hover) and (pointer: fine) {
+    .dir-card:hover {
+      filter: brightness(1.2);
+    }
   }
 
   .dir-cover {
