@@ -21,7 +21,7 @@ export interface DirectoryInfo {
   cover_img_height?: number | null;
 }
 
-export async function fetchFolderContent(folderPath: string, fetchFn: typeof fetch = fetch): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean, isProcessing: boolean, folderCoverId: string | null, folderCoverBoundingBox: any, folderCoverImgWidth: number | null, folderCoverImgHeight: number | null, folderDescription: string }> {
+export async function fetchFolderContent(folderPath: string, fetchFn: typeof fetch = fetch): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean, isProcessing: boolean, folderCoverId: string | null, folderCoverBoundingBox: any, folderCoverImgWidth: number | null, folderCoverImgHeight: number | null, folderDescription: string, hostError?: string | null }> {
   const res = await fetchFn(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch folder');
   const data = await res.json();
@@ -34,7 +34,8 @@ export async function fetchFolderContent(folderPath: string, fetchFn: typeof fet
     folderCoverBoundingBox: data.folderCoverBoundingBox || null,
     folderCoverImgWidth: data.folderCoverImgWidth || null,
     folderCoverImgHeight: data.folderCoverImgHeight || null,
-    folderDescription: data.folderDescription || '' 
+    folderDescription: data.folderDescription || '',
+    hostError: data.hostError || null
   };
 }
 

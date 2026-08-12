@@ -574,6 +574,34 @@ export async function queueRoutes(fastify: FastifyInstance) {
     return reply.send(result);
   });
 
+  // DELETE /api/admin/queues/:name/failed-jobs - Clears all failed jobs
+  fastify.delete('/api/admin/queues/:name/failed-jobs', async (request, reply) => {
+    const { name } = request.params as any;
+    const q = queues[name];
+    if (!q) return reply.status(404).send({ error: `Queue '${name}' not found` });
+    await q.clean(0, 1000000, 'failed');
+    return reply.send({ success: true });
+  });
+
+  // POST /api/admin/queues/:name/retry-failed - Retries all failed jobs
+  fastify.post('/api/admin/queues/:name/retry-failed', async (request, reply) => {
+    const { name } = request.params as any;
+    const q = queues[name];
+    if (!q) return reply.status(404).send({ error: `Queue '${name}' not found` });
+    
+    const failedJobs = await q.getFailed();
+    let count = 0;
+    for (const job of failedJobs) {
+      try {
+        await job.retry();
+        count++;
+      } catch (e) {
+        // ignore if job cannot be retried
+      }
+    }
+    return reply.send({ success: true, count });
+  });
+
   // GET /api/admin/health/ml - Tests connectivity and basic inference of ML container
   fastify.get('/api/admin/health/ml', async (request, reply) => {
     const startTime = Date.now();

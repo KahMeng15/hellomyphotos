@@ -155,8 +155,9 @@
     }
   }
 
-  onMount(async () => {
-    const sitekey = await getTurnstileSitekey();
+  let sitekey = $state('');
+
+  if (typeof window !== 'undefined') {
     (window as any).onTurnstileSuccess = async (token: string) => {
       verifyingTurnstile = true;
       turnstileError = '';
@@ -193,6 +194,10 @@
         (window as any).turnstile.execute(turnstileWidgetId);
       }
     };
+  }
+
+  onMount(async () => {
+    sitekey = await getTurnstileSitekey();
 
     if ((window as any).turnstile) {
       (window as any).onTurnstileLoad();

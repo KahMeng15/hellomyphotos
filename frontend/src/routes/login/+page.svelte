@@ -14,8 +14,9 @@
   let widgetContainer: HTMLElement;
   let turnstileWidgetId: string | null = null;
 
-  onMount(async () => {
-    const sitekey = await getTurnstileSitekey();
+  let sitekey = $state('');
+
+  if (typeof window !== 'undefined') {
     (window as any).onTurnstileLoad = () => {
       if ((window as any).turnstile && widgetContainer && !turnstileWidgetId && sitekey) {
         turnstileWidgetId = (window as any).turnstile.render(widgetContainer, {
@@ -25,7 +26,10 @@
         });
       }
     };
+  }
 
+  onMount(async () => {
+    sitekey = await getTurnstileSitekey();
     if ((window as any).turnstile) {
       (window as any).onTurnstileLoad();
     }

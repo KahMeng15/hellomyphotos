@@ -33,6 +33,11 @@ services:
       - ./volumes/cache_rw:/app/cache:rw
       - ./backend:/app
       - /app/node_modules
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
 
   backend-worker:
     restart: unless-stopped
@@ -51,6 +56,11 @@ services:
       - ./volumes/cache_rw:/app/cache:rw
       - ./backend:/app
       - /app/node_modules
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
 
   postgres:
     restart: unless-stopped

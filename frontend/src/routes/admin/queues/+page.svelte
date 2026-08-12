@@ -65,6 +65,41 @@
     }
   }
 
+  async function retryFailedJobs() {
+    if (!failedJobsQueueName) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${failedJobsQueueName}/retry-failed`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Retried ${data.count || 0} failed jobs`);
+        failedJobsModal = false;
+        loadQueuesOnly();
+      }
+    } catch (e) {
+      toast.error('Failed to retry jobs');
+    }
+  }
+
+  async function clearFailedJobs() {
+    if (!failedJobsQueueName) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${failedJobsQueueName}/failed-jobs`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+      if (res.ok) {
+        toast.success('Cleared all failed jobs');
+        failedJobsModal = false;
+        loadQueuesOnly();
+      }
+    } catch (e) {
+      toast.error('Failed to clear jobs');
+    }
+  }
+
   async function checkHealth(type: string) {
     healthLoading[type] = true;
     healthLoading = { ...healthLoading };
@@ -850,7 +885,11 @@
       {/each}
     </div>
   {/if}
-  <div class="modal-actions" style="margin-top: 24px; display: flex; justify-content: flex-end;">
+  <div class="modal-actions" style="margin-top: 24px; display: flex; justify-content: flex-end; gap: 12px;">
+    {#if failedJobsList.length > 0}
+      <button class="btn danger" onclick={clearFailedJobs}>Clear All</button>
+      <button class="btn primary" onclick={retryFailedJobs}>Retry All</button>
+    {/if}
     <button class="btn secondary" onclick={() => failedJobsModal = false}>Close</button>
   </div>
 </Modal>

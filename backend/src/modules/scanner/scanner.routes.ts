@@ -172,11 +172,11 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     // 4. Dynamically list subdirectories and find their cover images
     const fullPath = path.join(MEDIA_ROOT, folderPath);
     let directories: { name: string, cover_id: string | null, blurhash: string | null }[] = [];
+    let hostError: string | null = null;
     try {
-      if (fs.existsSync(fullPath)) {
-        const items = await fs.promises.readdir(fullPath, { withFileTypes: true });
-        
-        const dirNames = items.filter(item => item.isDirectory()).map(item => item.name);
+      const items = await fs.promises.readdir(fullPath, { withFileTypes: true });
+      
+      const dirNames = items.filter(item => item.isDirectory()).map(item => item.name);
         
         let validDirNames = dirNames.filter(name => {
           const subPath = folderPath ? `${folderPath}/${name}` : name;
@@ -269,9 +269,11 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         }));
         
         directories.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e: any) {
+      if (e.code !== 'ENOENT') {
+        console.error(`Failed to read directory: ${fullPath}`, e);
+        hostError = `Storage access error: ${e.message}`;
       }
-    } catch (e) {
-      console.error(`Failed to read directory: ${fullPath}`, e);
     }
     mark('3_directories');
 
@@ -402,6 +404,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       scanning: !exists, // Indicate if a scan was just triggered
       files,
       directories,
+      hostError,
       defaultViewMode: defaults.defaultViewMode,
       defaultSortMode: defaults.defaultSortMode,
       defaultFolderViewMode: defaults.defaultFolderViewMode

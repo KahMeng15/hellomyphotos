@@ -23,6 +23,7 @@
     }
   });
   import Toast from '$lib/components/Toast.svelte';
+  import { toast } from '$lib/stores/toast';
   
   const initialSidebarState = () => {
     if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') return false;

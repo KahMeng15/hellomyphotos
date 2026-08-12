@@ -37,15 +37,24 @@
 
   // Initialize input state when data changes
   let previousPath = $state(data.folderPath);
+  let hasShownHostError = $state(false);
   $effect(() => {
     folderDescInput = data.folderDescription || '';
     if (data.folderPath !== previousPath) {
       localCoverOverride = null;
+      visibleCount = 50; // Reset scroll on path change
       previousPath = data.folderPath;
+      hasShownHostError = false;
       toast.clear();
-      if (data.isProcessing) {
+      if (data.hostError) {
+        toast.error(`Storage Error: ${data.hostError}`);
+        hasShownHostError = true;
+      } else if (data.isProcessing) {
         toast.info('This folder is still being processed. Some items might be missing or slow to load. Feel free to come back later!', 8000);
       }
+    } else if (data.hostError && !hasShownHostError) {
+      toast.error(`Storage Error: ${data.hostError}`);
+      hasShownHostError = true;
     }
   });
 
@@ -303,6 +312,23 @@
     if (sortMode === 'z-a') return b.file_name.localeCompare(a.file_name);
     return 0;
   }));
+
+  let visibleCount = $state(50);
+  let visibleFiles = $derived(sortedFiles.slice(0, visibleCount));
+
+  function loadMore() {
+    visibleCount += 50;
+  }
+
+  function infiniteScroll(node: HTMLElement) {
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        loadMore();
+      }
+    }, { rootMargin: '800px' });
+    observer.observe(node);
+    return { destroy: () => observer.disconnect() };
+  }
   
   let selectedMediaIndex: number | null = $state(null);
 
@@ -701,7 +727,7 @@
 
 {#key data.folderPath}
 <div class="grid {viewMode}">
-  {#each sortedFiles as file, i}
+  {#each visibleFiles as file, i}
     <BlurhashImage 
       hash={file.blurhash || ''} 
       src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
@@ -716,6 +742,9 @@
     />
   {/each}
 </div>
+{#if visibleCount < sortedFiles.length}
+  <div use:infiniteScroll style="height: 20px; width: 100%;"></div>
+{/if}
 {/key}
 
 {#if selectedMediaIndex !== null}
