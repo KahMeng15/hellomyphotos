@@ -2,7 +2,7 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 COPY . .
 # Vite inlines these at build time; provide defaults so the build works without CI vars.
 ARG VITE_API_URL=
@@ -18,7 +18,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
 RUN apk upgrade --no-cache \
-    && npm ci --omit=dev \
+    && npm ci --omit=dev --legacy-peer-deps \
     && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=builder /app/build build/
 EXPOSE 3000

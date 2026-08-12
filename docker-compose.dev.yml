@@ -12,6 +12,11 @@ services:
       - BACKEND_PROXY_URL=http://backend:3000
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -33,11 +38,12 @@ services:
       - ./volumes/cache_rw:/app/cache:rw
       - ./backend:/app
       - /app/node_modules
-    devices:
-      - /dev/dri:/dev/dri
-    group_add:
-      - video
-      - render
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   backend-worker:
     restart: unless-stopped
@@ -56,11 +62,6 @@ services:
       - ./volumes/cache_rw:/app/cache:rw
       - ./backend:/app
       - /app/node_modules
-    devices:
-      - /dev/dri:/dev/dri
-    group_add:
-      - video
-      - render
 
   postgres:
     restart: unless-stopped
@@ -69,6 +70,11 @@ services:
     volumes:
       - ./volumes/pg_data:/var/lib/postgresql/data
       - ./volumes/pg_init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     restart: unless-stopped
@@ -78,6 +84,11 @@ services:
       - ./volumes/redis_data:/data
     ports:
       - "8003:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   machine-learning:
     restart: unless-stopped
@@ -87,3 +98,8 @@ services:
       - "8004:3003"
     volumes:
       - ./volumes/ml_cache:/cache
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3003/ping > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
