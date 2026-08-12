@@ -28,7 +28,7 @@ for (const [name, worker] of allWorkers) {
       logger.info(`Task completed: ${name}/${job.name}`, { jobId: job.id });
     });
     worker.on('failed', (job, err) => {
-      logger.error(`Task failed: ${name}/${job.name}`, { jobId: job?.id, error: err.message });
+      logger.error(`Task failed: ${name}/${job?.name || 'unknown'}`, { jobId: job?.id, error: err.message });
     });
   }
 }

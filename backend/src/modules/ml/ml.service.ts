@@ -104,15 +104,14 @@ export class MLService {
 
       // Use FormData + ReadStream to avoid loading the full image into a Buffer.
       // This streams the file directly to the ML container without V8 heap allocation.
-      const { Blob } = await import('buffer');
       const imageStream = fs.createReadStream(imagePath);
       const chunks: Buffer[] = [];
       await new Promise<void>((resolve, reject) => {
-        imageStream.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        imageStream.on('data', (chunk: any) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
         imageStream.on('end', resolve);
         imageStream.on('error', reject);
       });
-      const imageBlob = new Blob(chunks, { type: 'image/webp' });
+      const imageBlob = new Blob(chunks as any, { type: 'image/webp' });
       const formData = new FormData();
       formData.append('entries', entriesJson);
       formData.append('image', imageBlob, 'image.webp');

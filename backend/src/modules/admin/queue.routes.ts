@@ -581,14 +581,13 @@ export async function queueRoutes(fastify: FastifyInstance) {
     const tiny1x1PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI6QAAAABJRU5ErkJggg==', 'base64');
 
     try {
-      const { Blob } = await import('buffer');
       const entriesJson = JSON.stringify({
         "facial-recognition": {
           "recognition": { "modelName": "buffalo_l" },
           "detection": { "modelName": "buffalo_l" }
         }
       });
-      const imageBlob = new Blob([tiny1x1PNG], { type: 'image/png' });
+      const imageBlob = new Blob([new Uint8Array(tiny1x1PNG.buffer, tiny1x1PNG.byteOffset, tiny1x1PNG.byteLength)], { type: 'image/png' });
       const formData = new FormData();
       formData.append('entries', entriesJson);
       formData.append('image', imageBlob, 'test.png');

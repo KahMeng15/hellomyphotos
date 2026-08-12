@@ -33,7 +33,7 @@ export async function runTier3Tests(): Promise<{ passed: number; failed: number;
   console.log('\n--- Running Tier 3: Cross-Feature Interactions Tests (3 Tests) ---');
 
   await test('T3.01: End-to-End processing pipeline chain across all feature stages', async () => {
-    await setExecutionMode('sequential');
+    await setExecutionMode('pipeline');
     const imgPath = await createTestImage('e2e_chain.jpg', 800, 600);
 
     // 1. Insert DB media record
@@ -85,9 +85,9 @@ export async function runTier3Tests(): Promise<{ passed: number; failed: number;
   });
 
   await test('T3.03: Live execution mode toggling updates dispatch strategy dynamically', async () => {
-    await setExecutionMode('concurrent');
+    await setExecutionMode('batch');
     const currentMode = await getExecutionMode();
-    if (currentMode !== 'concurrent') throw new Error('Failed to set execution mode to concurrent');
+    if (currentMode !== 'batch') throw new Error('Failed to set execution mode to batch');
 
     const sampleImgPath = await createTestImage('mode_toggle.jpg');
     const mRes = await query(
@@ -97,8 +97,8 @@ export async function runTier3Tests(): Promise<{ passed: number; failed: number;
 
     await dispatchMediaFile({ mediaId, fullPath: sampleImgPath, mimeType: 'image/jpeg' });
 
-    // Switch back to sequential
-    await setExecutionMode('sequential');
+    // Switch back to pipeline
+    await setExecutionMode('pipeline');
   });
 
   await cleanupTestData();
