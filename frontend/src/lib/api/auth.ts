@@ -23,13 +23,33 @@ export async function logout() {
   });
 }
 
+export class BackendError extends Error {
+  constructor(public statusCode: number | null, message: string) {
+    super(message);
+    this.name = 'BackendError';
+  }
+}
+
 export async function getAuthUser() {
-  const res = await fetch(`${API_BASE}/api/auth/me`, {
-    credentials: 'include'
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/auth/me`, {
+      credentials: 'include'
+    });
+  } catch (err: any) {
+    // Network failure — backend is unreachable (crashed, not started, etc.)
+    throw new BackendError(null, 'Cannot reach the server. Is the backend running?');
+  }
+
+  if (res.status === 401) {
+    // Expected: user is simply not logged in
+    return null;
+  }
 
   if (!res.ok) {
-    return null;
+    // Unexpected non-401 error — backend is up but something is wrong
+    const body = await res.json().catch(() => ({}));
+    throw new BackendError(res.status, body.error || `Server error (${res.status})`);
   }
 
   const data = await res.json();

@@ -17,6 +17,20 @@ import {
 import { query } from '../../config/db';
 import { redis } from '../../config/redis';
 import path from 'path';
+import fs from 'fs';
+import { exec } from 'child_process';
+
+const execPromise = (cmd: string): Promise<{ stdout: string; stderr: string }> => {
+  return new Promise((resolve, reject) => {
+    exec(cmd, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+};
 
 const MEDIA_ROOT = () => process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
 const CACHE_ROOT = () => process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw');
@@ -537,4 +551,194 @@ export async function queueRoutes(fastify: FastifyInstance) {
     const running = await redis.get('queue:batch:running');
     return reply.send({ running: !!running });
   });
+
+  // GET /api/admin/queues/:name/failed-jobs - Returns the last 50 failed jobs for a given queue
+  fastify.get('/api/admin/queues/:name/failed-jobs', async (request, reply) => {
+    const { name } = request.params as any;
+    const q = queues[name];
+    if (!q) return reply.status(404).send({ error: `Queue '${name}' not found` });
+
+    const failedJobs = await q.getFailed(0, 49);
+    const result = failedJobs.map((j: any) => ({
+      id: j.id,
+      name: j.name,
+      data: {
+        mediaId: j.data?.mediaId,
+        fullPath: j.data?.fullPath,
+        folderPath: j.data?.folderPath,
+      },
+      failedReason: j.failedReason,
+      timestamp: j.timestamp,
+    }));
+
+    return reply.send(result);
+  });
+
+  // GET /api/admin/health/ml - Tests connectivity and basic inference of ML container
+  fastify.get('/api/admin/health/ml', async (request, reply) => {
+    const startTime = Date.now();
+    const ML_URL = process.env.IMMICH_ML_URL || 'http://localhost:3003';
+    const tiny1x1PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI6QAAAABJRU5ErkJggg==', 'base64');
+
+    try {
+      const { Blob } = await import('buffer');
+      const entriesJson = JSON.stringify({
+        "facial-recognition": {
+          "recognition": { "modelName": "buffalo_l" },
+          "detection": { "modelName": "buffalo_l" }
+        }
+      });
+      const imageBlob = new Blob([tiny1x1PNG], { type: 'image/png' });
+      const formData = new FormData();
+      formData.append('entries', entriesJson);
+      formData.append('image', imageBlob, 'test.png');
+
+      const response = await fetch(`${ML_URL}/predict`, {
+        method: 'POST',
+        body: formData as any,
+      });
+
+      const latencyMs = Date.now() - startTime;
+      if (!response.ok) {
+        return reply.send({
+          status: 'error',
+          message: `ML container returned HTTP ${response.status}`,
+          latencyMs,
+        });
+      }
+
+      return reply.send({
+        status: 'ok',
+        message: 'ML container responsive',
+        latencyMs,
+      });
+    } catch (err: any) {
+      const latencyMs = Date.now() - startTime;
+      return reply.send({
+        status: 'error',
+        message: err.message || 'Failed to connect to ML container',
+        latencyMs,
+      });
+    }
+  });
+
+  // GET /api/admin/health/ffmpeg - Tests if ffmpeg is available and can transcode
+  fastify.get('/api/admin/health/ffmpeg', async (request, reply) => {
+    let version: string | null = null;
+
+    try {
+      const versionResult = await execPromise('ffmpeg -version');
+      version = versionResult.stdout.split('\n')[0]?.trim() || 'unknown';
+    } catch (err: any) {
+      return reply.send({
+        status: 'error',
+        version: null,
+        softwareEncodeOk: false,
+        message: `FFmpeg not found or failed to execute: ${err.message}`,
+      });
+    }
+
+    try {
+      await execPromise('ffmpeg -f lavfi -i color=c=black:s=320x240:d=1 -vcodec libx264 -f null -');
+      return reply.send({
+        status: 'ok',
+        version,
+        softwareEncodeOk: true,
+        message: 'FFmpeg is available and software encoding succeeded',
+      });
+    } catch (err: any) {
+      return reply.send({
+        status: 'error',
+        version,
+        softwareEncodeOk: false,
+        message: `Software encoding test failed: ${err.message}`,
+      });
+    }
+  });
+
+  // GET /api/admin/health/vaapi - Tests if VAAPI hardware acceleration is available
+  fastify.get('/api/admin/health/vaapi', async (request, reply) => {
+    const renderDevicePath = '/dev/dri/renderD128';
+    let available = false;
+
+    try {
+      await fs.promises.access(renderDevicePath, fs.constants.R_OK);
+      available = true;
+    } catch {
+      available = false;
+    }
+
+    if (!available) {
+      return reply.send({
+        available: false,
+        testPassed: false,
+        message: `VAAPI render device (${renderDevicePath}) does not exist or is not readable`,
+      });
+    }
+
+    try {
+      await execPromise(`ffmpeg -hwaccel vaapi -hwaccel_device ${renderDevicePath} -f lavfi -i color=c=black:s=320x240:d=1 -vf 'format=nv12,hwupload' -vcodec h264_vaapi -f null -`);
+      return reply.send({
+        available: true,
+        testPassed: true,
+        message: 'VAAPI hardware acceleration test passed',
+      });
+    } catch (err: any) {
+      return reply.send({
+        available: true,
+        testPassed: false,
+        message: `VAAPI device exists but encoding test failed: ${err.message}`,
+      });
+    }
+  });
+
+  // GET /api/admin/health/system - System diagnostics endpoint
+  fastify.get('/api/admin/health/system', async (request, reply) => {
+    const { rss, heapUsed, heapTotal } = process.memoryUsage();
+
+    const mediaPath = process.env.MEDIA_ROOT || '/app/media';
+    let mediaExists = false;
+    let mediaReadable = false;
+    try {
+      await fs.promises.access(mediaPath, fs.constants.F_OK);
+      mediaExists = true;
+      await fs.promises.access(mediaPath, fs.constants.R_OK);
+      mediaReadable = true;
+    } catch {}
+
+    const cachePath = process.env.CACHE_ROOT || '/app/cache';
+    let cacheExists = false;
+    let cacheWritable = false;
+    try {
+      await fs.promises.access(cachePath, fs.constants.F_OK);
+      cacheExists = true;
+      await fs.promises.access(cachePath, fs.constants.W_OK);
+      cacheWritable = true;
+    } catch {}
+
+    let dbConnected = false;
+    try {
+      await query('SELECT 1');
+      dbConnected = true;
+    } catch {
+      dbConnected = false;
+    }
+
+    let redisConnected = false;
+    try {
+      const pong = await redis.ping();
+      redisConnected = pong === 'PONG';
+    } catch {
+      redisConnected = false;
+    }
+
+    return reply.send({
+      memory: { rss, heapUsed, heapTotal },
+      cacheDir: { exists: cacheExists, writable: cacheWritable, path: cachePath },
+      mediaDir: { exists: mediaExists, readable: mediaReadable, path: mediaPath },
+      dbConnected,
+      redisConnected,
+    });
+  });
 }
+

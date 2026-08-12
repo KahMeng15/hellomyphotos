@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Layers, Image, RefreshCw, Video } from '@lucide/svelte';
+  import { ChevronLeft, Activity, Play, Pause, Square, Trash2, Cpu, ShieldCheck, Save, Layers, Image, RefreshCw, Video, AlertCircle } from '@lucide/svelte';
   import Modal from '$lib/components/Modal.svelte';
 
   let queues = $state<any>({});
@@ -38,6 +38,61 @@
   let confirmMessage = $state('');
   let confirmDanger = $state(false);
   let confirmAction: (() => void) | null = $state(null);
+
+  let failedJobsModal = $state(false);
+  let failedJobsQueueName = $state('');
+  let failedJobsList = $state<any[]>([]);
+  let failedJobsLoading = $state(false);
+
+  let healthResults = $state<Record<string, any>>({});
+  let healthLoading = $state<Record<string, boolean>>({});
+  let systemStatusModal = $state(false);
+
+  async function viewFailedJobs(name: string) {
+    failedJobsQueueName = name;
+    failedJobsList = [];
+    failedJobsLoading = true;
+    failedJobsModal = true;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/queues/${name}/failed-jobs`, { credentials: 'include' });
+      if (res.ok) {
+        failedJobsList = await res.json();
+      }
+    } catch (e) {
+      toast.error('Failed to load error logs');
+    } finally {
+      failedJobsLoading = false;
+    }
+  }
+
+  async function checkHealth(type: string) {
+    healthLoading[type] = true;
+    healthLoading = { ...healthLoading };
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/health/${type}`, { credentials: 'include' });
+      const data = await res.json();
+      healthResults[type] = data;
+      healthResults = { ...healthResults };
+      if (type === 'system') {
+        systemStatusModal = true;
+      }
+      if (data.status === 'ok' || data.available === true || data.dbConnected === true || data.testPassed === true) {
+        toast.success(`${type.toUpperCase()} check passed`);
+      } else {
+        toast.error(`${type.toUpperCase()} check FAILED: ${data.message || 'Unknown error'}`);
+      }
+    } catch (e: any) {
+      toast.error(`Health check error: ${e.message}`);
+    } finally {
+      healthLoading[type] = false;
+      healthLoading = { ...healthLoading };
+    }
+  }
+
+  function formatMB(bytes: number | undefined): string {
+    if (!bytes) return 'N/A';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
 
   function customConfirm(title: string, message: string, danger: boolean, action: () => void) {
     confirmTitle = title;
@@ -543,6 +598,27 @@
       </div>
     </div>
 
+    <!-- Health Check Card -->
+    <div class="card" style="margin-top: 0.5rem;">
+      <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; color: #fff;">
+        <Activity size={20} color="#10b981" /> System Health Check
+      </h3>
+      <div style="display: flex; flex-wrap: wrap; gap: 0.75rem;">
+        <button class="btn secondary" onclick={() => checkHealth('ml')} disabled={healthLoading['ml']}>
+          {healthLoading['ml'] ? 'Testing ML...' : 'Test ML (Face Detection)'}
+        </button>
+        <button class="btn secondary" onclick={() => checkHealth('ffmpeg')} disabled={healthLoading['ffmpeg']}>
+          {healthLoading['ffmpeg'] ? 'Testing FFmpeg...' : 'Test FFmpeg'}
+        </button>
+        <button class="btn secondary" onclick={() => checkHealth('vaapi')} disabled={healthLoading['vaapi']}>
+          {healthLoading['vaapi'] ? 'Testing VAAPI...' : 'Test VAAPI (GPU)'}
+        </button>
+        <button class="btn primary" onclick={() => checkHealth('system')} disabled={healthLoading['system']}>
+          {healthLoading['system'] ? 'Checking System...' : 'System Status'}
+        </button>
+      </div>
+    </div>
+
     <div style="margin-top: 0.5rem;">
       <!-- Overall ETA banner when any queue is active -->
       {#if anyActive() && overallEta()}
@@ -613,6 +689,10 @@
 
                   <button class="icon-btn danger" disabled={!isRunning} onclick={() => stopQueue(name)} title="Stop & Cancel Pending">
                     <Square size={18}/>
+                  </button>
+
+                  <button class="icon-btn" onclick={() => viewFailedJobs(name)} title="View Failed Jobs" disabled={counts.failed === 0}>
+                    <AlertCircle size={18}/>
                   </button>
                 </div>
               </div>
@@ -733,6 +813,118 @@
       {#if confirmDanger}<Trash2 size={18} />{/if}
       Confirm
     </button>
+  </div>
+</Modal>
+
+<Modal bind:show={failedJobsModal} id="failed-jobs-modal" title="Failed Jobs: {failedJobsQueueName}">
+  {#if failedJobsLoading}
+    <p style="color: #a1a1aa; text-align: center; padding: 1.5rem 0;">Loading failed jobs...</p>
+  {:else if failedJobsList.length === 0}
+    <p style="color: #a1a1aa; text-align: center; padding: 1.5rem 0;">No failed jobs found for {failedJobsQueueName}.</p>
+  {:else}
+    <div style="max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; padding-right: 0.5rem;">
+      {#each failedJobsList as job}
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px; padding: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <span style="font-weight: 600; color: #ef4444; font-size: 0.9rem;">
+              Job #{job.id || 'N/A'}: {job.name || 'Job'}
+            </span>
+            {#if job.timestamp}
+              <span style="font-size: 0.75rem; color: #71717a;">
+                {new Date(job.timestamp).toLocaleString()}
+              </span>
+            {/if}
+          </div>
+          {#if job.failedReason}
+            <div style="margin-bottom: 0.5rem; font-size: 0.85rem; color: #f87171; background: rgba(239, 68, 68, 0.1); padding: 0.5rem; border-radius: 4px; word-break: break-all;">
+              <strong>Reason:</strong> {job.failedReason}
+            </div>
+          {/if}
+          {#if job.data}
+            <div style="font-size: 0.8rem; color: #a1a1aa;">
+              <strong>Data:</strong>
+              <pre style="background: rgba(0,0,0,0.4); padding: 0.5rem; border-radius: 4px; overflow-x: auto; margin-top: 0.25rem; font-family: monospace; color: #e4e4e7;">{JSON.stringify(job.data, null, 2)}</pre>
+            </div>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  {/if}
+  <div class="modal-actions" style="margin-top: 24px; display: flex; justify-content: flex-end;">
+    <button class="btn secondary" onclick={() => failedJobsModal = false}>Close</button>
+  </div>
+</Modal>
+
+<Modal bind:show={systemStatusModal} id="system-status-modal" title="System Status Diagnostics">
+  {#if healthResults.system}
+    {@const sys = healthResults.system}
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 0.5rem;">
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem;">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #a1a1aa;">Memory Usage</h4>
+        <div style="font-size: 0.85rem; color: #e4e4e7; display: flex; flex-direction: column; gap: 0.25rem;">
+          <div>RSS: <strong style="color: #60a5fa;">{formatMB(sys.memory?.rss)}</strong></div>
+          <div>Heap Used: <strong style="color: #c084fc;">{formatMB(sys.memory?.heapUsed)}</strong></div>
+          <div>Heap Total: <strong style="color: #a1a1aa;">{formatMB(sys.memory?.heapTotal)}</strong></div>
+        </div>
+      </div>
+
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem;">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #a1a1aa;">Database & Cache</h4>
+        <div style="font-size: 0.85rem; color: #e4e4e7; display: flex; flex-direction: column; gap: 0.4rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>PostgreSQL:</span>
+            {#if sys.dbConnected}
+              <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">CONNECTED</span>
+            {:else}
+              <span style="background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">DISCONNECTED</span>
+            {/if}
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Redis Cache:</span>
+            {#if sys.redisConnected}
+              <span style="background: #10b981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">CONNECTED</span>
+            {:else}
+              <span style="background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: bold;">DISCONNECTED</span>
+            {/if}
+          </div>
+        </div>
+      </div>
+
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem;">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #a1a1aa;">Media Directory</h4>
+        <div style="font-size: 0.8rem; color: #e4e4e7; word-break: break-all; margin-bottom: 0.5rem;">
+          {sys.mediaDir?.path || 'N/A'}
+        </div>
+        <div style="display: flex; gap: 0.5rem; font-size: 0.75rem;">
+          <span style="background: {sys.mediaDir?.exists ? '#10b981' : '#ef4444'}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+            {sys.mediaDir?.exists ? 'EXISTS' : 'MISSING'}
+          </span>
+          <span style="background: {sys.mediaDir?.readable ? '#10b981' : '#ef4444'}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+            {sys.mediaDir?.readable ? 'READABLE' : 'UNREADABLE'}
+          </span>
+        </div>
+      </div>
+
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 1rem;">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #a1a1aa;">Cache Directory</h4>
+        <div style="font-size: 0.8rem; color: #e4e4e7; word-break: break-all; margin-bottom: 0.5rem;">
+          {sys.cacheDir?.path || 'N/A'}
+        </div>
+        <div style="display: flex; gap: 0.5rem; font-size: 0.75rem;">
+          <span style="background: {sys.cacheDir?.exists ? '#10b981' : '#ef4444'}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+            {sys.cacheDir?.exists ? 'EXISTS' : 'MISSING'}
+          </span>
+          <span style="background: {sys.cacheDir?.writable ? '#10b981' : '#ef4444'}; color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold;">
+            {sys.cacheDir?.writable ? 'WRITABLE' : 'UNWRITABLE'}
+          </span>
+        </div>
+      </div>
+    </div>
+  {:else}
+    <p style="color: #a1a1aa; text-align: center; padding: 1.5rem 0;">No system health data available.</p>
+  {/if}
+  <div class="modal-actions" style="margin-top: 24px; display: flex; justify-content: flex-end;">
+    <button class="btn secondary" onclick={() => systemStatusModal = false}>Close</button>
   </div>
 </Modal>
 
