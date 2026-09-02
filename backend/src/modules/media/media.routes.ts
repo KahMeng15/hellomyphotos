@@ -57,9 +57,16 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         reply.header('Cache-Control', 'public, max-age=30'); // Short cache so they upgrade to webp later
         return sendThrottled(request, reply, fs.createReadStream(fullPath));
       }
+
+      // For videos still being processed: return 202 so browsers know to retry
+      if (file.mime_type.startsWith('video/')) {
+        reply.header('Cache-Control', 'no-cache');
+        reply.header('Retry-After', '5');
+        return reply.status(202).send({ message: 'Thumbnail is being generated, please retry shortly' });
+      }
     }
 
-    return reply.status(404).send({ error: 'Thumbnail not found or still processing' });
+    return reply.status(404).send({ error: 'Thumbnail not found' });
   });
 
   fastify.get<{ Params: { id: string }, Querystring: { watermark?: string, shareToken?: string } }>('/api/media/:id/preview', async (request, reply) => {
@@ -131,7 +138,12 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     if (!(await verifyMediaAccess(request, reply, id))) return;
 
     const { download, watermark, shareToken } = request.query as any;
-    const result = await query(`SELECT folder_path, file_name, mime_type, size_bytes FROM media_files WHERE id = $1`, [id]);
+    const result = await query(
+      `SELECT folder_path, file_name, mime_type, size_bytes,
+              is_transcoded, transcoded_mp4_path, transcoded_webm_path
+       FROM media_files WHERE id = $1`,
+      [id]
+    );
     
     if (result.rows.length === 0) return reply.status(404).send({ error: 'File not found' });
     
@@ -153,20 +165,56 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       });
     }
 
-      const wSettings = await WatermarkService.getSettings();
-      if (download !== 'true' && download !== '1' && (watermark === 'true' || wSettings.enforceGlobal)) {
-        reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
-        reply.header('Cache-Control', 'private, no-store');
-        const buffer = await WatermarkService.addWatermarkToStream(fullPath);
-        return sendThrottled(request, reply, buffer);
-      }
+    const wSettings = await WatermarkService.getSettings();
+    if (download !== 'true' && download !== '1' && (watermark === 'true' || wSettings.enforceGlobal)) {
+      reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
+      reply.header('Cache-Control', 'private, no-store');
+      const buffer = await WatermarkService.addWatermarkToStream(fullPath);
+      return sendThrottled(request, reply, buffer);
+    }
 
-      if (download === '1' || download === 'true') {
-        reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(file.file_name)}"`);
-      } else {
-        reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
-      }
+    if (download === '1' || download === 'true') {
+      reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(file.file_name)}"`);
+    } else {
+      reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
+    }
 
+    // --- Prefer transcoded MP4 for video streaming (not for explicit downloads) ---
+    const isVideo = file.mime_type.startsWith('video/');
+    const isExplicitDownload = download === '1' || download === 'true';
+
+    if (isVideo && !isExplicitDownload && file.is_transcoded) {
+      // Pick the best transcoded file available
+      const mp4Path: string | null = file.transcoded_mp4_path;
+      const servePath = mp4Path && fs.existsSync(mp4Path) ? mp4Path : null;
+
+      if (servePath) {
+        const stat = fs.statSync(servePath);
+        const mimeType = 'video/mp4';
+        const fileSize = stat.size;
+        const range = request.headers.range;
+
+        if (range) {
+          const parts = range.replace(/bytes=/, '').split('-');
+          const start = parseInt(parts[0], 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+          const chunksize = end - start + 1;
+
+          reply.status(206);
+          reply.header('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+          reply.header('Accept-Ranges', 'bytes');
+          reply.header('Content-Length', chunksize);
+          reply.header('Content-Type', mimeType);
+          return sendThrottled(request, reply, fs.createReadStream(servePath, { start, end }));
+        } else {
+          reply.header('Content-Length', fileSize);
+          reply.header('Content-Type', mimeType);
+          return sendThrottled(request, reply, fs.createReadStream(servePath));
+        }
+      }
+    }
+
+    // --- Fallback: serve original file ---
     const range = request.headers.range;
     if (range) {
       const parts = range.replace(/bytes=/, "").split("-");

@@ -23,6 +23,10 @@
   let randomDelay = Math.random() * 1.5;
 
   
+  let retryCount = $state(0);
+  const MAX_RETRIES = 10;
+  let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+
   function handleLoad(e: Event) {
     const img = e.target as HTMLImageElement;
     if (img.naturalWidth && img.naturalHeight) {
@@ -49,7 +53,28 @@
       }
     }
     imgLoaded = true;
+    // Clear any pending retry
+    if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = null; }
   }
+
+  function handleError() {
+    // Only retry for video thumbnails that may still be processing
+    if (isVideo && retryCount < MAX_RETRIES) {
+      retryTimeout = setTimeout(() => {
+        retryCount += 1;
+        // Append/update a retry counter as cache-buster so the browser re-fetches
+        const baseUrl = src.split('?')[0];
+        const params = new URLSearchParams(src.includes('?') ? src.split('?')[1] : '');
+        params.set('_r', String(retryCount));
+        // Trigger Svelte reactivity by creating a new string — caller's `src` is a prop,
+        // so we track a local override instead.
+        retrySrc = `${baseUrl}?${params.toString()}`;
+      }, 5000);
+    }
+  }
+
+  let retrySrc = $state('');
+  let effectiveSrc = $derived(retrySrc || src);
 
   $effect(() => {
     // Decode blurhash only when visible
@@ -89,6 +114,7 @@
 
     return () => {
       if (observer) observer.disconnect();
+      if (retryTimeout) clearTimeout(retryTimeout);
     };
   });
 </script>
@@ -98,7 +124,7 @@
     <div class="zoom-wrapper {visible ? '' : 'skeleton'}" style="animation-delay: -{randomDelay}s;">
       {#if visible}
         <canvas bind:this={canvas} width="16" height="16" class:loaded={imgLoaded}></canvas>
-        <img {src} {alt} onload={handleLoad} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox && transformString ? `transform: ${transformString};` : ''}" />
+        <img src={effectiveSrc} {alt} onload={handleLoad} onerror={handleError} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox && transformString ? `transform: ${transformString};` : ''}" />
       {/if}
     </div>
   </div>

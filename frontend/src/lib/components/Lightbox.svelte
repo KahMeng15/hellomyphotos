@@ -214,8 +214,9 @@
   // --- Download, share, cover ---
 
   function download() {
-    const url = getStreamUrl(media.id, token) + '&download=1';
-    window.location.href = url;
+    const base = getStreamUrl(media.id, token);
+    const separator = base.includes('?') ? '&' : '?';
+    window.location.href = base + separator + 'download=1';
   }
 
   let isSharing = $state(false);
