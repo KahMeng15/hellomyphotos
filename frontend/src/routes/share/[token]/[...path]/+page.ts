@@ -29,7 +29,7 @@ export const load: PageLoad = async ({ params, fetch, url }) => {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 403 && data.error === 'turnstile_required') {
-        return { turnstileRequired: true, token };
+        return { turnstileRequired: true, token, files: [], directories: [] };
       }
       throw new Error('Share not found');
     }

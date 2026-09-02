@@ -55,7 +55,7 @@
   let showViewMenu = $state(false);
   let showFolderViewMenu = $state(false);
 
-  let isFolderOnly = $derived(data.files.length === 0 && (data.directories?.length || 0) > 0);
+  let isFolderOnly = $derived((data.files?.length || 0) === 0 && (data.directories?.length || 0) > 0);
 
   let sortedDirectories = $derived((data.directories || []).slice().sort((a: any, b: any) => {
     if (sortMode === 'a-z') return a.name.localeCompare(b.name);
@@ -63,7 +63,7 @@
     return 0;
   }));
 
-  let sortedFiles = $derived([...data.files].sort((a, b) => {
+  let sortedFiles = $derived([...(data.files || [])].sort((a, b) => {
     if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);
     if (sortMode === 'oldest') return getSortDate(a) - getSortDate(b);
     if (sortMode === 'a-z') return a.file_name.localeCompare(b.file_name);
