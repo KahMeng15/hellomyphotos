@@ -28,13 +28,35 @@ export async function zipRoutes(fastify: FastifyInstance) {
       path: request.url
     });
     
+    const wSettings = await WatermarkService.getSettings();
+    const shouldWatermark = watermark === 'true' || wSettings.enforceGlobal;
+
     const result = await query(
-      `SELECT folder_path, file_name, mime_type FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
+      `SELECT folder_path, file_name, mime_type, size_bytes FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
       [folderPath]
     );
     
     if (result.rows.length === 0) {
       return reply.status(404).send({ error: 'No files found in this folder.' });
+    }
+
+    // Filter to existing files on disk
+    const existingFiles: Array<{ fullPath: string; fileName: string; mimeType: string; sizeBytes: number }> = [];
+    for (const file of result.rows) {
+      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+      if (fs.existsSync(fullPath)) {
+        const stat = fs.statSync(fullPath);
+        existingFiles.push({
+          fullPath,
+          fileName: file.file_name,
+          mimeType: file.mime_type,
+          sizeBytes: stat.size
+        });
+      }
+    }
+
+    if (existingFiles.length === 0) {
+      return reply.status(404).send({ error: 'No files found on disk for this folder.' });
     }
 
     const archive = new ZipArchive({
@@ -45,7 +67,19 @@ export async function zipRoutes(fastify: FastifyInstance) {
     
     reply.header('Content-Type', 'application/zip');
     reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(zipFilename || 'Photos')}.zip"`);
-    
+
+    // If we are not applying on-the-fly watermark buffers, we know the exact size of the zip upfront!
+    // Format: Store level 0 with file stream uses Data Descriptor:
+    // Per entry: 30 (local header) + nameBytes + file.sizeBytes + 16 (data descriptor) + 46 (central dir header) + nameBytes
+    // End of central directory record: 22 bytes
+    if (!shouldWatermark) {
+      let totalZipSize = 22;
+      for (const file of existingFiles) {
+        const nameBytes = Buffer.byteLength(file.fileName, 'utf8');
+        totalZipSize += (30 + nameBytes) + file.sizeBytes + 16 + (46 + nameBytes);
+      }
+      reply.header('Content-Length', totalZipSize);
+    }
 
     const isAuth = (request as any).user != null;
     const ip = request.ip || 'unknown';
@@ -59,28 +93,21 @@ export async function zipRoutes(fastify: FastifyInstance) {
       reply.send(archive);
     }
 
-    
     archive.on('error', (err: any) => {
       console.error('Archiver error:', err);
     });
 
-    const wSettings = await WatermarkService.getSettings();
-    const shouldWatermark = watermark === 'true' || wSettings.enforceGlobal;
-
-    for (const file of result.rows) {
-      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
-      if (fs.existsSync(fullPath)) {
-        if (shouldWatermark && file.mime_type?.startsWith('image/')) {
-          try {
-            const buffer = await WatermarkService.addWatermarkToStream(fullPath);
-            archive.append(buffer, { name: file.file_name });
-          } catch (e) {
-            console.error('Failed to watermark in zip:', e);
-            archive.file(fullPath, { name: file.file_name });
-          }
-        } else {
-          archive.file(fullPath, { name: file.file_name });
+    for (const file of existingFiles) {
+      if (shouldWatermark && file.mimeType?.startsWith('image/')) {
+        try {
+          const buffer = await WatermarkService.addWatermarkToStream(file.fullPath);
+          archive.append(buffer, { name: file.fileName });
+        } catch (e) {
+          console.error('Failed to watermark in zip:', e);
+          archive.file(file.fullPath, { name: file.fileName });
         }
+      } else {
+        archive.file(file.fullPath, { name: file.fileName });
       }
     }
 

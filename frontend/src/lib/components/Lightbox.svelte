@@ -150,8 +150,8 @@
       pzInstance = panzoom(node, {
         maxZoom: 5,
         minZoom: 1,
-        bounds: true,
-        boundsPadding: 0.1,
+        bounds: false,
+        smoothScroll: false,
       });
 
       pzInstance.on('transform', () => {
@@ -249,6 +249,16 @@
     if (onsetcover) onsetcover(media.id);
   }
 
+  // Reset zoom & pan when navigating between media items
+  $effect(() => {
+    if (media.id && pzInstance) {
+      pzInstance.zoomAbs(window.innerWidth / 2, window.innerHeight / 2, 1);
+      pzInstance.moveTo(0, 0);
+      currentZoom = 1;
+      showZoomSlider = false;
+    }
+  });
+
   onMount(() => {
     document.addEventListener('keydown', handleKeydown);
     lastActivity = Date.now();
@@ -323,12 +333,15 @@
       
       <div class="content" onclick={(e) => e.stopPropagation()}>
         {#if media.mime_type.startsWith('video/')}
-          <video controls autoplay class="media-element">
-            <source src={getStreamUrl(media.id, token)} type={media.mime_type} />
-            Your browser does not support the video tag.
-          </video>
+          {#key media.id}
+            <video controls autoplay playsinline class="media-element" src={getStreamUrl(media.id, token)}>
+              Your browser does not support the video tag.
+            </video>
+          {/key}
         {:else}
-          <img src={getPreviewUrl(media.id, false, token)} alt={media.file_name} class="media-element" draggable="false" use:initPanzoom />
+          {#key media.id}
+            <img src={getPreviewUrl(media.id, false, token)} alt={media.file_name} class="media-element" draggable="false" use:initPanzoom />
+          {/key}
         {/if}
       </div>
       
