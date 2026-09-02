@@ -135,7 +135,10 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'Share not found or expired' });
     }
 
-    if (process.env.TURNSTILE_SECRET) {
+    const userAgent = (request.headers['user-agent'] || '').toLowerCase();
+    const isSocialCrawler = /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|linkedinbot|slackbot|discordbot|applebot|bingbot|googlebot|pinterest/i.test(userAgent);
+
+    if (process.env.TURNSTILE_SECRET && !isSocialCrawler) {
       const tsCookie = request.cookies[`ts_${token}`];
       if (!tsCookie) {
         return reply.status(403).send({ error: 'turnstile_required' });

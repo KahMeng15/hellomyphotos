@@ -281,10 +281,97 @@
 
   let coverObjectPosition = $derived(computeCoverObjectPosition(effectiveCoverBoundingBox, effectiveCoverImgWidth, effectiveCoverImgHeight));
 
+  // Determine single media file if viewing single photo/video share
+  let singleSelectedMedia = $derived.by(() => {
+    if (data.share?.media_id) {
+      return data.files?.find((f: any) => f.id === data.share.media_id) || data.files?.[0] || null;
+    }
+    if (data.selectedFile) {
+      return data.files?.find((f: any) => f.file_name === data.selectedFile) || null;
+    }
+    return null;
+  });
+
+  // Effective preview image media ID
+  let metaCoverMediaId = $derived(
+    singleSelectedMedia?.id ||
+    fallbackCoverId ||
+    null
+  );
+
+  // Title calculation: Album / Folder / Person name or single photo name
+  let metaTitle = $derived.by(() => {
+    if (data.turnstileRequired) return 'Security Check - hellomyphotos';
+    if (data.error) return 'Shared Gallery - hellomyphotos';
+    if (singleSelectedMedia) return `${singleSelectedMedia.file_name} - hellomyphotos`;
+    if (personName) return `${personName} - hellomyphotos`;
+    const folderName = data.folderPath ? data.folderPath.split('/').pop() : '';
+    return folderName ? `${folderName} - hellomyphotos` : 'Shared Album - hellomyphotos';
+  });
+
+  // Subtitle / Description calculation
+  let metaDescription = $derived.by(() => {
+    if (data.turnstileRequired || data.error) return 'Shared album on hellomyphotos';
+    if (singleSelectedMedia) {
+      const parts: string[] = [];
+      if (singleSelectedMedia.mime_type?.startsWith('video/')) parts.push('Video');
+      else parts.push('Photo');
+      if (singleSelectedMedia.size_bytes) {
+        const mb = (singleSelectedMedia.size_bytes / (1024 * 1024)).toFixed(1);
+        parts.push(`${mb} MB`);
+      }
+      return parts.join(' • ');
+    }
+    if (data.folderDescription) return data.folderDescription;
+    const fileCount = data.files?.length || 0;
+    const dirCount = data.directories?.length || 0;
+    const parts: string[] = [];
+    if (fileCount > 0) parts.push(`${fileCount} item${fileCount === 1 ? '' : 's'}`);
+    if (dirCount > 0) parts.push(`${dirCount} folder${dirCount === 1 ? '' : 's'}`);
+    return parts.length > 0 ? parts.join(' • ') : 'View shared photos and videos on hellomyphotos';
+  });
+
+  // Canonical absolute preview image URL
+  let metaImageUrl = $derived.by(() => {
+    if (!metaCoverMediaId) return null;
+    const baseUrl = data.origin || (typeof window !== 'undefined' ? window.location.origin : '');
+    const previewPath = getPreviewUrl(metaCoverMediaId, false, data.token);
+    if (previewPath.startsWith('http')) return previewPath;
+    return baseUrl ? `${baseUrl}${previewPath.startsWith('/') ? '' : '/'}${previewPath}` : previewPath;
+  });
+
+  let metaPageUrl = $derived(data.pageUrl || (typeof window !== 'undefined' ? window.location.href : ''));
 </script>
 
 <svelte:head>
-  <title>{data.turnstileRequired ? 'Verifying...' : data.error ? 'Error' : (personName || (data.folderPath ? data.folderPath.split('/').pop() : 'Shared Gallery'))} - hellomyphotos</title>
+  <title>{metaTitle}</title>
+  <meta name="description" content={metaDescription} />
+
+  <!-- Open Graph / WhatsApp / Facebook -->
+  <meta property="og:type" content={singleSelectedMedia?.mime_type?.startsWith('video/') ? 'video.other' : 'website'} />
+  <meta property="og:site_name" content="hellomyphotos" />
+  <meta property="og:title" content={metaTitle} />
+  <meta property="og:description" content={metaDescription} />
+  {#if metaPageUrl}
+    <meta property="og:url" content={metaPageUrl} />
+  {/if}
+  {#if metaImageUrl}
+    <meta property="og:image" content={metaImageUrl} />
+    <meta property="og:image:secure_url" content={metaImageUrl} />
+    <meta property="og:image:alt" content={metaTitle} />
+    <meta property="og:image:type" content="image/webp" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+  {/if}
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content={metaTitle} />
+  <meta name="twitter:description" content={metaDescription} />
+  {#if metaImageUrl}
+    <meta name="twitter:image" content={metaImageUrl} />
+  {/if}
+
   {#if data.turnstileRequired}
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
   {/if}

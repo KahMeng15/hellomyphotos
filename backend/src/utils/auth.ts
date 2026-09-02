@@ -132,11 +132,23 @@ export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyR
   mediaFolder = mediaResult.rows[0].folder_path;
 
   if (shareToken) {
-    const shareResult = await pool.query('SELECT folder_path FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())', [shareToken]);
+    const shareResult = await pool.query(
+      'SELECT folder_path, media_id, person_id FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())',
+      [shareToken]
+    );
     if (shareResult.rows.length > 0) {
-      const shareRoot = shareResult.rows[0].folder_path;
-      if (mediaFolder === shareRoot || mediaFolder.startsWith(shareRoot + '/')) {
-        return true; // Access granted via share link
+      const { folder_path: shareRoot, media_id: shareMediaId, person_id: sharePersonId } = shareResult.rows[0];
+      if (shareMediaId && shareMediaId === mediaId) {
+        return true;
+      }
+      if (shareRoot && (mediaFolder === shareRoot || mediaFolder.startsWith(shareRoot + '/'))) {
+        return true; // Access granted via folder share link
+      }
+      if (sharePersonId) {
+        const faceRes = await pool.query('SELECT 1 FROM face_embeddings WHERE media_id = $1 AND person_id = $2 LIMIT 1', [mediaId, sharePersonId]);
+        if (faceRes.rows.length > 0) {
+          return true;
+        }
       }
     }
   }

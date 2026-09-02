@@ -1,14 +1,12 @@
 import { API_BASE } from '$lib/api/media';
 import type { PageLoad } from './$types';
 
-export const ssr = false;
-
 const MEDIA_EXTENSIONS = new Set([
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif',
   'mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'm4v'
 ]);
 
-export const load: PageLoad = async ({ params, fetch }) => {
+export const load: PageLoad = async ({ params, fetch, url }) => {
   const { token, path } = params;
   let folderPath = path || '';
   let selectedFile: string | undefined;
@@ -49,7 +47,9 @@ export const load: PageLoad = async ({ params, fetch }) => {
       personCoverMediaId: data.personCoverMediaId || null,
       personCoverBoundingBox: data.personCoverBoundingBox || null,
       personCoverImgWidth: data.personCoverImgWidth || null,
-      personCoverImgHeight: data.personCoverImgHeight || null
+      personCoverImgHeight: data.personCoverImgHeight || null,
+      pageUrl: url.href,
+      origin: url.origin
     };
   } catch (error: any) {
     if (error.message === 'Share not found') {
