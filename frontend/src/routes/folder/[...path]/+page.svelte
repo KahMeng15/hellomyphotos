@@ -197,6 +197,25 @@
     }
   }
   
+  let isRegeneratingOG = $state(false);
+  async function handleRegenerateOG() {
+    try {
+      isRegeneratingOG = true;
+      const res = await fetch('/api/folder/regenerate-og', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: data.folderPath || '' })
+      });
+      if (!res.ok) throw new Error('Failed to regenerate');
+      showAppAlert('Success', 'OG Image cache cleared. It will regenerate on the next share request.');
+    } catch (e) {
+      console.error(e);
+      showAppAlert('Error', 'Failed to regenerate OG image');
+    } finally {
+      isRegeneratingOG = false;
+    }
+  }
+  
   type SortMode = 'newest' | 'oldest' | 'a-z' | 'z-a';
   type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square';
 
@@ -889,6 +908,10 @@
     
     <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRescanML} disabled={isRescanningML}>
       {isRescanningML ? 'Queuing...' : 'Rescan Faces & Items in Images'}
+    </button>
+    
+    <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRegenerateOG} disabled={isRegeneratingOG}>
+      {isRegeneratingOG ? 'Regenerating...' : 'Regenerate WhatsApp / OG Images'}
     </button>
   </div>
 </Modal>

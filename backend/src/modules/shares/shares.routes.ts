@@ -503,4 +503,33 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     
     return reply.send({ success: true });
   });
+
+  fastify.get<{ Params: { token: string }, Querystring: { path?: string } }>('/api/shares/:token/og', async (request, reply) => {
+    const { token } = request.params;
+    const { path: subPath } = request.query;
+
+    const res = await query(`SELECT folder_path FROM shared_folders WHERE share_token = $1`, [token]);
+    if (res.rows.length === 0) return reply.status(404).send({ error: 'Not found' });
+
+    const baseFolderPath = res.rows[0].folder_path;
+    let targetFolder = baseFolderPath;
+    if (subPath) {
+      targetFolder = path.join(baseFolderPath, subPath).replace(/\\/g, '/');
+    }
+
+    const { OgService } = await import('../media/og.service');
+    try {
+      // Synchronously generate and serve the OG image if requested (cached by OgService)
+      const imagePath = await OgService.generateForFolder(token, targetFolder);
+      
+      const stat = fs.statSync(imagePath);
+      reply.header('Content-Type', 'image/png');
+      reply.header('Content-Length', stat.size);
+      reply.header('Cache-Control', 'public, max-age=86400');
+      return reply.send(fs.createReadStream(imagePath));
+    } catch (err: any) {
+      request.log.error(err);
+      return reply.status(500).send({ error: 'Failed to generate OG image' });
+    }
+  });
 }

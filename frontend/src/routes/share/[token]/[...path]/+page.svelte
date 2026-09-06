@@ -316,14 +316,37 @@
 
   // Canonical absolute preview image URL
   let metaImageUrl = $derived.by(() => {
+    let baseUrl = data.origin || (typeof window !== 'undefined' ? window.location.origin : '');
+    if (baseUrl.startsWith('http://') && !baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')) {
+      baseUrl = baseUrl.replace('http://', 'https://');
+    }
+    
+    if (data.share && data.share.folder_path) {
+      let ogPath = `/api/shares/${data.token}/og`;
+      if (data.folderPath && data.folderPath !== data.baseFolderPath) {
+        let diff = data.folderPath.substring(data.baseFolderPath.length);
+        if (diff.startsWith('/')) diff = diff.substring(1);
+        if (diff.length > 0) {
+          ogPath += `?path=${encodeURIComponent(diff)}`;
+        }
+      }
+      return baseUrl ? `${baseUrl}${ogPath}` : ogPath;
+    }
+    
     if (!metaCoverMediaId) return null;
-    const baseUrl = data.origin || (typeof window !== 'undefined' ? window.location.origin : '');
     const previewPath = getPreviewUrl(metaCoverMediaId, false, data.token);
-    if (previewPath.startsWith('http')) return previewPath;
+    if (previewPath.startsWith('http')) return previewPath.replace('http://', 'https://');
     return baseUrl ? `${baseUrl}${previewPath.startsWith('/') ? '' : '/'}${previewPath}` : previewPath;
   });
 
-  let metaPageUrl = $derived(data.pageUrl || (typeof window !== 'undefined' ? window.location.href : ''));
+  let metaPageUrl = $derived.by(() => {
+    let baseUrl = data.origin || (typeof window !== 'undefined' ? window.location.origin : '');
+    if (baseUrl.startsWith('http://') && !baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')) {
+      baseUrl = baseUrl.replace('http://', 'https://');
+    }
+    const currentPath = $page.url.pathname;
+    return baseUrl ? `${baseUrl}${currentPath}` : currentPath;
+  });
 </script>
 
 <svelte:head>
@@ -342,9 +365,9 @@
     <meta property="og:image" content={metaImageUrl} />
     <meta property="og:image:secure_url" content={metaImageUrl} />
     <meta property="og:image:alt" content={metaTitle} />
-    <meta property="og:image:type" content="image/webp" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content={data.share && data.share.folder_path ? "image/png" : "image/webp"} />
+    <meta property="og:image:width" content={data.share && data.share.folder_path ? "1080" : "1200"} />
+    <meta property="og:image:height" content={data.share && data.share.folder_path ? "1080" : "630"} />
   {/if}
 
   <!-- Twitter Card -->

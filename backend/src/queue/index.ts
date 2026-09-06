@@ -7,6 +7,7 @@ import { smartSearchQueue, smartSearchWorker } from './smartSearchQueue';
 import { faceDetectionQueue, faceDetectionWorker } from './faceDetectionQueue';
 import { facialRecognitionQueue, facialRecognitionWorker } from './facialRecognitionQueue';
 import { faceThumbnailQueue, faceThumbnailWorker } from './faceThumbnailQueue';
+import { ogQueue, ogWorker } from './ogQueue';
 import { getExecutionMode, setExecutionMode, type QueueExecutionMode } from './mode';
 import { logger } from '../utils/logger';
 import { dispatchMediaFile, MediaJobData } from './dispatch';
@@ -20,6 +21,7 @@ const allWorkers: [string, Worker | undefined][] = [
   ['face-detection', faceDetectionWorker],
   ['facial-recognition', facialRecognitionWorker],
   ['face-thumbnail', faceThumbnailWorker],
+  ['og', ogWorker],
 ];
 
 for (const [name, worker] of allWorkers) {
@@ -42,6 +44,7 @@ export {
   faceDetectionQueue, faceDetectionWorker,
   facialRecognitionQueue, facialRecognitionWorker,
   faceThumbnailQueue, faceThumbnailWorker,
+  ogQueue, ogWorker,
   getExecutionMode, setExecutionMode, type QueueExecutionMode,
   dispatchMediaFile, type MediaJobData
 };
@@ -55,5 +58,5 @@ export const queues: Record<string, Queue> = {
   'face-detection': faceDetectionQueue,
   'facial-recognition': facialRecognitionQueue,
   'face-thumbnail': faceThumbnailQueue,
+  'og': ogQueue,
 };
-

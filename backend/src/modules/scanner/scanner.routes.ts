@@ -66,8 +66,32 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         }
       }
     }
+
+    try {
+      const ogDir = path.resolve(process.env.MEDIA_ROOT || '/app/media', '../cache/og');
+      if (fs.existsSync(ogDir)) {
+        fs.rmSync(ogDir, { recursive: true, force: true });
+        fs.mkdirSync(ogDir, { recursive: true });
+      }
+    } catch (e) {
+      console.error('Failed to clear OG cache', e);
+    }
     
     return reply.send({ success: true });
+  });
+
+  fastify.post('/api/folder/regenerate-og', { preHandler: requireAuth }, async (request, reply) => {
+    try {
+      const ogDir = path.resolve(process.env.MEDIA_ROOT || '/app/media', '../cache/og');
+      if (fs.existsSync(ogDir)) {
+        fs.rmSync(ogDir, { recursive: true, force: true });
+        fs.mkdirSync(ogDir, { recursive: true });
+      }
+      return reply.send({ success: true });
+    } catch (e) {
+      console.error('Failed to clear OG cache', e);
+      return reply.status(500).send({ error: 'Failed to clear cache' });
+    }
   });
 
   fastify.post<{ Body: { folder: string, description: string } }>('/api/folder/settings', { preHandler: requireAuth }, async (request, reply) => {
