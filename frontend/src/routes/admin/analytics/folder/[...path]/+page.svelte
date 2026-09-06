@@ -35,6 +35,7 @@
   } from '@lucide/svelte';
 
   const folderPath = $derived($page.params.path || '');
+  const fromFolder = $derived($page.url.searchParams.get('from'));
 
   let data = $state<any>(null);
   let loading = $state(true);
@@ -164,7 +165,7 @@
 <div class="admin-container">
   <div class="header">
     <div style="display: flex; align-items: center; gap: 16px;">
-      <a href="/admin/analytics" title="Back to Global Analytics" style="display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s, transform 0.2s;">
+      <a href={fromFolder !== null ? folderHref(fromFolder) : "/admin/analytics"} title={fromFolder !== null ? "Back to Folder" : "Back to Global Analytics"} style="display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; color: rgba(255,255,255,0.4); text-decoration: none; transition: color 0.2s, transform 0.2s;">
         <ChevronLeft size={28} strokeWidth={2.5} />
       </a>
       <div>

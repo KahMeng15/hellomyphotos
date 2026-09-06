@@ -6,10 +6,28 @@ import './queue';
 import './cron/periodicScanner';
 import './cron/analyticsCron';
 
+import fs from 'fs';
+import path from 'path';
+
 logger.info('Server starting up');
 
+const crashLog = path.join(process.cwd(), 'logs', 'crash.log');
+
+process.on('uncaughtException', (err) => {
+  const line = `[${new Date().toISOString()}] CRASH uncaughtException: ${err.stack || err.message}\n`;
+  fs.appendFileSync(crashLog, line);
+  console.error(line);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  const line = `[${new Date().toISOString()}] CRASH unhandledRejection: ${String(reason)}\n`;
+  fs.appendFileSync(crashLog, line);
+  console.error(line);
+  process.exit(1);
+});
+
 import { fork } from 'child_process';
-import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);

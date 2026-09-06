@@ -11,6 +11,7 @@ const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.c
 import { verifyMediaAccess } from '../../utils/auth';
 import { thumbnailQueue } from '../../queue/thumbnailQueue';
 import { videoQueue } from '../../queue/videoQueue';
+import { getClientIp } from '../../utils/getIp';
 
 import { getThrottleLimits, BandwidthThrottler } from '../../utils/throttle';
 async function sendThrottled(request: FastifyRequest, reply: FastifyReply, stream: NodeJS.ReadableStream | Buffer) {
@@ -69,25 +70,26 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     return reply.status(404).send({ error: 'Thumbnail not found' });
   });
 
-  fastify.get<{ Params: { id: string }, Querystring: { watermark?: string, shareToken?: string } }>('/api/media/:id/preview', async (request, reply) => {
+  fastify.get<{ Params: { id: string }, Querystring: { watermark?: string, shareToken?: string, context?: string } }>('/api/media/:id/preview', async (request, reply) => {
     const { id } = request.params;
     
     if (!(await verifyMediaAccess(request, reply, id))) return;
 
-    const { watermark, shareToken } = request.query;
+    const { watermark, shareToken, context } = request.query;
     const filePath = path.join(CACHE_ROOT, '1080p', `${id}.webp`);
     
-    // Log analytics
-    AnalyticsService.logView(id, 'VIEW_1080P', 120000, shareToken); // Rough byte size estimate for analytics buffer
-    AnalyticsService.logVisit({
-      mediaId: id,
-      shareToken,
-      actionType: 'preview',
-      ip: request.ip,
-      userAgent: request.headers['user-agent'] as string | undefined,
-      referrer: request.headers.referer as string | undefined,
-      path: request.url
-    });
+    if (context === 'lightbox') {
+      AnalyticsService.logView(id, 'VIEW_1080P', 120000, shareToken);
+      AnalyticsService.logVisit({
+        mediaId: id,
+        shareToken,
+        actionType: 'preview',
+        ip: getClientIp(request),
+        userAgent: request.headers['user-agent'] as string | undefined,
+        referrer: request.headers.referer as string | undefined,
+        path: request.url
+      });
+    }
 
     if (fs.existsSync(filePath)) {
       reply.header('Content-Type', 'image/webp');
@@ -158,7 +160,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         mediaId: id,
         shareToken,
         actionType: 'download',
-        ip: request.ip,
+        ip: getClientIp(request),
         userAgent: request.headers['user-agent'] as string | undefined,
         referrer: request.headers.referer as string | undefined,
         path: request.url
@@ -229,6 +231,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       reply.header('Content-Type', file.mime_type);
       return sendThrottled(request, reply, fs.createReadStream(fullPath, { start, end }));
     } else {
+      reply.header('Accept-Ranges', 'bytes');
       reply.header('Content-Length', file.size_bytes);
       reply.header('Content-Type', file.mime_type);
       return sendThrottled(request, reply, fs.createReadStream(fullPath));

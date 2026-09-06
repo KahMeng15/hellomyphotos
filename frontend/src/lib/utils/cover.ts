@@ -8,7 +8,6 @@ export function computeCoverObjectPosition(
   const containerH = hero?.offsetHeight || 0;
 
   if (!bb) {
-    console.log('[cover] FALLBACK (no bounding box)', { objectPosition: 'center center', containerW, containerH });
     return 'center center';
   }
 
@@ -22,23 +21,11 @@ export function computeCoverObjectPosition(
   const faceH = y2 - y1;
 
   if (!imgWidth || !imgHeight) {
-    console.log('[cover] FALLBACK (no image dimensions)', {
-      faceCenterX, faceCenterY, faceW, faceH, imgWidth, imgHeight, containerW, containerH, objectPosition: 'center center'
-    });
     return 'center center';
   }
 
   const pctX = (faceCenterX / imgWidth) * 100;
   const pctY = Math.min((faceCenterY / imgHeight) * 100 + 10, 55);
-
-  console.log('[cover] POSITION', {
-    face: { x1, y1, x2, y2, centerX: faceCenterX, centerY: faceCenterY, width: faceW, height: faceH },
-    image: { width: imgWidth, height: imgHeight },
-    container: { width: containerW, height: containerH },
-    rawPctY: ((faceCenterY / imgHeight) * 100).toFixed(1) + '%',
-    adjustedPctY: pctY.toFixed(1) + '%',
-    objectPosition: `${pctX.toFixed(1)}% ${pctY.toFixed(1)}%`
-  });
 
   return `${pctX}% ${pctY}%`;
 }

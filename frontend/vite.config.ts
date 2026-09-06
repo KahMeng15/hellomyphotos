@@ -28,6 +28,7 @@ export default defineConfig({
 		})
 	],
 	server: {
+		allowedHosts: ['test.kmeng.ddnsgeek.com'],
 		proxy: {
 			'/api': {
 				target: process.env.BACKEND_PROXY_URL || 'http://localhost:3000',

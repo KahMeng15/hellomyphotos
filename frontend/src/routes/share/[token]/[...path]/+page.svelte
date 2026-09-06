@@ -301,34 +301,17 @@
 
   // Title calculation: Album / Folder / Person name or single photo name
   let metaTitle = $derived.by(() => {
-    if (data.turnstileRequired) return 'Security Check - hellomyphotos';
-    if (data.error) return 'Shared Gallery - hellomyphotos';
-    if (singleSelectedMedia) return `${singleSelectedMedia.file_name} - hellomyphotos`;
-    if (personName) return `${personName} - hellomyphotos`;
+    if (data.turnstileRequired) return 'Security Check';
+    if (data.error) return 'Shared Gallery';
+    if (singleSelectedMedia) return singleSelectedMedia.file_name;
+    if (personName) return personName;
     const folderName = data.folderPath ? data.folderPath.split('/').pop() : '';
-    return folderName ? `${folderName} - hellomyphotos` : 'Shared Album - hellomyphotos';
+    return folderName ? folderName : 'Shared Album';
   });
 
   // Subtitle / Description calculation
   let metaDescription = $derived.by(() => {
-    if (data.turnstileRequired || data.error) return 'Shared album on hellomyphotos';
-    if (singleSelectedMedia) {
-      const parts: string[] = [];
-      if (singleSelectedMedia.mime_type?.startsWith('video/')) parts.push('Video');
-      else parts.push('Photo');
-      if (singleSelectedMedia.size_bytes) {
-        const mb = (singleSelectedMedia.size_bytes / (1024 * 1024)).toFixed(1);
-        parts.push(`${mb} MB`);
-      }
-      return parts.join(' • ');
-    }
-    if (data.folderDescription) return data.folderDescription;
-    const fileCount = data.files?.length || 0;
-    const dirCount = data.directories?.length || 0;
-    const parts: string[] = [];
-    if (fileCount > 0) parts.push(`${fileCount} item${fileCount === 1 ? '' : 's'}`);
-    if (dirCount > 0) parts.push(`${dirCount} folder${dirCount === 1 ? '' : 's'}`);
-    return parts.length > 0 ? parts.join(' • ') : 'View shared photos and videos on hellomyphotos';
+    return 'hellomyphotos';
   });
 
   // Canonical absolute preview image URL
@@ -421,7 +404,7 @@
 ">
   <div class="header-content">
     <div class="header-left">
-      <div class="header-text-container">
+      <div class="header-text-container" style="--scroll-prog: {scrollProgress};">
         {#key personName || data.folderPath}
           {#if personName}
             <div class="subheading">Person</div>
@@ -467,33 +450,35 @@
           {/if}
         </div>
         
-        <div class="dropdown-container" use:clickOutside={() => showFolderViewMenu = false}>
-          <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; showViewMenu = false; }} title="Folder View">
-            <Folder size={18} />
-          </button>
-          {#if showFolderViewMenu}
-            <div class="dropdown-menu">
-              <button class:active={folderViewMode === 'small-grid'} onclick={() => { folderViewMode = 'small-grid'; showFolderViewMenu = false; }}>Small Grid</button>
-              <button class:active={folderViewMode === 'medium-grid'} onclick={() => { folderViewMode = 'medium-grid'; showFolderViewMenu = false; }}>Medium Grid</button>
-              <button class:active={folderViewMode === 'large-grid'} onclick={() => { folderViewMode = 'large-grid'; showFolderViewMenu = false; }}>Large Grid</button>
-              <button class:active={folderViewMode === 'list'} onclick={() => { folderViewMode = 'list'; showFolderViewMenu = false; }}>List View</button>
-            </div>
-          {/if}
-        </div>
-
-        <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
-          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; showFolderViewMenu = false; }} title="View">
-            <LayoutGrid size={18} />
-          </button>
-          {#if showViewMenu}
-            <div class="dropdown-menu">
-              <button class:active={viewMode === 'small-fit'} onclick={() => { viewMode = 'small-fit'; showViewMenu = false; }}>Small Fit Size</button>
-              <button class:active={viewMode === 'large-fit'} onclick={() => { viewMode = 'large-fit'; showViewMenu = false; }}>Large Fit Size</button>
-              <button class:active={viewMode === 'small-square'} onclick={() => { viewMode = 'small-square'; showViewMenu = false; }}>Small Square Grid</button>
-              <button class:active={viewMode === 'large-square'} onclick={() => { viewMode = 'large-square'; showViewMenu = false; }}>Large Square Grid</button>
-            </div>
-          {/if}
-        </div>
+        {#if isFolderOnly}
+          <div class="dropdown-container" use:clickOutside={() => showFolderViewMenu = false}>
+            <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; showViewMenu = false; }} title="View">
+              <LayoutGrid size={18} />
+            </button>
+            {#if showFolderViewMenu}
+              <div class="dropdown-menu">
+                <button class:active={folderViewMode === 'small-grid'} onclick={() => { folderViewMode = 'small-grid'; showFolderViewMenu = false; }}>Small Grid</button>
+                <button class:active={folderViewMode === 'medium-grid'} onclick={() => { folderViewMode = 'medium-grid'; showFolderViewMenu = false; }}>Medium Grid</button>
+                <button class:active={folderViewMode === 'large-grid'} onclick={() => { folderViewMode = 'large-grid'; showFolderViewMenu = false; }}>Large Grid</button>
+                <button class:active={folderViewMode === 'list'} onclick={() => { folderViewMode = 'list'; showFolderViewMenu = false; }}>List</button>
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
+            <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; showFolderViewMenu = false; }} title="View">
+              <LayoutGrid size={18} />
+            </button>
+            {#if showViewMenu}
+              <div class="dropdown-menu">
+                <button class:active={viewMode === 'small-fit'} onclick={() => { viewMode = 'small-fit'; showViewMenu = false; }}>Small Fit Size</button>
+                <button class:active={viewMode === 'large-fit'} onclick={() => { viewMode = 'large-fit'; showViewMenu = false; }}>Large Fit Size</button>
+                <button class:active={viewMode === 'small-square'} onclick={() => { viewMode = 'small-square'; showViewMenu = false; }}>Small Square Grid</button>
+                <button class:active={viewMode === 'large-square'} onclick={() => { viewMode = 'large-square'; showViewMenu = false; }}>Large Square Grid</button>
+              </div>
+            {/if}
+          </div>
+        {/if}
         
         <div class="actions">
           {#if !personName && data.share.allow_download_folder}<a href={getFolderZipUrl(data.share.folder_path, data.token)} target="_blank" class="icon-btn" title="Download ZIP"><Download size={18} /></a>{/if}
@@ -922,6 +907,11 @@
     }
     .grid.small-square {
       grid-template-columns: repeat(3, 1fr);
+    }
+    .header-text-container {
+      max-height: calc((1 - var(--scroll-prog)) * 120px + 4px);
+      opacity: calc(1 - var(--scroll-prog));
+      overflow: hidden;
     }
     .toolbar .dropdown-menu {
       right: auto;

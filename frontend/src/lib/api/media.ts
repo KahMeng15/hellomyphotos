@@ -100,9 +100,14 @@ export function getThumbnailUrl(id: string, token?: string): string {
   return `${API_BASE}/api/media/${id}/thumbnail${token ? `?shareToken=${token}` : ''}`;
 }
 
-export function getPreviewUrl(id: string, lowBandwidth: boolean = false, token?: string): string {
+export function getPreviewUrl(id: string, lowBandwidth: boolean = false, token?: string, context?: string): string {
   if (lowBandwidth) return getThumbnailUrl(id, token);
-  return `${API_BASE}/api/media/${id}/preview${token ? `?shareToken=${token}` : ''}`;
+  let url = `${API_BASE}/api/media/${id}/preview`;
+  const params = new URLSearchParams();
+  if (token) params.set('shareToken', token);
+  if (context) params.set('context', context);
+  const q = params.toString();
+  return q ? `${url}?${q}` : url;
 }
 
 export function getStreamUrl(id: string, token?: string): string {

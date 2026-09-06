@@ -82,15 +82,15 @@
   function handleTouchStart(e: TouchEvent) {
     onActivity();
     if (currentZoom > 1.05) return;
-    touchStartX = e.changedTouches[0].screenX;
-    touchStartY = e.changedTouches[0].screenY;
+    touchStartX = e.changedTouches[0].clientX;
+    touchStartY = e.changedTouches[0].clientY;
   }
 
   function handleTouchEnd(e: TouchEvent) {
     onActivity();
     if (currentZoom > 1.05) return;
-    touchEndX = e.changedTouches[0].screenX;
-    touchEndY = e.changedTouches[0].screenY;
+    touchEndX = e.changedTouches[0].clientX;
+    touchEndY = e.changedTouches[0].clientY;
     handleSwipe();
   }
 
@@ -334,13 +334,13 @@
       <div class="content" onclick={(e) => e.stopPropagation()}>
         {#if media.mime_type.startsWith('video/')}
           {#key media.id}
-            <video controls autoplay playsinline class="media-element" src={getStreamUrl(media.id, token)}>
+            <video controls autoplay playsinline class="media-element" crossorigin="use-credentials" src={getStreamUrl(media.id, token)}>
               Your browser does not support the video tag.
             </video>
           {/key}
         {:else}
           {#key media.id}
-            <img src={getPreviewUrl(media.id, false, token)} alt={media.file_name} class="media-element" draggable="false" use:initPanzoom />
+            <img src={getPreviewUrl(media.id, false, token, 'lightbox')} alt={media.file_name} class="media-element" draggable="false" use:initPanzoom />
           {/key}
         {/if}
       </div>
@@ -735,6 +735,7 @@
     justify-content: center;
     align-items: center;
     animation: fadeIn 0.4s ease both;
+    touch-action: none;
   }
 
   .media-element {

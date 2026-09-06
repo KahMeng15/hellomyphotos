@@ -35,13 +35,14 @@ export class AnalyticsService {
 
   static async logVisit(record: VisitRecord) {
     try {
-      const ua = parseUserAgent(record.userAgent || '');
+      const ua = parseUserAgent(record.userAgent);
+      const ip = record.ip || 'unknown';
       const entry = {
         media_id: record.mediaId || null,
         share_token: record.shareToken || null,
         action_type: record.actionType,
-        ip: (record.ip || 'unknown').slice(0, 45),
-        ip_hash: hashIp(record.ip || 'unknown'),
+        ip: ip.slice(0, 45),
+        ip_hash: hashIp(ip),
         user_agent: (record.userAgent || '').slice(0, 300) || null,
         os: ua.os,
         browser: ua.browser,

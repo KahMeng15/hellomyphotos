@@ -60,7 +60,7 @@
       const res = await login(email, password, token);
       currentUser.set(res.user);
       try { localStorage.setItem('sidebarOpen', 'true'); } catch {}
-      goto('/');
+      goto('/folder');
     } catch (err: any) {
       error = err.message || 'Invalid credentials';
       // @ts-ignore

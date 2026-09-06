@@ -28,7 +28,8 @@
       .map((r, i) => ({ i, label: r.day.slice(5) }))
       .filter((_, i) => i % step === 0 || i === n - 1)
       .map(({ i, label }) => ({ x: x(i), label }));
-    return { points: pts, area, labels, total: rows.reduce((s, r) => s + r.v, 0) };
+    const pointsData = rows.map((r, i) => ({ x: x(i), y: y(r.v), val: r.v, day: r.day }));
+    return { points: pts, area, labels, pointsData, total: rows.reduce((s, r) => s + r.v, 0) };
   }
 </script>
 
@@ -49,6 +50,11 @@
     </defs>
     <polygon points={series.area} fill="url(#{fillId})" />
     <polyline points={series.points} fill="none" stroke={stroke} stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+    {#each series.pointsData as p}
+      <circle cx={p.x} cy={p.y} r="12" fill={stroke} class="point">
+        <title>{p.day}: {p.val}</title>
+      </circle>
+    {/each}
   </svg>
   <div class="chart-labels">
     {#each series.labels as l}
@@ -59,7 +65,9 @@
 
 <style>
   .chart-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; margin-bottom: 0.5rem; color: #a1a1aa; }
-  .line-chart { width: 100%; height: 200px; display: block; }
+  .line-chart { width: 100%; height: 200px; display: block; overflow: visible; }
+  .point { opacity: 0; transition: opacity 0.2s; cursor: crosshair; }
+  .point:hover { opacity: 1; }
   .chart-labels { display: flex; justify-content: space-between; font-size: 0.7rem; color: #71717a; margin-top: 0.35rem; }
   .muted { color: #71717a; font-size: 0.85rem; }
 </style>

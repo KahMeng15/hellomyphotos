@@ -449,21 +449,6 @@
 
   let coverObjectPosition = $derived(computeCoverObjectPosition(effectiveCoverBoundingBox, effectiveCoverImgWidth, effectiveCoverImgHeight));
 
-  $effect(() => {
-    console.log('[folder cover] STATE', {
-      fallbackCoverId,
-      source: fallbackCoverId === data.folderCoverId ? 'folder_settings' :
-              fallbackCoverId === (localCoverOverride || data.folderCoverId) ? 'local override' :
-              data.files.find(f => f.id === fallbackCoverId) ? 'files[0]' :
-              'directory',
-      folderSettingsCoverId: data.folderCoverId,
-      folderSettingsBoundingBox: data.folderCoverBoundingBox,
-      effectiveBoundingBox: effectiveCoverBoundingBox,
-      effectiveImgWidth: effectiveCoverImgWidth,
-      effectiveImgHeight: effectiveCoverImgHeight,
-      objectPosition: coverObjectPosition
-    });
-  });
 
   let coverRefreshKey = $state(0);
 
@@ -547,7 +532,7 @@
 ">
   <div class="header-content">
     <div class="header-left">
-      <div class="header-text-container">
+      <div class="header-text-container" style="--scroll-prog: {scrollProgress};">
         {#key data.folderPath}
           {#if data.folderPath && data.folderPath.includes('/')}
             <div class="subheading breadcrumbs">
@@ -568,7 +553,7 @@
     <div class="header-right">
       <div class="toolbar">
         {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}
-          <a href="/admin/analytics/folder/{encodePath(data.folderPath || '')}" class="icon-btn" title="Folder Analytics" style="display: inline-flex; align-items: center; justify-content: center;">
+          <a href="/admin/analytics/folder/{encodePath(data.folderPath || '')}?from={encodePath(data.folderPath || '')}" class="icon-btn" title="Folder Analytics" style="display: inline-flex; align-items: center; justify-content: center;">
             <BarChart3 size={18} />
           </a>
         {/if}
@@ -1373,6 +1358,11 @@
     }
     .grid.small-square {
       grid-template-columns: repeat(3, 1fr);
+    }
+    .header-text-container {
+      max-height: calc((1 - var(--scroll-prog)) * 120px + 4px);
+      opacity: calc(1 - var(--scroll-prog));
+      overflow: hidden;
     }
     .toolbar .dropdown-menu {
       right: auto;

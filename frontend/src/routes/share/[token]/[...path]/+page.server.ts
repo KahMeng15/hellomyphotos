@@ -1,12 +1,12 @@
 import { API_BASE } from '$lib/api/media';
-import type { PageLoad } from './$types';
+import type { PageServerLoad } from './$types';
 
 const MEDIA_EXTENSIONS = new Set([
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'heif',
   'mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'm4v'
 ]);
 
-export const load: PageLoad = async ({ params, fetch, url }) => {
+export const load: PageServerLoad = async ({ params, fetch, url, request }) => {
   const { token, path } = params;
   let folderPath = path || '';
   let selectedFile: string | undefined;
@@ -24,8 +24,17 @@ export const load: PageLoad = async ({ params, fetch, url }) => {
     }
   }
 
+  // Forward the real User-Agent from the incoming request.
+  // This is critical for social crawlers (WhatsApp, Facebook, etc.) — the backend checks
+  // the UA to skip the Turnstile security challenge. Universal fetch (+page.ts) doesn't
+  // have access to the raw request, so it couldn't forward the UA. Server load can.
+  const userAgent = request.headers.get('user-agent') || '';
+
   try {
-    const res = await fetch(`${API_BASE}/api/shares/${token}${folderPath ? '/' + encodeURIComponent(folderPath) : ''}`);
+    const res = await fetch(
+      `${API_BASE}/api/shares/${token}${folderPath ? '/' + encodeURIComponent(folderPath) : ''}`,
+      { headers: userAgent ? { 'user-agent': userAgent } : {} }
+    );
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 403 && data.error === 'turnstile_required') {

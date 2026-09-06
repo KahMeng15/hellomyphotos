@@ -38,12 +38,33 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     if (folder !== '') paths.push('');
 
     for (const p of paths) {
-      await query(`
-        INSERT INTO folder_settings (folder_path, cover_media_id, updated_at) 
-        VALUES ($1, $2, NOW()) 
-        ON CONFLICT (folder_path) DO UPDATE 
-        SET cover_media_id = EXCLUDED.cover_media_id, updated_at = NOW()
-      `, [p, mediaId]);
+      if (p === folder) {
+        await query(`
+          INSERT INTO folder_settings (folder_path, cover_media_id, updated_at) 
+          VALUES ($1, $2, NOW()) 
+          ON CONFLICT (folder_path) DO UPDATE 
+          SET cover_media_id = EXCLUDED.cover_media_id, updated_at = NOW()
+        `, [p, mediaId]);
+      } else {
+        const parentRes = await query(`
+          SELECT fs.cover_media_id, mf.folder_path as media_folder
+          FROM folder_settings fs
+          LEFT JOIN media_files mf ON mf.id = fs.cover_media_id
+          WHERE fs.folder_path = $1
+        `, [p]);
+        
+        const parent = parentRes.rows[0];
+        const shouldUpdate = !parent?.cover_media_id || (parent.media_folder && (parent.media_folder === folder || parent.media_folder.startsWith(folder + '/')));
+        
+        if (shouldUpdate) {
+          await query(`
+            INSERT INTO folder_settings (folder_path, cover_media_id, updated_at) 
+            VALUES ($1, $2, NOW()) 
+            ON CONFLICT (folder_path) DO UPDATE 
+            SET cover_media_id = EXCLUDED.cover_media_id, updated_at = NOW()
+          `, [p, mediaId]);
+        }
+      }
     }
     
     return reply.send({ success: true });
