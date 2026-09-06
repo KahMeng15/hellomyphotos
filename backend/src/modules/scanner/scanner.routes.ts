@@ -70,8 +70,18 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     try {
       const ogDir = path.resolve(process.env.MEDIA_ROOT || '/app/media', '../cache/og');
       if (fs.existsSync(ogDir)) {
-        fs.rmSync(ogDir, { recursive: true, force: true });
-        fs.mkdirSync(ogDir, { recursive: true });
+        if (folderPath === '') {
+          fs.rmSync(ogDir, { recursive: true, force: true });
+          fs.mkdirSync(ogDir, { recursive: true });
+        } else {
+          const safePathBase = folderPath.replace(/[^a-zA-Z0-9-_\.]/g, '_');
+          const files = fs.readdirSync(ogDir);
+          for (const file of files) {
+            if (file.endsWith(`_${safePathBase}.png`) || file.includes(`_${safePathBase}_`)) {
+              fs.unlinkSync(path.join(ogDir, file));
+            }
+          }
+        }
       }
     } catch (e) {
       console.error('Failed to clear OG cache', e);
@@ -80,16 +90,30 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true });
   });
 
-  fastify.post('/api/folder/regenerate-og', { preHandler: requireAuth }, async (request, reply) => {
+  fastify.post<{ Body: { folder?: string } }>('/api/folder/regenerate-og', { preHandler: requireAuth }, async (request, reply) => {
     try {
+      const folder = request.body?.folder || '';
       const ogDir = path.resolve(process.env.MEDIA_ROOT || '/app/media', '../cache/og');
+      
       if (fs.existsSync(ogDir)) {
-        fs.rmSync(ogDir, { recursive: true, force: true });
-        fs.mkdirSync(ogDir, { recursive: true });
+        if (folder === '') {
+          // If it's the absolute root, clear everything
+          fs.rmSync(ogDir, { recursive: true, force: true });
+          fs.mkdirSync(ogDir, { recursive: true });
+        } else {
+          const safePathBase = folder.replace(/[^a-zA-Z0-9-_\.]/g, '_');
+          const files = fs.readdirSync(ogDir);
+          for (const file of files) {
+            // Delete if it matches this exact folder or any of its subfolders
+            if (file.endsWith(`_${safePathBase}.png`) || file.includes(`_${safePathBase}_`)) {
+              fs.unlinkSync(path.join(ogDir, file));
+            }
+          }
+        }
       }
       return reply.send({ success: true });
     } catch (e) {
-      console.error('Failed to clear OG cache', e);
+      console.error('Failed to clear specific OG cache', e);
       return reply.status(500).send({ error: 'Failed to clear cache' });
     }
   });
