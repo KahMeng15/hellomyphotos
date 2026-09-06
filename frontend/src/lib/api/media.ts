@@ -8,6 +8,7 @@ export interface MediaFile {
   exif_json?: any;
   aspectRatio?: number;
   folder_cover_id?: string | null;
+  is_transcoded?: boolean;
 }
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -112,6 +113,20 @@ export function getPreviewUrl(id: string, lowBandwidth: boolean = false, token?:
 
 export function getStreamUrl(id: string, token?: string): string {
   return `${API_BASE}/api/media/${id}/stream${token ? `?shareToken=${token}` : ''}`;
+}
+
+export async function repairMedia(id: string, token?: string): Promise<{ message: string }> {
+  const url = `${API_BASE}/api/media/${id}/repair${token ? `?shareToken=${token}` : ''}`;
+  const res = await fetch(url, { method: 'POST' });
+  if (!res.ok) throw new Error('Repair request failed');
+  return res.json();
+}
+
+export async function getMediaQueueStatus(id: string, token?: string): Promise<{ status: string, position?: number }> {
+  const url = `${API_BASE}/api/media/${id}/queue-status${token ? `?shareToken=${token}` : ''}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to fetch queue status');
+  return res.json();
 }
 
 export function getFolderZipUrl(folderPath: string, token?: string): string {

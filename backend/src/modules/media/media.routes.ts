@@ -1,6 +1,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fs from 'fs';
 import path from 'path';
+import util from 'util';
+import { execFile } from 'child_process';
+const execFileAsync = util.promisify(execFile);
 import { query } from '../../config/db';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { WatermarkService } from './watermark.service';
@@ -235,6 +238,77 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       reply.header('Content-Length', file.size_bytes);
       reply.header('Content-Type', file.mime_type);
       return sendThrottled(request, reply, fs.createReadStream(fullPath));
+    }
+  });
+
+  fastify.get<{ Params: { id: string }, Querystring: { shareToken?: string } }>('/api/media/:id/queue-status', async (request, reply) => {
+    const { id } = request.params;
+    if (!(await verifyMediaAccess(request, reply, id))) return;
+
+    // Fast DB check first
+    const res = await query(`SELECT is_transcoded FROM media_files WHERE id = $1`, [id]);
+    if (res.rows.length === 0) return reply.status(404).send({ error: 'File not found' });
+    if (res.rows[0].is_transcoded) return reply.send({ status: 'completed' });
+
+    const { videoQueue } = await import('../../queue/videoQueue');
+    
+    // Check active jobs
+    const activeJobs = await videoQueue.getActive();
+    const isActive = activeJobs.some(j => j.data?.mediaId === id);
+    if (isActive) {
+      return reply.send({ status: 'processing', position: 0 });
+    }
+
+    // Check waiting jobs
+    const waitingJobs = await videoQueue.getWaiting();
+    const waitingIndex = waitingJobs.findIndex(j => j.data?.mediaId === id);
+    if (waitingIndex !== -1) {
+      return reply.send({ status: 'queued', position: waitingIndex + 1 });
+    }
+
+    return reply.send({ status: 'unknown' });
+  });
+
+  fastify.post<{ Params: { id: string }, Querystring: { shareToken?: string } }>('/api/media/:id/repair', async (request, reply) => {
+    const { id } = request.params;
+    if (!(await verifyMediaAccess(request, reply, id))) return;
+
+    const result = await query(`
+      SELECT folder_path, file_name, mime_type, is_transcoded, transcoded_mp4_path, transcoded_webm_path 
+      FROM media_files WHERE id = $1`, 
+    [id]);
+    
+    if (result.rows.length === 0) return reply.status(404).send({ error: 'File not found' });
+    const file = result.rows[0];
+
+    if (!file.is_transcoded || !file.transcoded_mp4_path) {
+      return reply.send({ message: 'Already processing or not transcoded' });
+    }
+
+    try {
+      // Check if ffprobe can read the moov atom and valid headers
+      await execFileAsync('ffprobe', [file.transcoded_mp4_path]);
+      return reply.send({ message: 'File is valid, no repair needed' });
+    } catch (err: any) {
+      logger.warn(`Repair endpoint detected corrupted video for ${file.file_name}: ${err.message}`);
+      
+      // Reset database flags
+      await query(`UPDATE media_files SET has_480p = false, is_transcoded = false WHERE id = $1`, [id]);
+      
+      // Delete corrupted files
+      try { fs.unlinkSync(file.transcoded_mp4_path); } catch (e) {}
+      if (file.transcoded_webm_path) {
+        try { fs.unlinkSync(file.transcoded_webm_path); } catch (e) {}
+      }
+      
+      // Re-queue
+      const { videoQueue } = await import('../../queue/videoQueue');
+      const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/app/media');
+      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+      
+      await videoQueue.add('process-video', { mediaId: id, fullPath, mimeType: file.mime_type, skipCascade: true }, { priority: 1 }).catch(() => {});
+      
+      return reply.send({ message: 'Repair initiated' });
     }
   });
 }

@@ -28,7 +28,7 @@ async function isVaapiAvailable(): Promise<boolean> {
 
 // Transcode a single file to MP4 using VAAPI (h264_vaapi) if available, else libx264
 function transcodeToMp4(inputPath: string, outputPath: string, useVaapi: boolean): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const cmd = ffmpeg(inputPath).save(outputPath);
 
     if (useVaapi) {
@@ -38,9 +38,9 @@ function transcodeToMp4(inputPath: string, outputPath: string, useVaapi: boolean
         .outputOptions(['-vf format=nv12,hwupload', '-qp 23', '-movflags +faststart'])
         .on('end', () => resolve())
         .on('error', (err) => {
-          // VAAPI failed mid-way — re-run with software fallback
           console.warn(`[VideoService] VAAPI MP4 encode failed (${err.message}), retrying with libx264`);
-          transcodeToMp4Software(inputPath, outputPath).then(resolve).catch(() => resolve());
+          try { fs.unlinkSync(outputPath); } catch (e) {}
+          transcodeToMp4Software(inputPath, outputPath).then(resolve).catch(reject);
         });
     } else {
       cmd
@@ -48,36 +48,42 @@ function transcodeToMp4(inputPath: string, outputPath: string, useVaapi: boolean
         .outputOptions(['-preset veryfast', '-pix_fmt yuv420p', '-movflags +faststart', '-crf 23'])
         .on('end', () => resolve())
         .on('error', (err) => {
-          console.warn(`[VideoService] MP4 transcode warning for ${inputPath}:`, err.message);
-          resolve();
+          console.warn(`[VideoService] MP4 transcode failed for ${inputPath}:`, err.message);
+          try { fs.unlinkSync(outputPath); } catch (e) {}
+          reject(err);
         });
     }
   });
 }
 
 function transcodeToMp4Software(inputPath: string, outputPath: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
       .save(outputPath)
       .videoCodec('libx264')
       .outputOptions(['-preset veryfast', '-pix_fmt yuv420p', '-movflags +faststart', '-crf 23'])
       .on('end', () => resolve())
-      .on('error', () => resolve());
+      .on('error', (err) => {
+        console.warn(`[VideoService] Software MP4 transcode failed for ${inputPath}:`, err.message);
+        try { fs.unlinkSync(outputPath); } catch (e) {}
+        reject(err);
+      });
   });
 }
 
 // WebM transcoding is always software — VP9 VAAPI is unreliable.
 // Run sequentially AFTER MP4 to avoid CPU contention with VAAPI.
 function transcodeToWebm(inputPath: string, outputPath: string): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     ffmpeg(inputPath)
       .save(outputPath)
       .videoCodec('libvpx')
       .outputOptions(['-b:v 1M', '-deadline realtime', '-cpu-used 5'])
       .on('end', () => resolve())
       .on('error', (err) => {
-        console.warn(`[VideoService] WebM transcode warning for ${inputPath}:`, err.message);
-        resolve();
+        console.warn(`[VideoService] WebM transcode failed for ${inputPath}:`, err.message);
+        try { fs.unlinkSync(outputPath); } catch (e) {}
+        reject(err);
       });
   });
 }

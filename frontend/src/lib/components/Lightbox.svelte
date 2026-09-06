@@ -3,11 +3,12 @@
   import { env } from '$env/dynamic/public';
   import { fade, slide } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
-  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, getFaceThumbnailUrl, fetchMediaFaces } from '$lib/api/media';
+  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, getFaceThumbnailUrl, fetchMediaFaces, repairMedia, getMediaQueueStatus } from '$lib/api/media';
   import { createShare } from '$lib/api/shares';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import BlurhashImage from './BlurhashImage.svelte';
-  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut } from '@lucide/svelte';
+  import { toast } from '$lib/stores/toast';
+  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut, Clock } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { formatDate } from '$lib/utils/date';
 
@@ -138,7 +139,63 @@
     }
   });
 
+  let queueStatus = $state<{ status: string, position?: number } | null>(null);
+
+  async function checkQueue() {
+    if (!media?.id || media.is_transcoded) return;
+    try {
+      const status = await getMediaQueueStatus(media.id, token);
+      queueStatus = status;
+      if (status.status === 'completed') {
+        media.is_transcoded = true; // Triggers UI re-render
+      }
+    } catch (err) {
+      console.error('Queue check failed:', err);
+    }
+  }
+
+  $effect(() => {
+    let interval: any;
+    if (media?.mime_type.startsWith('video/') && media.is_transcoded === false) {
+      checkQueue();
+      interval = setInterval(checkQueue, 3000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  });
+
+  let isRepairing = $state(false);
+
+  async function handleVideoError(e: Event) {
+    const video = e.target as HTMLVideoElement;
+    if (video.error && (video.error.code === 3 || video.error.code === 4)) {
+      if (isRepairing) return;
+      isRepairing = true;
+      try {
+        toast.info('Video playback error detected. Checking for corruption...');
+        const res = await repairMedia(media.id, token);
+        if (res.message === 'Repair initiated') {
+          toast.success('Corrupted video detected! It has been queued for reprocessing.');
+          media.is_transcoded = false;
+        } else {
+          toast.warning(res.message || 'Video check completed.');
+        }
+      } catch (err) {
+        console.error('Repair failed:', err);
+      } finally {
+        isRepairing = false;
+      }
+    }
+  }
+
   // --- Zoom logic ---
+  let scale = $state(1);
+  let isZoomed = $derived(scale > 1);
+
+  $effect(() => {
+    // Other effects if any...
+  });
   let pzInstance: any = $state(null);
   let currentZoom = $state(1);
   let showZoomSlider = $state(false);
@@ -334,9 +391,38 @@
       <div class="content" onclick={(e) => e.stopPropagation()}>
         {#if media.mime_type.startsWith('video/')}
           {#key media.id}
-            <video controls autoplay playsinline class="media-element" crossorigin="use-credentials" src={getStreamUrl(media.id, token)}>
-              Your browser does not support the video tag.
-            </video>
+            {#if media.is_transcoded === false}
+              <div class="processing-video-container">
+                <img src={getPreviewUrl(media.id, false, token, 'lightbox')} alt={media.file_name} class="media-element" draggable="false" style="opacity: 0.3" />
+                <div class="processing-overlay">
+                  <Clock size={48} strokeWidth={2} />
+                  <div class="processing-text">
+                    <p>This video is being processed.</p>
+                    {#if queueStatus?.status === 'processing'}
+                      <p style="font-size: 0.85rem; color: #cbd5e1; margin-top: 4px;">Status: Currently Encoding...</p>
+                    {:else if queueStatus?.status === 'queued'}
+                      <p style="font-size: 0.85rem; color: #cbd5e1; margin-top: 4px;">Queue position: {queueStatus.position}</p>
+                    {:else if queueStatus?.status === 'completed'}
+                      <p style="font-size: 0.85rem; color: #10b981; margin-top: 4px;">Ready!</p>
+                    {:else}
+                      <p style="font-size: 0.85rem; color: #cbd5e1; margin-top: 4px;">Checking status...</p>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            {:else}
+              <video 
+                controls 
+                autoplay 
+                playsinline 
+                class="media-element" 
+                crossorigin="use-credentials" 
+                src={getStreamUrl(media.id, token)}
+                onerror={handleVideoError}
+              >
+                Your browser does not support the video tag.
+              </video>
+            {/if}
           {/key}
         {:else}
           {#key media.id}
@@ -736,6 +822,38 @@
     align-items: center;
     animation: fadeIn 0.4s ease both;
     touch-action: none;
+  }
+
+  .processing-video-container {
+    position: relative;
+    max-width: 100%;
+    max-height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+  }
+
+  .processing-overlay {
+    position: absolute;
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 12px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+    gap: 12px;
+    text-align: center;
+  }
+
+  .processing-text p {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.9);
   }
 
   .media-element {
