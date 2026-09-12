@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { execFile } from 'child_process';
 import path from 'path';
 import sharp from 'sharp';
 import ffmpeg from 'fluent-ffmpeg';
@@ -40,14 +41,17 @@ export class MediaService {
       let cleanupTmp = false;
       const tmpPngPath = path.join(CACHE_ROOT, `tmp_${mediaId}.png`);
 
-      const runFfmpegFallback = async () => {
-        console.warn(`[MediaService] Sharp failed on HEIC, falling back to ffmpeg for ${fullPath}`);
+      const runHeifConvertFallback = async () => {
+        console.warn(`[MediaService] Sharp failed on HEIC, falling back to heif-convert for ${fullPath}`);
+        
         await new Promise<void>((resolve, reject) => {
-          ffmpeg(fullPath)
-            .outputOptions(['-vframes 1', '-q:v 2'])
-            .save(tmpPngPath)
-            .on('end', () => resolve())
-            .on('error', (e) => reject(e));
+          execFile('heif-convert', [fullPath, tmpPngPath], (error) => {
+            if (error) {
+              reject(new Error(`heif-convert failed: ${error.message}`));
+            } else {
+              resolve();
+            }
+          });
         });
         cleanupTmp = true;
         return tmpPngPath as string | Buffer;
@@ -63,7 +67,7 @@ export class MediaService {
         out1080Done = true;
       } catch (err: any) {
         if (!isHeic) throw err;
-        sharpInput = await runFfmpegFallback();
+        sharpInput = await runHeifConvertFallback();
         await sharp(sharpInput, { unlimited: true })
           .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 80 })

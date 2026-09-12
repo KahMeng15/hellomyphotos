@@ -240,7 +240,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     if (!hasFolderAccess(request.user!, folder)) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
     }
-    await scannerQueue.add('scan-directory', { folder: folder });
+    await scannerQueue.add('scan-directory', { folderPath: folder });
     return reply.send({ success: true });
   });
 
@@ -255,7 +255,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     }
     
     // Trigger standard scan
-    await scannerQueue.add('scan-directory', { folder: folder });
+    await scannerQueue.add('scan-directory', { folderPath: folder });
     
     // Queue ML processing for all media files in this folder
     const result = await query(
@@ -297,7 +297,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       // M-6 Fix: Increased cooldown from 5s to 30s to reduce background scan churn
       // when multiple users are browsing folders concurrently.
       await redis.set(cooldownKey, '1', 'EX', 30); // 30 seconds
-      await scannerQueue.add('scan-directory', { folder });
+      await scannerQueue.add('scan-directory', { folderPath: folder });
     }
 
     // 3. Serve Directory Tree from DB

@@ -1,14 +1,10 @@
-FROM node:22-slim
+FROM node:22-alpine
 
-RUN echo "Acquire::Check-Valid-Until \"false\";\nAcquire::Check-Date \"false\";" > /etc/apt/apt.conf.d/10no--check-valid-until && \
-    apt-get update -o Acquire::AllowInsecureRepositories=true -o Acquire::AllowDowngradeToInsecureRepositories=true || true
-
-RUN apt-get install -y --allow-unauthenticated --no-install-recommends \
+RUN apk update && apk add --no-cache \
     ffmpeg \
-    libva-drm2 \
-    libva2 \
-    mesa-va-drivers \
-    && rm -rf /var/lib/apt/lists/*
+    libheif-tools \
+    libva \
+    mesa-va-gallium
 
 WORKDIR /app
 COPY package*.json ./
