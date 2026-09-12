@@ -66,7 +66,7 @@ const start = async () => {
 
       
       // Listen for kill signals from the API
-      import { redis } from './config/redis';
+      const { redis } = await import('./config/redis');
       const sub = redis.duplicate();
       sub.subscribe('worker:control');
       sub.on('message', (channel, message) => {
