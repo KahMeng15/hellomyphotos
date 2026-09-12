@@ -2,8 +2,8 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
 COPY . .
+RUN npm install --legacy-peer-deps
 # Vite inlines these at build time; provide defaults so the build works without CI vars.
 ARG VITE_API_URL=
 ARG PUBLIC_APP_DOMAIN=http://localhost:8000
