@@ -34,35 +34,16 @@ export class MediaService {
       let cleanupTmp = false;
       const tmpPngPath = path.join(CACHE_ROOT, `tmp_${mediaId}.png`);
 
-      try {
-        await sharp(fullPath).metadata();
-      } catch (err: any) {
-        if (err.message?.includes('Security limit exceeded') || err.message?.includes('heif: Invalid input')) {
-          console.warn(`[MediaService] Sharp failed for ${fullPath} due to HEIF limits. Falling back to FFmpeg...`);
-          const { execFile } = await import('child_process');
-          await new Promise<void>((resolve, reject) => {
-            // Use -f heif to force HEIF/HEIC image demuxer so FFmpeg doesn't
-            // try the mov/mp4 demuxer (which errors: "moov atom not found").
-            execFile('ffmpeg', ['-f', 'heif', '-i', fullPath, '-vframes', '1', '-f', 'image2', '-c:v', 'png', '-y', tmpPngPath], (error) => {
-              if (error) reject(error);
-              else resolve();
-            });
-          });
-          sharpInput = tmpPngPath;
-          cleanupTmp = true;
-        } else {
-          throw err;
-        }
-      }
+      await sharp(fullPath, { unlimited: true }).metadata();
 
       // 1. Generate 1080p WebP preview (max 1920x1080, quality 80)
-      await sharp(sharpInput)
+      await sharp(sharpInput, { unlimited: true })
         .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 80 })
         .toFile(out1080);
 
       // 2. Generate 480p WebP thumbnail (max 854x480, quality 65)
-      const buffer480 = await sharp(sharpInput)
+      const buffer480 = await sharp(sharpInput, { unlimited: true })
         .resize({ width: 854, height: 480, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 65 })
         .toBuffer();

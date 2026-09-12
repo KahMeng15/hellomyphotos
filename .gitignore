@@ -34,3 +34,4 @@ yarn-error.log*
 
 .agents/*
 docker-compose.prod.yml
+logs_backend prod/

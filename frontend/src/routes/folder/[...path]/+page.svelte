@@ -2,7 +2,7 @@
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import CoverImage from '$lib/components/CoverImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, regenerateImages, regenerateVideos } from '$lib/api/media';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
   import { getSortDate } from '$lib/utils/date';
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
@@ -157,6 +157,8 @@
 
   let isRescanning = $state(false);
   let isRescanningML = $state(false);
+  let isRegeneratingImages = $state(false);
+  let isRegeneratingVideos = $state(false);
 
   let showRevokeConfirm = $state(false);
   let revokeTargetToken = $state('');
@@ -181,6 +183,32 @@
       showAppAlert('Error', 'Failed to rescan folder');
     } finally {
       isRescanning = false;
+    }
+  }
+
+  async function handleRegenerateImages() {
+    try {
+      isRegeneratingImages = true;
+      const res = await regenerateImages(data.folderPath || '');
+      showAppAlert('Success', `Queued ${res.count} images for thumbnail regeneration.`);
+    } catch (e) {
+      console.error(e);
+      showAppAlert('Error', 'Failed to queue image regeneration');
+    } finally {
+      isRegeneratingImages = false;
+    }
+  }
+
+  async function handleRegenerateVideos() {
+    try {
+      isRegeneratingVideos = true;
+      const res = await regenerateVideos(data.folderPath || '');
+      showAppAlert('Success', `Queued ${res.count} videos for transcode and thumbnail regeneration.`);
+    } catch (e) {
+      console.error(e);
+      showAppAlert('Error', 'Failed to queue video regeneration');
+    } finally {
+      isRegeneratingVideos = false;
     }
   }
 
@@ -912,6 +940,14 @@
     
     <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRegenerateOG} disabled={isRegeneratingOG}>
       {isRegeneratingOG ? 'Regenerating...' : 'Regenerate WhatsApp / OG Images'}
+    </button>
+    
+    <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: #ff9999; width: 100%; justify-content: flex-start;" onclick={handleRegenerateImages} disabled={isRegeneratingImages}>
+      {isRegeneratingImages ? 'Queuing...' : 'Regenerate All Image Thumbnails'}
+    </button>
+    
+    <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: #ff9999; width: 100%; justify-content: flex-start;" onclick={handleRegenerateVideos} disabled={isRegeneratingVideos}>
+      {isRegeneratingVideos ? 'Queuing...' : 'Regenerate Video Transcodes & Thumbnails'}
     </button>
   </div>
 </Modal>

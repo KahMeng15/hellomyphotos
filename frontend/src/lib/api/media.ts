@@ -52,6 +52,28 @@ export async function setFolderDescription(folderPath: string, description: stri
   if (!res.ok) throw new Error('Failed to set folder description');
 }
 
+export async function regenerateImages(folderPath: string): Promise<{ count: number }> {
+  const res = await fetch(`${API_BASE}/api/folder/regenerate-images`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder: folderPath }),
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error('Failed to queue image regeneration');
+  return res.json();
+}
+
+export async function regenerateVideos(folderPath: string): Promise<{ count: number }> {
+  const res = await fetch(`${API_BASE}/api/folder/regenerate-videos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder: folderPath }),
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error('Failed to queue video regeneration');
+  return res.json();
+}
+
 export async function rescanFolder(folderPath: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/folder/rescan`, {
     method: 'POST',

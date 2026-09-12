@@ -137,6 +137,58 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true });
   });
 
+  fastify.post<{ Body: { folder: string } }>('/api/folder/regenerate-images', { preHandler: requireAuth }, async (request, reply) => {
+    const { folder } = request.body;
+
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot trigger scans' });
+    }
+    if (!hasFolderAccess(request.user!, folder)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+
+    const result = await query(`
+      UPDATE media_files 
+      SET has_480p = false, has_1080p = false 
+      WHERE (folder_path = $1 OR folder_path LIKE $2) 
+      AND mime_type LIKE 'image/%'
+      RETURNING id, folder_path, file_name, mime_type
+    `, [folder, `${folder}/%`]);
+
+    for (const row of result.rows) {
+      const fullPath = path.join(MEDIA_ROOT, row.folder_path, row.file_name);
+      await thumbnailQueue.add('generate-thumbnail', { mediaId: row.id, fullPath, mimeType: row.mime_type }, { priority: 2 }).catch(() => {});
+    }
+
+    return reply.send({ success: true, count: result.rows.length });
+  });
+
+  fastify.post<{ Body: { folder: string } }>('/api/folder/regenerate-videos', { preHandler: requireAuth }, async (request, reply) => {
+    const { folder } = request.body;
+
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot trigger scans' });
+    }
+    if (!hasFolderAccess(request.user!, folder)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+
+    const result = await query(`
+      UPDATE media_files 
+      SET has_480p = false, has_1080p = false, is_transcoded = false
+      WHERE (folder_path = $1 OR folder_path LIKE $2) 
+      AND mime_type LIKE 'video/%'
+      RETURNING id, folder_path, file_name, mime_type
+    `, [folder, `${folder}/%`]);
+
+    for (const row of result.rows) {
+      const fullPath = path.join(MEDIA_ROOT, row.folder_path, row.file_name);
+      await videoQueue.add('process-video', { mediaId: row.id, fullPath, mimeType: row.mime_type, skipCascade: true }, { priority: 2 }).catch(() => {});
+    }
+
+    return reply.send({ success: true, count: result.rows.length });
+  });
+
   fastify.post<{ Body: { folder: string } }>('/api/folder/rescan', { preHandler: requireAuth }, async (request, reply) => {
     const { folder } = request.body;
 
