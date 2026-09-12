@@ -212,6 +212,7 @@
       });
 
       pzInstance.on('transform', () => {
+        if (!pzInstance) return;
         const transform = pzInstance.getTransform();
         currentZoom = transform.scale;
         if (currentZoom > 1.05) {

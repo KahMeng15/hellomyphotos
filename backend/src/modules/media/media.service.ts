@@ -41,7 +41,9 @@ export class MediaService {
           console.warn(`[MediaService] Sharp failed for ${fullPath} due to HEIF limits. Falling back to FFmpeg...`);
           const { execFile } = await import('child_process');
           await new Promise<void>((resolve, reject) => {
-            execFile('ffmpeg', ['-i', fullPath, '-vframes', '1', '-c:v', 'png', '-y', tmpPngPath], (error) => {
+            // Use -f heif to force HEIF/HEIC image demuxer so FFmpeg doesn't
+            // try the mov/mp4 demuxer (which errors: "moov atom not found").
+            execFile('ffmpeg', ['-f', 'heif', '-i', fullPath, '-vframes', '1', '-f', 'image2', '-c:v', 'png', '-y', tmpPngPath], (error) => {
               if (error) reject(error);
               else resolve();
             });

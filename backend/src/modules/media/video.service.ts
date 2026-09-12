@@ -35,6 +35,7 @@ function transcodeToMp4(inputPath: string, outputPath: string, useVaapi: boolean
       cmd
         .inputOptions(['-hwaccel vaapi', '-hwaccel_device /dev/dri/renderD128'])
         .videoCodec('h264_vaapi')
+        .audioCodec('aac')
         .outputOptions(['-vf format=nv12,hwupload', '-qp 23', '-movflags +faststart'])
         .on('end', () => resolve())
         .on('error', (err) => {
@@ -45,6 +46,7 @@ function transcodeToMp4(inputPath: string, outputPath: string, useVaapi: boolean
     } else {
       cmd
         .videoCodec('libx264')
+        .audioCodec('aac')
         .outputOptions(['-preset veryfast', '-pix_fmt yuv420p', '-movflags +faststart', '-crf 23'])
         .on('end', () => resolve())
         .on('error', (err) => {
@@ -61,7 +63,16 @@ function transcodeToMp4Software(inputPath: string, outputPath: string): Promise<
     ffmpeg(inputPath)
       .save(outputPath)
       .videoCodec('libx264')
-      .outputOptions(['-preset veryfast', '-pix_fmt yuv420p', '-movflags +faststart', '-crf 23'])
+      .audioCodec('aac')
+      .outputOptions([
+        '-preset veryfast',
+        '-pix_fmt yuv420p',
+        '-movflags +faststart',
+        '-crf 23',
+        // Scale to max 1920px wide / 1080px tall, preserve aspect ratio,
+        // ensure width and height are divisible by 2 (required by libx264)
+        '-vf scale=\'min(1920,iw)\':\'min(1080,ih)\':force_original_aspect_ratio=decrease,scale=\'trunc(iw/2)*2\':\'trunc(ih/2)*2\''
+      ])
       .on('end', () => resolve())
       .on('error', (err) => {
         console.warn(`[VideoService] Software MP4 transcode failed for ${inputPath}:`, err.message);
@@ -106,9 +117,11 @@ export class VideoService {
       let bHash: string | null = null;
 
       // 1. Extract a frame thumbnail using ffmpeg
+      // Use ?x480 to scale to 480px height while preserving the native aspect ratio.
+      // This prevents portrait/vertical videos from being squashed into a landscape frame.
       await new Promise<void>((resolve) => {
         ffmpeg(fullPath)
-          .screenshots({ timestamps: ['10%'], filename: tempFrameFile, folder: dir480, size: '854x480' })
+          .screenshots({ timestamps: ['10%'], filename: tempFrameFile, folder: dir480, size: '?x480' })
           .on('end', () => resolve())
           .on('error', (err) => {
             console.warn(`[VideoService] Screenshot extraction warning for ${fullPath}:`, err.message);

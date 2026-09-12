@@ -403,7 +403,7 @@
   {/each}
 </div>
 
-{#if selectedMediaIndex !== null}
+{#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
   <Lightbox
     media={sortedFiles[selectedMediaIndex]}
     onclose={closeLightbox}
