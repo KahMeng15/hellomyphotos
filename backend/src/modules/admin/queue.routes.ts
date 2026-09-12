@@ -235,6 +235,10 @@ export async function queueRoutes(fastify: FastifyInstance) {
     if (!q) return reply.status(404).send({ error: `Queue '${name}' not found` });
     await q.pause();
     await redis.del('queue:stats:cache');
+    
+    // Immediately terminate any active processing in the background worker
+    await redis.publish('worker:control', 'kill');
+
     return reply.send({ success: true });
   });
 

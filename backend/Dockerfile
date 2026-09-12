@@ -1,15 +1,22 @@
-FROM node:22-alpine
+FROM ubuntu:24.04
 
-RUN apk update && apk add --no-cache \
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get update && apt-get install -y \
+    nodejs \
     ffmpeg \
-    libheif-tools \
-    libva \
-    mesa-va-gallium
+    libheif-examples \
+    libva-drm2 \
+    libva2 \
+    mesa-va-drivers \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev \
-    && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+    && rm -rf /root/.npm
 COPY . .
 EXPOSE 3000
 CMD ["node_modules/.bin/tsx", "src/server.ts"]

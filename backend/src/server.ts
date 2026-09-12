@@ -64,6 +64,20 @@ const start = async () => {
       let workerProc: ReturnType<typeof fork> | null = null;
       let isShuttingDown = false;
 
+      
+      // Listen for kill signals from the API
+      import { redis } from './config/redis';
+      const sub = redis.duplicate();
+      sub.subscribe('worker:control');
+      sub.on('message', (channel, message) => {
+        if (channel === 'worker:control' && message === 'kill') {
+          console.log('Received remote kill signal via Redis! Terminating worker process to abort jobs...');
+          if (workerProc) {
+            workerProc.kill('SIGKILL');
+          }
+        }
+      });
+      
       const spawnWorker = () => {
         if (isShuttingDown || process.env.DISABLE_WORKER === 'true') {
           if (process.env.DISABLE_WORKER === 'true') {
