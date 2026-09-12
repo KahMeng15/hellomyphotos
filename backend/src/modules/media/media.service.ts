@@ -36,37 +36,43 @@ export class MediaService {
       if (isHeic) {
         sharpInput = await fs.promises.readFile(fullPath);
       }
-      
+
       let cleanupTmp = false;
       const tmpPngPath = path.join(CACHE_ROOT, `tmp_${mediaId}.png`);
 
-      try {
-        await sharp(sharpInput, { unlimited: true }).metadata();
-      } catch (err: any) {
-        if (isHeic) {
-          console.warn(`[MediaService] Sharp failed on HEIC (${err.message}), attempting ffmpeg fallback for ${fullPath}`);
-          await new Promise<void>((resolve, reject) => {
-            
-            ffmpeg(fullPath)
-              .outputOptions(['-vframes 1', '-q:v 2'])
-              .save(tmpPngPath)
-              .on('end', () => resolve())
-              .on('error', (e) => reject(e));
-          });
-          cleanupTmp = true;
-          sharpInput = tmpPngPath;
-        } else {
-          throw err;
-        }
-      }
+      const runFfmpegFallback = async () => {
+        console.warn(`[MediaService] Sharp failed on HEIC, falling back to ffmpeg for ${fullPath}`);
+        await new Promise<void>((resolve, reject) => {
+          ffmpeg(fullPath)
+            .outputOptions(['-vframes 1', '-q:v 2'])
+            .save(tmpPngPath)
+            .on('end', () => resolve())
+            .on('error', (e) => reject(e));
+        });
+        cleanupTmp = true;
+        return tmpPngPath as string | Buffer;
+      };
 
       // 1. Generate 1080p WebP preview (max 1920x1080, quality 80)
-      await sharp(sharpInput, { unlimited: true })
-        .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
-        .webp({ quality: 80 })
-        .toFile(out1080);
+      let out1080Done = false;
+      try {
+        await sharp(sharpInput, { unlimited: true })
+          .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: 80 })
+          .toFile(out1080);
+        out1080Done = true;
+      } catch (err: any) {
+        if (!isHeic) throw err;
+        sharpInput = await runFfmpegFallback();
+        await sharp(sharpInput, { unlimited: true })
+          .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: 80 })
+          .toFile(out1080);
+        out1080Done = true;
+      }
 
       // 2. Generate 480p WebP thumbnail (max 854x480, quality 65)
+      // Note: if ffmpeg fallback already ran, sharpInput is now the PNG path
       const buffer480 = await sharp(sharpInput, { unlimited: true })
         .resize({ width: 854, height: 480, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 65 })
