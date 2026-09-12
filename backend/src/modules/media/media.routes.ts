@@ -290,7 +290,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       await execFileAsync('ffprobe', [file.transcoded_mp4_path]);
       return reply.send({ message: 'File is valid, no repair needed' });
     } catch (err: any) {
-      logger.warn(`Repair endpoint detected corrupted video for ${file.file_name}: ${err.message}`);
+      console.warn(`Repair endpoint detected corrupted video for ${file.file_name}: ${err.message}`);
       
       // Reset database flags
       await query(`UPDATE media_files SET has_480p = false, is_transcoded = false WHERE id = $1`, [id]);

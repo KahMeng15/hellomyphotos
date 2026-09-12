@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
+import ffmpeg from 'fluent-ffmpeg';
 import { encode } from 'blurhash';
 import { query } from '../../config/db';
 import { VideoService } from './video.service';
@@ -30,11 +31,34 @@ export class MediaService {
       const out1080 = path.join(dir1080, `${mediaId}.webp`);
       const out480 = path.join(dir480, `${mediaId}.webp`);
 
-      let sharpInput: string = fullPath;
+      let sharpInput: string | Buffer = fullPath;
+      const isHeic = fullPath.toLowerCase().endsWith('.heic') || fullPath.toLowerCase().endsWith('.heif');
+      if (isHeic) {
+        sharpInput = await fs.promises.readFile(fullPath);
+      }
+      
       let cleanupTmp = false;
       const tmpPngPath = path.join(CACHE_ROOT, `tmp_${mediaId}.png`);
 
-      await sharp(fullPath, { unlimited: true }).metadata();
+      try {
+        await sharp(sharpInput, { unlimited: true }).metadata();
+      } catch (err: any) {
+        if (isHeic) {
+          console.warn(`[MediaService] Sharp failed on HEIC (${err.message}), attempting ffmpeg fallback for ${fullPath}`);
+          await new Promise<void>((resolve, reject) => {
+            
+            ffmpeg(fullPath)
+              .outputOptions(['-vframes 1', '-q:v 2'])
+              .save(tmpPngPath)
+              .on('end', () => resolve())
+              .on('error', (e) => reject(e));
+          });
+          cleanupTmp = true;
+          sharpInput = tmpPngPath;
+        } else {
+          throw err;
+        }
+      }
 
       // 1. Generate 1080p WebP preview (max 1920x1080, quality 80)
       await sharp(sharpInput, { unlimited: true })

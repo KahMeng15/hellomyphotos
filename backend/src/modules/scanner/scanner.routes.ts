@@ -14,8 +14,8 @@ import { logger } from '../../utils/logger';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
-function profileLabel(folderPath: string, step: string) {
-  return `[FOLDER_PROFILE] ${JSON.stringify(folderPath)} :: ${step}`;
+function profileLabel(folder: string, step: string) {
+  return `[FOLDER_PROFILE] ${JSON.stringify(folder)} :: ${step}`;
 }
 
 export async function scannerRoutes(fastify: FastifyInstance) {
@@ -70,11 +70,11 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     try {
       const ogDir = path.resolve(process.env.MEDIA_ROOT || '/app/media', '../cache/og');
       if (fs.existsSync(ogDir)) {
-        if (folderPath === '') {
+        if (folder === '') {
           fs.rmSync(ogDir, { recursive: true, force: true });
           fs.mkdirSync(ogDir, { recursive: true });
         } else {
-          const safePathBase = folderPath.replace(/[^a-zA-Z0-9-_\.]/g, '_');
+          const safePathBase = folder.replace(/[^a-zA-Z0-9-_\.]/g, '_');
           const files = fs.readdirSync(ogDir);
           for (const file of files) {
             if (file.endsWith(`_${safePathBase}.png`) || file.includes(`_${safePathBase}_`)) {
@@ -240,7 +240,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     if (!hasFolderAccess(request.user!, folder)) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
     }
-    await scannerQueue.add('scan-directory', { folderPath: folder });
+    await scannerQueue.add('scan-directory', { folder: folder });
     return reply.send({ success: true });
   });
 
@@ -255,7 +255,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     }
     
     // Trigger standard scan
-    await scannerQueue.add('scan-directory', { folderPath: folder });
+    await scannerQueue.add('scan-directory', { folder: folder });
     
     // Queue ML processing for all media files in this folder
     const result = await query(
@@ -276,19 +276,19 @@ export async function scannerRoutes(fastify: FastifyInstance) {
 
   fastify.get<{ Params: { '*': string } }>('/api/folder/*', { preHandler: requireAuth }, async (request, reply) => {
     // URL decode the path param and sanitize
-    const folderPath = decodeURIComponent(request.params['*'] || '');
+    const folder = decodeURIComponent(request.params['*'] || '');
     const t0 = performance.now();
     
-    if (!canBrowseFolder(request.user!, folderPath)) {
+    if (!canBrowseFolder(request.user!, folder)) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
     }
 
     const mark = (name: string) => {
-      logger.info(profileLabel(folderPath, name), { ms: Math.round(performance.now() - t0) });
+      logger.info(profileLabel(folder, name), { ms: Math.round(performance.now() - t0) });
     };
     
     // 1. Query Redis for Cooldown
-    const cooldownKey = `scan_cooldown:${folderPath}`;
+    const cooldownKey = `scan_cooldown:${folder}`;
     const exists = await redis.exists(cooldownKey);
     mark('1_redis_cooldown');
     
@@ -297,16 +297,16 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       // M-6 Fix: Increased cooldown from 5s to 30s to reduce background scan churn
       // when multiple users are browsing folders concurrently.
       await redis.set(cooldownKey, '1', 'EX', 30); // 30 seconds
-      await scannerQueue.add('scan-directory', { folderPath });
+      await scannerQueue.add('scan-directory', { folder });
     }
 
     // 3. Serve Directory Tree from DB
     const result = await query(
       `SELECT * FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
-      [folderPath]
+      [folder]
     );
     let files = result.rows;
-    if (!hasFolderAccess(request.user!, folderPath)) {
+    if (!hasFolderAccess(request.user!, folder)) {
       files = []; // Cannot see files in ancestor folders
     } else {
       // Prioritize processing for files in this actively navigated folder
@@ -333,7 +333,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     mark('2_db_files');
 
     // 4. Dynamically list subdirectories and find their cover images
-    const fullPath = path.join(MEDIA_ROOT, folderPath);
+    const fullPath = path.join(MEDIA_ROOT, folder);
     let directories: { name: string, cover_id: string | null, blurhash: string | null }[] = [];
     let hostError: string | null = null;
     try {
@@ -342,12 +342,12 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       const dirNames = items.filter(item => item.isDirectory()).map(item => item.name);
         
         let validDirNames = dirNames.filter(name => {
-          const subPath = folderPath ? `${folderPath}/${name}` : name;
+          const subPath = folder ? `${folder}/${name}` : name;
           return canBrowseFolder(request.user!, subPath);
         });
         
         directories = await Promise.all(validDirNames.map(async (name) => {
-          const subPath = folderPath ? `${folderPath}/${name}` : name;
+          const subPath = folder ? `${folder}/${name}` : name;
           
           // Check if there is a custom cover OR cached auto cover in folder_settings
           const customCoverRes = await query(`
@@ -446,11 +446,11 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     let folderCoverImgWidth: number | null = null;
     let folderCoverImgHeight: number | null = null;
     let folderDescription = '';
-    if (folderPath !== null && folderPath !== undefined) {
+    if (folder !== null && folder !== undefined) {
       const currentFolderSettingsRes = await query(`
         SELECT cover_media_id, auto_cover_media_id, description 
         FROM folder_settings WHERE folder_path = $1
-      `, [folderPath]);
+      `, [folder]);
       if (currentFolderSettingsRes.rows.length > 0) {
         folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id || currentFolderSettingsRes.rows[0].auto_cover_media_id || null;
         folderDescription = currentFolderSettingsRes.rows[0].description || '';
@@ -460,12 +460,12 @@ export async function scannerRoutes(fastify: FastifyInstance) {
 
     if (!folderCoverId) {
       // Check if processing is active for the current folder
-      const isProcessingRes = await query(`SELECT 1 FROM media_files WHERE folder_path = $1 AND blurhash IS NULL LIMIT 1`, [folderPath]);
+      const isProcessingRes = await query(`SELECT 1 FROM media_files WHERE folder_path = $1 AND blurhash IS NULL LIMIT 1`, [folder]);
       
       let fallbackResult;
       if (isProcessingRes.rows.length > 0) {
         // Active processing: fast random image
-        fallbackResult = await query(`SELECT id FROM media_files WHERE folder_path = $1 ORDER BY id ASC LIMIT 1`, [folderPath]);
+        fallbackResult = await query(`SELECT id FROM media_files WHERE folder_path = $1 ORDER BY id ASC LIMIT 1`, [folder]);
       } else {
         // Processing finished: smart logic
         fallbackResult = await query(`
@@ -480,14 +480,14 @@ export async function scannerRoutes(fastify: FastifyInstance) {
           WHERE m.folder_path = $1
           ORDER BY is_landscape DESC, face_count DESC, m.id ASC
           LIMIT 1
-        `, [folderPath]);
+        `, [folder]);
         
-        if (fallbackResult.rows.length > 0 && folderPath) {
+        if (fallbackResult.rows.length > 0 && folder) {
            await query(`
               INSERT INTO folder_settings (folder_path, auto_cover_media_id)
               VALUES ($1, $2)
               ON CONFLICT (folder_path) DO UPDATE SET auto_cover_media_id = EXCLUDED.auto_cover_media_id
-           `, [folderPath, fallbackResult.rows[0].id]);
+           `, [folder, fallbackResult.rows[0].id]);
         }
       }
       
@@ -551,13 +551,13 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       SELECT COUNT(*) as count 
       FROM media_files 
       WHERE (folder_path = $1 OR folder_path LIKE $1 || '/%') AND (exif_json IS NULL OR blurhash IS NULL)
-    `, [folderPath || '']);
+    `, [folder || '']);
     const isProcessing = parseInt(processingRes.rows[0].count) > 0;
     mark('6_processing_count');
     mark('total');
 
     return reply.send({
-      folderPath,
+      folder,
       isProcessing,
       folderCoverId,
       folderCoverBoundingBox,
