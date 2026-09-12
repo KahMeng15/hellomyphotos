@@ -58,26 +58,25 @@ export class MediaService {
       };
 
       // 1. Generate 1080p WebP preview (max 1920x1080, quality 80)
-      let out1080Done = false;
+      let preview1080: Buffer;
       try {
-        await sharp(sharpInput, { unlimited: true })
+        preview1080 = await sharp(sharpInput, { unlimited: true })
           .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 80 })
-          .toFile(out1080);
-        out1080Done = true;
+          .toBuffer();
       } catch (err: any) {
         if (!isHeic) throw err;
         sharpInput = await runHeifConvertFallback();
-        await sharp(sharpInput, { unlimited: true })
+        preview1080 = await sharp(sharpInput, { unlimited: true })
           .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 80 })
-          .toFile(out1080);
-        out1080Done = true;
+          .toBuffer();
       }
+      await fs.promises.writeFile(out1080, preview1080);
 
       // 2. Generate 480p WebP thumbnail (max 854x480, quality 65)
-      // Note: if ffmpeg fallback already ran, sharpInput is now the PNG path
-      const buffer480 = await sharp(sharpInput, { unlimited: true })
+      // Downscale the already-decoded preview instead of decoding the source again.
+      const buffer480 = await sharp(preview1080, { unlimited: true })
         .resize({ width: 854, height: 480, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 65 })
         .toBuffer();

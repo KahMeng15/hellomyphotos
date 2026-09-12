@@ -18,9 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libheif1 \
         libheif-examples \
         libheif-plugin-libde265 \
-        libheif-plugin-dav1d \
-        libheif-plugin-aomdec \
-        libheif-plugin-aomenc \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

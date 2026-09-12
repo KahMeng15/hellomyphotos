@@ -35,8 +35,6 @@ const __dirname = path.dirname(__filename);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-import { getContainerCpuCount } from './config/cpu';
-
 const start = async () => {
   try {
     if (process.env.IS_WORKER === 'true') {
@@ -56,9 +54,6 @@ const start = async () => {
         logger.info(`API disabled via DISABLE_API=true. Running worker orchestrator only.`);
       }
       
-      const maxCpuCores = getContainerCpuCount();
-      const cpuConcurrency = String(Math.max(1, maxCpuCores - 1)); // Leave 1 core for OS/DB
-      const ioConcurrency = String(Math.max(1, Math.floor(maxCpuCores / 2))); // Don't thrash disk too hard
       const mlConcurrency = '1'; // ML models take tons of RAM, keep it strictly to 1
 
       let workerProc: ReturnType<typeof fork> | null = null;
@@ -91,13 +86,13 @@ const start = async () => {
             ...process.env, 
             IS_WORKER: 'true',
             SCANNER_CONCURRENCY: process.env.SCANNER_CONCURRENCY || '1', 
-            METADATA_CONCURRENCY: process.env.METADATA_CONCURRENCY || ioConcurrency,
-            THUMBNAIL_CONCURRENCY: process.env.THUMBNAIL_CONCURRENCY || cpuConcurrency,
-            VIDEO_CONCURRENCY: process.env.VIDEO_CONCURRENCY || cpuConcurrency,
+            METADATA_CONCURRENCY: process.env.METADATA_CONCURRENCY || '1',
+            THUMBNAIL_CONCURRENCY: process.env.THUMBNAIL_CONCURRENCY || '1',
+            VIDEO_CONCURRENCY: process.env.VIDEO_CONCURRENCY || '1',
             SMART_SEARCH_CONCURRENCY: process.env.SMART_SEARCH_CONCURRENCY || mlConcurrency,
             FACE_DETECTION_CONCURRENCY: process.env.FACE_DETECTION_CONCURRENCY || mlConcurrency,
             FACIAL_RECOGNITION_CONCURRENCY: process.env.FACIAL_RECOGNITION_CONCURRENCY || '1', 
-            FACE_THUMBNAIL_CONCURRENCY: process.env.FACE_THUMBNAIL_CONCURRENCY || cpuConcurrency
+            FACE_THUMBNAIL_CONCURRENCY: process.env.FACE_THUMBNAIL_CONCURRENCY || '1'
           },
           execArgv: process.execArgv // preserve tsx loader in dev
         });
