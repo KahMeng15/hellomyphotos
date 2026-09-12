@@ -1,16 +1,26 @@
-FROM ubuntu:24.04
+FROM node:22-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
-    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get update && apt-get install -y \
-    nodejs \
-    ffmpeg \
-    libheif-examples \
-    libva-drm2 \
-    libva2 \
-    mesa-va-drivers \
+# Install ffmpeg and a modern libheif (v1.19+) from Debian Trixie backport.
+# node:22-slim is Debian Bookworm; Bookworm's libheif (v1.15) is too old for
+# iOS 17 HEIC files. Pinning only the libheif packages from Trixie keeps the
+# image small while getting the decoder support we need.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ffmpeg \
+        libva-drm2 \
+        libva2 \
+    && echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        -t trixie \
+        libheif1 \
+        libheif-examples \
+        libheif-plugin-libde265 \
+        libheif-plugin-dav1d \
+        libheif-plugin-aomdec \
+        libheif-plugin-aomenc \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
