@@ -44,15 +44,26 @@ async function generateFaceThumbnailAsync(personId: string, face: any, fullPath:
   try {
     await faceThumbSemaphore.acquire();
     if (fs.existsSync(cachedPath)) return;
+    
+    let sourcePath = fullPath;
+    const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
+    const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
+    if (fs.existsSync(cache480)) {
+      sourcePath = cache480;
+    } else if (fs.existsSync(cache1080)) {
+      sourcePath = cache1080;
+    }
+
     const crop = parseBoundingBox(face.bounding_box);
-    const meta = await sharp(fullPath).metadata();
+    const meta = await sharp(sourcePath).metadata();
     const imgW = meta.width || 1;
     const imgH = meta.height || 1;
     crop.left = Math.min(crop.left, imgW - 1);
     crop.top = Math.min(crop.top, imgH - 1);
     crop.width = Math.min(crop.width, imgW - crop.left);
     crop.height = Math.min(crop.height, imgH - crop.top);
-    await sharp(fullPath)
+    
+    await sharp(sourcePath)
       .extract(crop)
       .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
       .webp({ quality: 75 })
@@ -310,9 +321,11 @@ export async function mlRoutes(fastify: FastifyInstance) {
       if (mediaResult.rows.length > 0) {
         const face = mediaResult.rows[0];
         const fullPath = path.join(MEDIA_ROOT, face.folder_path, face.file_name);
-        if (fs.existsSync(fullPath)) {
+        const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
+        const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
+        if (fs.existsSync(fullPath) || fs.existsSync(cache480) || fs.existsSync(cache1080)) {
           faceToUse = face;
-          fullPathToUse = fullPath;
+          fullPathToUse = fullPath; // `generateFaceThumbnailAsync` handles resolving the actual path
         }
       }
     }
@@ -331,9 +344,11 @@ export async function mlRoutes(fastify: FastifyInstance) {
       if (repResult.rows.length > 0) {
         const face = repResult.rows[0];
         const fullPath = path.join(MEDIA_ROOT, face.folder_path, face.file_name);
-        if (fs.existsSync(fullPath)) {
+        const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
+        const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
+        if (fs.existsSync(fullPath) || fs.existsSync(cache480) || fs.existsSync(cache1080)) {
           faceToUse = face;
-          fullPathToUse = fullPath;
+          fullPathToUse = fullPath; // `generateFaceThumbnailAsync` handles resolving the actual path
         }
       }
     }
