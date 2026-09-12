@@ -2,8 +2,12 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
+# Delete the lock file so npm re-resolves optional native binaries for the
+# current platform (linux-musl). The lock file was generated on macOS and only
+# contains @rollup/rollup-darwin-arm64, causing the linux-x64-musl binary to
+# be skipped and breaking `vite build` inside the container.
+RUN rm -f package-lock.json && npm install --legacy-peer-deps
 COPY . .
-RUN npm install --legacy-peer-deps
 # Vite inlines these at build time; provide defaults so the build works without CI vars.
 ARG VITE_API_URL=
 ARG PUBLIC_APP_DOMAIN=http://localhost:8000
@@ -18,6 +22,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package*.json ./
 RUN apk upgrade --no-cache \
+    && rm -f package-lock.json \
     && npm install --omit=dev --legacy-peer-deps \
     && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=builder /app/build build/
