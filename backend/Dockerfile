@@ -12,7 +12,7 @@ RUN apt-get install -y --allow-unauthenticated --no-install-recommends \
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev \
+RUN npm install --omit=dev \
     && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY . .
 EXPOSE 3000
