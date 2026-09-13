@@ -67,6 +67,8 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
+          limit-severities-for-sarif: true
+          hide-vulnerabilities-with-no-workaround: true
           ignore-unfixed: true
           exit-code: '1'
 

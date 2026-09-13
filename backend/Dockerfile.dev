@@ -20,7 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libheif-examples \
         libheif-plugin-libde265 \
         libheif-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/apt/sources.list.d/trixie.list \
+    && echo 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\nNAME="Debian GNU/Linux"\nVERSION_ID="12"\nVERSION="12 (bookworm)"\nVERSION_CODENAME=bookworm\nID=debian' > /etc/os-release
 
 WORKDIR /app
 COPY package*.json ./
