@@ -1,28 +1,20 @@
-FROM node:22-slim
+FROM node:22-trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install ffmpeg and a modern libheif (v1.19+) from Debian Trixie backport.
-# node:22-slim is Debian Bookworm; Bookworm's libheif (v1.15) is too old for
-# iOS 17 HEIC files. Pinning only the libheif packages from Trixie keeps the
-# image small while getting the decoder support we need.
+# We use node:22-trixie-slim as the base image so we get a modern libheif (v1.19+) natively,
+# which is required to decode iOS 17 HEIC files.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
         libva-drm2 \
         libva2 \
         g++ \
-    && echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        -t trixie \
         libheif1 \
         libheif-examples \
         libheif-plugin-libde265 \
         libheif-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -f /etc/apt/sources.list.d/trixie.list \
-    && echo 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\nNAME="Debian GNU/Linux"\nVERSION_ID="12"\nVERSION="12 (bookworm)"\nVERSION_CODENAME=bookworm\nID=debian' > /etc/os-release
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package*.json ./
