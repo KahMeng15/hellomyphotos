@@ -113,7 +113,7 @@ export class MLService {
       const entriesJson = JSON.stringify({
         "facial-recognition": {
           "recognition": { "modelName": "buffalo_l" },
-          "detection": { "modelName": "buffalo_l" }
+          "detection": { "modelName": "buffalo_l", "minScore": 0.7 }
         }
       });
 
