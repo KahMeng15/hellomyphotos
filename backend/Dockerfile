@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev \
-    && rm -rf /root/.npm
+    && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx
 COPY . .
 RUN g++ -O2 -o /usr/local/bin/heic-primary-decode src/utils/heic_primary_decode.cpp -lheif
 EXPOSE 3000

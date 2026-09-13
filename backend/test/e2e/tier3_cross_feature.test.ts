@@ -79,8 +79,8 @@ export async function runTier3Tests(): Promise<{ passed: number; failed: number;
     const res = await fetch(`${url}/api/admin/queues`, { headers });
     if (!res.ok) throw new Error('Failed to fetch admin queues endpoint');
     const data = await res.json();
-    if (!data.queues || Object.keys(data.queues).length !== 8) {
-      throw new Error(`Expected 8 queues in response, found ${Object.keys(data.queues || {}).length}`);
+    if (!data.queues || Object.keys(data.queues).length !== 9) {
+      throw new Error(`Expected 9 queues in response, found ${Object.keys(data.queues || {}).length}`);
     }
   });
 
