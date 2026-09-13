@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         libva-drm2 \
         libva2 \
+        g++ \
     && echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -18,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libheif1 \
         libheif-examples \
         libheif-plugin-libde265 \
+        libheif-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -25,5 +27,6 @@ COPY package*.json ./
 RUN npm install --omit=dev \
     && rm -rf /root/.npm
 COPY . .
+RUN g++ -O2 -o /usr/local/bin/heic-primary-decode src/utils/heic_primary_decode.cpp -lheif
 EXPOSE 3000
 CMD ["node_modules/.bin/tsx", "src/server.ts"]

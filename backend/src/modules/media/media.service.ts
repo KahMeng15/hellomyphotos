@@ -39,22 +39,21 @@ export class MediaService {
       }
 
       let cleanupTmp = false;
-      const tmpPngPath = path.join(CACHE_ROOT, `tmp_${mediaId}.png`);
+      const tmpPpmPath = path.join(CACHE_ROOT, `tmp_${mediaId}.ppm`);
 
-      const runHeifConvertFallback = async () => {
-        console.warn(`[MediaService] Sharp failed on HEIC, falling back to heif-convert for ${fullPath}`);
-        
+      const runHeicFallback = async () => {
+        console.warn(`[MediaService] Sharp failed on HEIC, decoding primary image with libheif for ${fullPath}`);
         await new Promise<void>((resolve, reject) => {
-          execFile('heif-convert', [fullPath, tmpPngPath], (error) => {
+          execFile('heic-primary-decode', [fullPath, tmpPpmPath], (error) => {
             if (error) {
-              reject(new Error(`heif-convert failed: ${error.message}`));
+              reject(new Error(`primary HEIC decode failed: ${error.message}`));
             } else {
               resolve();
             }
           });
         });
         cleanupTmp = true;
-        return tmpPngPath as string | Buffer;
+        return tmpPpmPath as string | Buffer;
       };
 
       // 1. Generate 1080p WebP preview (max 1920x1080, quality 80)
@@ -66,7 +65,7 @@ export class MediaService {
           .toBuffer();
       } catch (err: any) {
         if (!isHeic) throw err;
-        sharpInput = await runHeifConvertFallback();
+        sharpInput = await runHeicFallback();
         preview1080 = await sharp(sharpInput, { unlimited: true })
           .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 80 })
@@ -106,7 +105,7 @@ export class MediaService {
       );
 
       if (cleanupTmp) {
-        fs.unlink(tmpPngPath, () => {});
+        fs.unlink(tmpPpmPath, () => {});
       }
 
       return { blurhash: bHash, has1080p: true, has480p: true };
