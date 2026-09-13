@@ -40,6 +40,7 @@ export class MediaService {
 
       let cleanupTmp = false;
       const tmpPpmPath = path.join(CACHE_ROOT, `tmp_${mediaId}.ppm`);
+      const tmpPngPath = path.join(CACHE_ROOT, `tmp_${mediaId}.png`);
 
       const runHeicFallback = async () => {
         console.warn(`[MediaService] Sharp failed on HEIC, decoding primary image with libheif for ${fullPath}`);
@@ -52,8 +53,19 @@ export class MediaService {
             }
           });
         });
+        
+        await new Promise<void>((resolve, reject) => {
+          execFile('ffmpeg', ['-y', '-i', tmpPpmPath, '-c:v', 'png', tmpPngPath], (error) => {
+            if (error) {
+              reject(new Error(`ffmpeg ppm to png failed: ${error.message}`));
+            } else {
+              resolve();
+            }
+          });
+        });
+
         cleanupTmp = true;
-        return tmpPpmPath as string | Buffer;
+        return tmpPngPath as string | Buffer;
       };
 
       // 1. Generate 1080p WebP preview (max 1920x1080, quality 80)
@@ -105,7 +117,8 @@ export class MediaService {
       );
 
       if (cleanupTmp) {
-        fs.unlink(tmpPpmPath, () => {});
+        if (fs.existsSync(tmpPpmPath)) fs.unlinkSync(tmpPpmPath);
+        if (fs.existsSync(tmpPngPath)) fs.unlinkSync(tmpPngPath);
       }
 
       return { blurhash: bHash, has1080p: true, has480p: true };
