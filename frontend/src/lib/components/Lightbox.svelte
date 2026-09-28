@@ -500,7 +500,8 @@
                     <span class="face-avatar">
                       <BlurhashImage 
                         hash={''}
-                        src={getFaceThumbnailUrl(face.person_id)} 
+                        src={getThumbnailUrl(item.id)} 
+                        faceBox={face.bounding_box}
                         objectFit="cover" 
                         square={true} 
                       />

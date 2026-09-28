@@ -1,6 +1,6 @@
 <script lang="ts">
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
-  import { getFaceThumbnailUrl, renamePerson } from '$lib/api/media';
+  import { getThumbnailUrl, renamePerson } from '$lib/api/media';
   import { ArrowDownUp } from '@lucide/svelte';
   import type { PageData } from './$types';
   
@@ -111,9 +111,10 @@
       <a href="/people/{face.person_id}" class="grid-item">
         <BlurhashImage 
           hash={face.blurhash || ''}
-          src={getFaceThumbnailUrl(face.person_id) + (face.cover_media_id ? '?cv=' + face.cover_media_id.substring(0,8) : '')} 
+          src={getThumbnailUrl(face.media_id)} 
           alt={face.name || 'unnamed'}
           objectFit="cover"
+          faceBox={face.bounding_box}
           square={true}
           priority={i < 8}
         />

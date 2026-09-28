@@ -123,13 +123,16 @@ export async function mlRoutes(fastify: FastifyInstance) {
         GROUP BY person_id
       ),
       rep_faces AS (
-        SELECT DISTINCT ON (person_id)
-          person_id,
-          media_id,
-          bounding_box
-        FROM face_embeddings
-        WHERE person_id IS NOT NULL
-        ORDER BY person_id, created_at DESC
+        SELECT DISTINCT ON (fe.person_id)
+          fe.person_id,
+          fe.media_id,
+          fe.bounding_box
+        FROM face_embeddings fe
+        LEFT JOIN people p ON p.id = fe.person_id
+        WHERE fe.person_id IS NOT NULL
+        ORDER BY fe.person_id,
+                 CASE WHEN fe.media_id = p.cover_media_id THEN 0 ELSE 1 END,
+                 fe.created_at DESC
       )
       SELECT 
         pc.person_id as id,
@@ -357,10 +360,15 @@ export async function mlRoutes(fastify: FastifyInstance) {
       return sendDefaultAvatar(reply);
     }
 
-    // Fire and forget async generation
-    generateFaceThumbnailAsync(id, faceToUse, fullPathToUse, cachedPath).catch(console.error);
+    // Generate face thumbnail synchronously and stream it immediately
+    await generateFaceThumbnailAsync(id, faceToUse, fullPathToUse, cachedPath);
 
-    // Immediately return default avatar to prevent blocking the browser connection
+    if (fs.existsSync(cachedPath)) {
+      reply.header('Content-Type', 'image/webp');
+      reply.header('Cache-Control', 'public, max-age=86400');
+      return reply.send(fs.createReadStream(cachedPath));
+    }
+
     return sendDefaultAvatar(reply);
   });
 

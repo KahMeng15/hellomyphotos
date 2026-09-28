@@ -95,6 +95,8 @@ services:
     restart: unless-stopped
     image: ghcr.io/immich-app/immich-machine-learning:release
     env_file: .env
+    environment:
+      - MACHINE_LEARNING_MODEL_INTRA_OP_THREADS=4
     ports:
       - "8004:3003"
     volumes:

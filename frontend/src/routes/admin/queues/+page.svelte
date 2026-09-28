@@ -823,7 +823,7 @@
             <Video size={16}/> Reset Videos
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetFaces}>
-            <Cpu size={16}/> Reset ML Data
+            <Cpu size={16}/> Reset Faces
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetSmartSearch}>
             <Layers size={16}/> Reset Smart Search
