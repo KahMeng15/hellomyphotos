@@ -125,6 +125,7 @@ const SCHEMA_STATEMENTS = [
   )`,
   `ALTER TABLE shared_folders ADD COLUMN IF NOT EXISTS person_id UUID REFERENCES people(id) ON DELETE SET NULL`,
   `ALTER TABLE shared_folders ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+  `INSERT INTO people (id, name) SELECT DISTINCT person_id, '' FROM face_embeddings WHERE person_id IS NOT NULL ON CONFLICT (id) DO NOTHING`,
 
   // ---- Settings / logs (03-settings-logs.sql) ----
   `CREATE TABLE IF NOT EXISTS system_logs (

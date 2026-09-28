@@ -51,6 +51,10 @@ services:
     environment:
       - DISABLE_API=true
       - NODE_ENV=production
+      - SMART_SEARCH_CONCURRENCY=2
+      - FACE_DETECTION_CONCURRENCY=2
+      - FACIAL_RECOGNITION_CONCURRENCY=2
+      - FACE_THUMBNAIL_CONCURRENCY=4
     depends_on:
       - postgres
       - redis

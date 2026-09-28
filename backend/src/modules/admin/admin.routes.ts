@@ -251,7 +251,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     const settings: any = {
       scanInterval: 3600000,
       scanSchedule: { type: 'off' },
-      mlConfidenceThreshold: 0.6,
+      mlConfidenceThreshold: 0.75,
       throttleAuthGlobal: 0,
       throttlePublicGlobal: 0,
       throttleAuth: 0,

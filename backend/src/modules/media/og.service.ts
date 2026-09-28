@@ -6,7 +6,8 @@ import sharp from 'sharp';
 import { query } from '../../config/db';
 import { computeCoverObjectPosition } from './cover.utils';
 
-const CACHE_DIR = path.resolve(process.env.MEDIA_ROOT || '/app/media', '../cache/og');
+const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
+const CACHE_DIR = path.join(process.env.CACHE_ROOT || defaultCacheDir, 'og');
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
 
 // Load font synchronously on startup

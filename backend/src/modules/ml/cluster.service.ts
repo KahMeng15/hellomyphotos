@@ -16,149 +16,62 @@ export class ClusterService {
     return Math.max(0, 1 - sim);
   }
 
-  static async reclusterFaces(eps: number = 0.4, minSamples: number = 2) {
-    console.log(`[Clustering] Fetching face embeddings for dynamic DBSCAN clustering (eps=${eps}, minSamples=${minSamples})...`);
-    const result = await query(`SELECT id, person_id, embedding::text as vector FROM face_embeddings`);
-    const rows = result.rows;
+  static async reclusterFaces(eps: number = 0.25, minSamples: number = 1) {
+    console.log(`[Clustering] Running pgvector nearest-neighbour face clustering (eps=${eps}, minSamples=${minSamples})...`);
 
-    if (rows.length === 0) {
-      console.log('[Clustering] No faces to cluster.');
-      return;
-    }
+    // Fetch unassigned faces (person_id IS NULL)
+    const unassigned = await query(`SELECT id, embedding::text as vector FROM face_embeddings WHERE person_id IS NULL`);
+    const rows = unassigned.rows;
 
-    console.log(`[Clustering] Running dynamic DBSCAN on ${rows.length} faces...`);
+    if (rows.length > 0) {
+      console.log(`[Clustering] Processing ${rows.length} unassigned faces...`);
 
-    // Parse and normalize vectors to Float32Array for high performance
-    const dataset: Float32Array[] = rows.map(r => {
-      let arr: number[];
-      if (typeof r.vector === 'string') {
-        try {
-          arr = JSON.parse(r.vector);
-        } catch (e) {
-          arr = new Array(512).fill(0);
-        }
-      } else if (Array.isArray(r.vector)) {
-        arr = r.vector;
-      } else {
-        arr = new Array(512).fill(0);
-      }
+      for (const row of rows) {
+        if (!row.vector) continue;
+        const embeddingString = typeof row.vector === 'string' ? row.vector : `[${row.vector.join(',')}]`;
 
-      const f32 = new Float32Array(512);
-      let norm = 0;
-      for (let i = 0; i < 512; i++) {
-        const val = arr[i] || 0;
-        f32[i] = val;
-        norm += val * val;
-      }
-      norm = Math.sqrt(norm);
-      if (norm > 0) {
-        for (let i = 0; i < 512; i++) {
-          f32[i] /= norm;
-        }
-      }
-      return f32;
-    });
+        // Query pgvector for nearest face with assigned person_id
+        const matchResult = await query(`
+          SELECT person_id, (embedding <=> $1::vector) as distance
+          FROM face_embeddings
+          WHERE person_id IS NOT NULL
+          ORDER BY embedding <=> $1::vector
+          LIMIT 1
+        `, [embeddingString]);
 
-    const n = dataset.length;
-    const minDot = 1.0 - eps;
-    const adj: number[][] = new Array(n);
-    for (let i = 0; i < n; i++) {
-      adj[i] = [];
-    }
-
-    // Build pairwise symmetric graph with 8-way SIMD unrolled Float32Array dot products
-    for (let i = 0; i < n; i++) {
-      const targetVec = dataset[i];
-      for (let j = i + 1; j < n; j++) {
-        const vec = dataset[j];
-        let dot = 0;
-        for (let k = 0; k < 512; k += 8) {
-          dot += targetVec[k] * vec[k]
-               + targetVec[k+1] * vec[k+1]
-               + targetVec[k+2] * vec[k+2]
-               + targetVec[k+3] * vec[k+3]
-               + targetVec[k+4] * vec[k+4]
-               + targetVec[k+5] * vec[k+5]
-               + targetVec[k+6] * vec[k+6]
-               + targetVec[k+7] * vec[k+7];
-        }
-        if (dot >= minDot) {
-          adj[i].push(j);
-          adj[j].push(i);
-        }
-      }
-    }
-
-    // Dynamic DBSCAN Clustering execution
-    const visited = new Uint8Array(n);
-    const inCluster = new Uint8Array(n);
-    const clusters: number[][] = [];
-    const noise: number[] = [];
-
-    for (let i = 0; i < n; i++) {
-      if (visited[i]) continue;
-      visited[i] = 1;
-
-      const neighbors = [i, ...adj[i]];
-      if (neighbors.length < minSamples) {
-        noise.push(i);
-      } else {
-        const cluster: number[] = [];
-        for (const idx of neighbors) {
-          inCluster[idx] = 1;
-        }
-
-        for (let k = 0; k < neighbors.length; k++) {
-          const neighborIdx = neighbors[k];
-          cluster.push(neighborIdx);
-
-          if (!visited[neighborIdx]) {
-            visited[neighborIdx] = 1;
-            const subNeighbors = adj[neighborIdx];
-            if (subNeighbors.length + 1 >= minSamples) {
-              for (let m = 0; m < subNeighbors.length; m++) {
-                const sn = subNeighbors[m];
-                if (!inCluster[sn]) {
-                  inCluster[sn] = 1;
-                  neighbors.push(sn);
-                }
-              }
+        let personId: string | null = null;
+        if (matchResult.rows.length > 0 && matchResult.rows[0].distance < eps) {
+          personId = matchResult.rows[0].person_id;
+        } else {
+          if (minSamples > 1) {
+            const countResult = await query(`
+              SELECT COUNT(*)::int as count
+              FROM face_embeddings
+              WHERE embedding <=> $1::vector < $2
+            `, [embeddingString, eps]);
+            if (countResult.rows[0].count >= minSamples) {
+              personId = uuidv4();
             }
+          } else {
+            personId = uuidv4();
           }
         }
-        clusters.push(cluster);
-      }
-    }
 
-    console.log(`[Clustering] DBSCAN found ${clusters.length} clusters. Noise points: ${noise.length}`);
-
-    // Update database for each cluster using batched WHERE id = ANY($2::uuid[])
-    for (const cluster of clusters) {
-      let personId: string | null = null;
-      for (const index of cluster) {
-        if (rows[index].person_id) {
-          personId = rows[index].person_id;
-          break;
-        }
-      }
-      if (!personId) personId = uuidv4();
-      const faceIds = cluster.map(idx => rows[idx].id);
-      await query(`UPDATE face_embeddings SET person_id = $1 WHERE id = ANY($2::uuid[])`, [personId, faceIds]);
-    }
-
-    if (noise.length > 0) {
-      if (minSamples > 1) {
-        const noiseFaceIds = noise.map(idx => rows[idx].id);
-        await query(`UPDATE face_embeddings SET person_id = NULL WHERE id = ANY($1::uuid[])`, [noiseFaceIds]);
-      } else {
-        for (const index of noise) {
-          const personId = rows[index].person_id || uuidv4();
-          const faceId = rows[index].id;
-          await query(`UPDATE face_embeddings SET person_id = $1 WHERE id = $2`, [personId, faceId]);
+        if (personId) {
+          await query(`UPDATE face_embeddings SET person_id = $1 WHERE id = $2`, [personId, row.id]);
         }
       }
     }
 
-    console.log('[Clustering] Dynamic DBSCAN face clustering complete!');
+    // Bug #2 Fix: Populate people table for all novel/existing person_ids
+    await query(`
+      INSERT INTO people (id, name)
+      SELECT DISTINCT person_id, ''
+      FROM face_embeddings
+      WHERE person_id IS NOT NULL
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    console.log('[Clustering] Face clustering complete!');
   }
 }

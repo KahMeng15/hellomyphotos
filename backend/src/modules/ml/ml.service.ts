@@ -9,7 +9,7 @@ const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 const ML_URL = process.env.IMMICH_ML_URL || 'http://localhost:3003';
 
 // H-2 Fix: Read confidence threshold dynamically from admin_settings instead of hardcoding.
-const DEFAULT_CONFIDENCE_THRESHOLD = 0.4; // cosine distance (lower = more similar)
+const DEFAULT_CONFIDENCE_THRESHOLD = 0.25; // cosine distance (lower = more similar)
 async function getFaceMatchThreshold(): Promise<number> {
   try {
     const res = await query(`SELECT value FROM admin_settings WHERE key = 'ml_confidence'`);
@@ -113,7 +113,7 @@ export class MLService {
       const entriesJson = JSON.stringify({
         "facial-recognition": {
           "recognition": { "modelName": "buffalo_l" },
-          "detection": { "modelName": "buffalo_l", "minScore": 0.7 }
+          "detection": { "modelName": "buffalo_l", "options": { "minScore": 0.7 } }
         }
       });
 
