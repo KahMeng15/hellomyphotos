@@ -29,6 +29,7 @@ services:
     command: npm run dev
     env_file: .env
     environment:
+      - LIBVA_DRIVER_NAME=radeonsi
       - DISABLE_WORKER=true
     depends_on:
       - postgres
@@ -53,6 +54,7 @@ services:
     command: npm run dev
     env_file: .env
     environment:
+      - LIBVA_DRIVER_NAME=radeonsi
       - DISABLE_API=true
     depends_on:
       - postgres

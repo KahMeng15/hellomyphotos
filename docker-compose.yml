@@ -25,6 +25,7 @@ services:
       context: ./backend
     env_file: .env
     environment:
+      - LIBVA_DRIVER_NAME=radeonsi
       - DISABLE_WORKER=true
       - NODE_ENV=production
     depends_on:
@@ -49,6 +50,7 @@ services:
       context: ./backend
     env_file: .env
     environment:
+      - LIBVA_DRIVER_NAME=radeonsi
       - DISABLE_API=true
       - NODE_ENV=production
       - SMART_SEARCH_CONCURRENCY=2

@@ -9,6 +9,8 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
         ffmpeg \
         libva-drm2 \
         libva2 \
+        mesa-va-drivers \
+        vainfo \
         g++ \
         libheif1 \
         libheif-examples \
@@ -32,6 +34,8 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
         ffmpeg \
         libva-drm2 \
         libva2 \
+        mesa-va-drivers \
+        vainfo \
         libheif1 \
         libheif-examples \
         libheif-plugin-libde265 \
