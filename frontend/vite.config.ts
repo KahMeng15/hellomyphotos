@@ -19,6 +19,9 @@ export default defineConfig({
 		}),
 		SvelteKitPWA({
 			registerType: 'autoUpdate',
+			workbox: {
+				navigateFallbackDenylist: [/^\/api\//]
+			},
 			manifest: {
 				name: 'hellomyphotos',
 				short_name: 'hellomyphotos',

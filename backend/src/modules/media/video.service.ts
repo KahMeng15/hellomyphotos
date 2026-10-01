@@ -89,6 +89,7 @@ function transcodeToWebm(inputPath: string, outputPath: string): Promise<void> {
     ffmpeg(inputPath)
       .save(outputPath)
       .videoCodec('libvpx')
+      .audioCodec('libvorbis')
       .outputOptions(['-b:v 1M', '-deadline realtime', '-cpu-used 5'])
       .on('end', () => resolve())
       .on('error', (err) => {

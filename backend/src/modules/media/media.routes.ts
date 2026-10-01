@@ -212,6 +212,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
           reply.header('Content-Type', mimeType);
           return sendThrottled(request, reply, fs.createReadStream(servePath, { start, end }));
         } else {
+          reply.header('Accept-Ranges', 'bytes');
           reply.header('Content-Length', fileSize);
           reply.header('Content-Type', mimeType);
           return sendThrottled(request, reply, fs.createReadStream(servePath));

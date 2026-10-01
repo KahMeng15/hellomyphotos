@@ -417,7 +417,6 @@
                 autoplay 
                 playsinline 
                 class="media-element" 
-                crossorigin="use-credentials" 
                 src={getStreamUrl(media.id, token)}
                 onerror={handleVideoError}
               >
