@@ -185,7 +185,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
     // Fetch BullMQ state for all queues in parallel
     await Promise.all(Object.entries(queues).map(async ([name, q]) => {
       const [bullmqCounts, isPaused, activeJobsRaw] = await Promise.all([
-        q.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed', 'paused'),
+        q.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
         q.isPaused(),
         q.getJobs(['active']),
       ]);

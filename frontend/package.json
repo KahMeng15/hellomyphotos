@@ -31,6 +31,7 @@
 		"panzoom": "^9.4.4"
 	},
 	"overrides": {
+		"typescript": "$typescript",
 		"cookie": "^0.7.0",
 		"fast-uri": "^3.1.8",
 		"brace-expansion": "^5.0.10"
