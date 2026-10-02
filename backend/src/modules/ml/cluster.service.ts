@@ -22,7 +22,7 @@ export class ClusterService {
     // Step 1: Wipe all existing (potentially bad) cluster assignments and people.
     // This ensures we start from a clean slate every time recluster is called.
     // If you want to preserve manual name assignments, change to a more targeted approach.
-    await query(`UPDATE face_embeddings SET person_id = NULL`);
+    await query(`UPDATE face_embeddings SET person_id = NULL WHERE person_id IS NOT NULL`);
     await query(`DELETE FROM people`);
     console.log('[Clustering] Cleared existing assignments.');
 
