@@ -9,7 +9,8 @@
   let settings = $state<any>({
     scanInterval: 3600000,
     scanSchedule: { type: 'off' },
-    mlConfidenceThreshold: 0.6
+    mlConfidenceThreshold: 0.6,
+    mlClusterStrictness: 0.35
   });
   let saving = $state(false);
   let loading = $state(true);
@@ -158,6 +159,7 @@
         settings.scanInterval = data.scanInterval;
         settings.scanSchedule = data.scanSchedule || { type: 'off' };
         settings.mlConfidenceThreshold = data.mlConfidenceThreshold;
+        settings.mlClusterStrictness = data.mlClusterStrictness ?? 0.35;
       }
     } catch (e) {
       toast.error('API is offline');
@@ -189,7 +191,8 @@
         body: JSON.stringify({
           scanInterval: Number(settings.scanInterval),
           scanSchedule: settings.scanSchedule,
-          mlConfidenceThreshold: Number(settings.mlConfidenceThreshold)
+          mlConfidenceThreshold: Number(settings.mlConfidenceThreshold),
+          mlClusterStrictness: Number(settings.mlClusterStrictness)
         })
       });
       // D-4 Fix: check response.ok before declaring success — previously showed
@@ -587,12 +590,21 @@
 
       <div class="card">
         <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem;"><ShieldCheck size={18} color="#a855f7"/> Machine Learning</h3>
-        <div class="form-group">
+        <div class="form-group" style="margin-bottom: 1.5rem;">
           <label style="display: block; font-size: 0.9rem; margin-bottom: 0.25rem;">Facial Recognition Confidence Threshold</label>
           <p style="font-size: 0.8rem; color: #a1a1aa; margin: 0 0 0.5rem 0;">Higher means fewer false positives. (0.0 to 1.0)</p>
           <div style="display: flex; gap: 1rem; align-items: center;">
             <input type="range" bind:value={settings.mlConfidenceThreshold} min="0.1" max="0.99" step="0.01" style="flex: 1;" />
             <span style="font-family: monospace; background: rgba(168,85,247,0.2); padding: 0.25rem; border-radius: 4px;">{settings.mlConfidenceThreshold}</span>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label style="display: block; font-size: 0.9rem; margin-bottom: 0.25rem;">Face Clustering Strictness (Epsilon)</label>
+          <p style="font-size: 0.8rem; color: #a1a1aa; margin: 0 0 0.5rem 0;">Lower = tighter clusters (more splitting). Higher = looser clusters (more merging). (0.20 to 0.60)</p>
+          <div style="display: flex; gap: 1rem; align-items: center;">
+            <input type="range" bind:value={settings.mlClusterStrictness} min="0.20" max="0.60" step="0.01" style="flex: 1;" />
+            <span style="font-family: monospace; background: rgba(168,85,247,0.2); padding: 0.25rem; border-radius: 4px;">{settings.mlClusterStrictness}</span>
           </div>
         </div>
       </div>
@@ -763,6 +775,31 @@
                         {job.target || 'Processing...'}
                       </div>
                     {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if name === 'facial-recognition' && q.clustering?.active}
+                {@const cProgress = q.clustering.total > 0 ? (q.clustering.processed / q.clustering.total) * 100 : 0}
+                <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
+                  <h4 style="margin: 0 0 0.5rem 0; font-size: 0.85rem; color: #3b82f6;">Clustering in Progress...</h4>
+                  <div class="progress-container" style="display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: rgba(0,0,0,0.3); margin-bottom: 0.75rem;">
+                    <div class="progress-bar active" style="width: {cProgress}%; background: #3b82f6;"></div>
+                  </div>
+                  <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+                    <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                      Processed: {q.clustering.processed} / {q.clustering.total}
+                    </span>
+                    {#if q.clustering.rate > 0}
+                      <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                        {Math.round(q.clustering.rate)} faces/s
+                      </span>
+                    {/if}
+                    {#if q.clustering.etaSeconds > 0}
+                      <span style="font-size: 0.75rem; color: #a1a1aa; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 8px; border-radius: 6px;">
+                        {formatEta(q.clustering.etaSeconds)} remaining
+                      </span>
+                    {/if}
                   </div>
                 </div>
               {/if}

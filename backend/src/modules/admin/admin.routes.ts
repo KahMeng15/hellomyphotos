@@ -252,6 +252,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       scanInterval: 3600000,
       scanSchedule: { type: 'off' },
       mlConfidenceThreshold: 0.75,
+      mlClusterStrictness: 0.35,
       throttleAuthGlobal: 0,
       throttlePublicGlobal: 0,
       throttleAuth: 0,
@@ -277,6 +278,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       if (r.key === 'scan_interval') settings.scanInterval = r.value;
       if (r.key === 'scan_schedule') settings.scanSchedule = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
       if (r.key === 'ml_confidence') settings.mlConfidenceThreshold = r.value;
+      if (r.key === 'ml_cluster_strictness') settings.mlClusterStrictness = r.value;
       if (r.key === 'throttle_auth_global') settings.throttleAuthGlobal = r.value;
       if (r.key === 'throttle_public_global') settings.throttlePublicGlobal = r.value;
       if (r.key === 'throttle_auth') settings.throttleAuth = r.value;
@@ -303,12 +305,13 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.put('/api/admin/settings', async (request, reply) => {
-    const { scanInterval, scanSchedule, mlConfidenceThreshold, throttleAuthGlobal, throttlePublicGlobal, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal, defaultViewMode, defaultSortMode, defaultFolderViewMode, defaultShareViewMode, defaultShareSortMode, defaultShareFolderViewMode, analyticsFilterBots, analyticsFilterSpam } = request.body as any;
+    const { scanInterval, scanSchedule, mlConfidenceThreshold, mlClusterStrictness, throttleAuthGlobal, throttlePublicGlobal, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal, defaultViewMode, defaultSortMode, defaultFolderViewMode, defaultShareViewMode, defaultShareSortMode, defaultShareFolderViewMode, analyticsFilterBots, analyticsFilterSpam } = request.body as any;
     
     const updates = [];
     if (scanInterval !== undefined) updates.push({ k: 'scan_interval', v: scanInterval });
     if (scanSchedule !== undefined) updates.push({ k: 'scan_schedule', v: scanSchedule });
     if (mlConfidenceThreshold !== undefined) updates.push({ k: 'ml_confidence', v: mlConfidenceThreshold });
+    if (mlClusterStrictness !== undefined) updates.push({ k: 'ml_cluster_strictness', v: mlClusterStrictness });
     if (throttleAuthGlobal !== undefined) updates.push({ k: 'throttle_auth_global', v: throttleAuthGlobal });
     if (throttlePublicGlobal !== undefined) updates.push({ k: 'throttle_public_global', v: throttlePublicGlobal });
     if (throttleAuth !== undefined) updates.push({ k: 'throttle_auth', v: throttleAuth });

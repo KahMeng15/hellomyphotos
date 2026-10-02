@@ -222,6 +222,11 @@ export async function queueRoutes(fastify: FastifyInstance) {
       };
     }));
 
+    const clusteringStatusStr = await redis.get("clustering:status");
+    if (clusteringStatusStr && stats['facial-recognition']) {
+      stats['facial-recognition'].clustering = JSON.parse(clusteringStatusStr);
+    }
+
     const result = { queues: stats, mode: currentMode };
     // Cache for 6 seconds (shorter than the 10s poll interval so data is always fresh)
     await redis.set(STATS_CACHE_KEY, JSON.stringify(result), 'EX', 6);

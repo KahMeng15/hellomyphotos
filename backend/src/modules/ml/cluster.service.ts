@@ -1,4 +1,5 @@
 import { query } from '../../config/db';
+import { redis } from '../../config/redis';
 import { v4 as uuidv4 } from 'uuid';
 
 export class ClusterService {
@@ -16,7 +17,17 @@ export class ClusterService {
     return Math.max(0, 1 - sim);
   }
 
-  static async reclusterFaces(eps: number = 0.25, minSamples: number = 1): Promise<void> {
+  static async reclusterFaces(overrideEps?: number, minSamples: number = 1): Promise<void> {
+    let eps = overrideEps;
+    if (eps === undefined) {
+      const settingRes = await query(`SELECT value FROM admin_settings WHERE key = 'ml_cluster_strictness'`);
+      if (settingRes.rows.length > 0) {
+        eps = parseFloat(settingRes.rows[0].value) || 0.35;
+      } else {
+        eps = 0.35;
+      }
+    }
+
     console.log(`[Clustering] Starting safe batched pgvector clustering (eps=${eps})...`);
 
     // Step 1: Wipe existing assignments ONLY if they have one. 
@@ -25,8 +36,12 @@ export class ClusterService {
     await query(`DELETE FROM people`);
     console.log('[Clustering] Cleared existing assignments.');
 
+    const totalRes = await query(`SELECT COUNT(*) as total FROM face_embeddings`);
+    const total = parseInt(totalRes.rows[0].total, 10);
+
     const BATCH_SIZE = 1000;
     let processed = 0;
+    const start = Date.now();
 
     while (true) {
       // 1. Fetch a batch of unassigned faces
@@ -72,7 +87,20 @@ export class ClusterService {
         processed++;
       }
       
-      console.log(`[Clustering] Processed ${processed} faces...`);
+      const elapsed = (Date.now() - start) / 1000;
+      const rate = processed / elapsed;
+      const remaining = total - processed;
+      const etaSeconds = rate > 0 ? Math.round(remaining / rate) : 0;
+
+      await redis.set("clustering:status", JSON.stringify({
+        active: true,
+        processed,
+        total,
+        etaSeconds,
+        rate
+      }), "EX", 60);
+
+      console.log(`[Clustering] Processed ${processed}/${total} faces...`);
     }
 
     // Step 3: Populate the people table from all distinct person_ids
