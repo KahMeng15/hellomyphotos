@@ -27,7 +27,7 @@
 		"@lucide/svelte": "^1.49.0",
 		"@tanstack/svelte-virtual": "^3.13.39",
 		"blurhash": "^2.0.5",
-		"devalue": "^5.9.4",
+		"devalue": "^6.0.2",
 		"panzoom": "^9.4.4"
 	},
 	"overrides": {
