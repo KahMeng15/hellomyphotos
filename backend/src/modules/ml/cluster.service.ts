@@ -17,62 +17,65 @@ export class ClusterService {
   }
 
   static async reclusterFaces(eps: number = 0.25, minSamples: number = 1): Promise<void> {
-    console.log(`[Clustering] Starting batch pgvector face clustering (eps=${eps})...`);
+    console.log(`[Clustering] Starting safe batched pgvector clustering (eps=${eps})...`);
 
-    // Step 1: Wipe all existing (potentially bad) cluster assignments and people.
-    // This ensures we start from a clean slate every time recluster is called.
-    // If you want to preserve manual name assignments, change to a more targeted approach.
+    // Step 1: Wipe existing assignments ONLY if they have one. 
+    // (The WHERE clause prevents Postgres from rewriting 424K rows unnecessarily)
     await query(`UPDATE face_embeddings SET person_id = NULL WHERE person_id IS NOT NULL`);
     await query(`DELETE FROM people`);
     console.log('[Clustering] Cleared existing assignments.');
 
-    // Step 2: Assign each face to an existing person if a close enough neighbour exists.
-    // We do this iteratively in rounds until no more assignments are made.
-    // Each round, unassigned faces that are within eps of an already-assigned face get merged.
-    //
-    // The key trick: we query the top-K neighbours WITHOUT a person_id filter (so HNSW
-    // runs at full speed), and then apply the filter on the small result set.
-    let round = 0;
-    let assigned = 1; // set to 1 to enter the loop
-    while (assigned > 0) {
-      round++;
-      const result = await query(`
-        WITH nearest AS (
-          SELECT
-            u.id                           AS unassigned_id,
-            (
-              SELECT a.person_id
-              FROM face_embeddings a
-              WHERE a.person_id IS NOT NULL
-                AND (a.embedding <=> u.embedding) < $1
-              ORDER BY a.embedding <=> u.embedding
-              LIMIT 1
-            ) AS matched_person_id
-          FROM face_embeddings u
-          WHERE u.person_id IS NULL
-        )
-        UPDATE face_embeddings fe
-        SET person_id = nearest.matched_person_id
-        FROM nearest
-        WHERE fe.id = nearest.unassigned_id
-          AND nearest.matched_person_id IS NOT NULL
-        RETURNING fe.id
-      `, [eps]);
-      assigned = result.rowCount ?? 0;
-      console.log(`[Clustering] Round ${round}: assigned ${assigned} faces to existing people.`);
+    const BATCH_SIZE = 1000;
+    let processed = 0;
+
+    while (true) {
+      // 1. Fetch a batch of unassigned faces
+      const batchRes = await query(`
+        SELECT id, embedding::text as vector 
+        FROM face_embeddings 
+        WHERE person_id IS NULL 
+        LIMIT $1
+      `, [BATCH_SIZE]);
+      
+      if (batchRes.rows.length === 0) break;
+      
+      // 2. Process each face in the batch
+      for (const row of batchRes.rows) {
+        const embeddingString = typeof row.vector === 'string' ? 
+          (row.vector.startsWith('[') ? row.vector : `[${row.vector}]`) : 
+          `[${row.vector.join(',')}]`;
+        
+        // Query top 50 nearest neighbors USING the HNSW index (no IS NOT NULL filter!)
+        const nnRes = await query(`
+          SELECT person_id, (embedding <=> $1::vector) as distance
+          FROM face_embeddings
+          ORDER BY embedding <=> $1::vector
+          LIMIT 50
+        `, [embeddingString]);
+        
+        let personId = null;
+        // Filter the results in Node to find the closest assigned person
+        for (const nn of nnRes.rows) {
+           if (nn.person_id !== null && nn.distance < eps) {
+              personId = nn.person_id;
+              break;
+           }
+        }
+        
+        // If no close assigned neighbor, become a new seed
+        if (!personId) {
+           personId = uuidv4();
+        }
+        
+        // Update the face individually (very fast, no table locks)
+        await query(`UPDATE face_embeddings SET person_id = $1 WHERE id = $2`, [personId, row.id]);
+        processed++;
+      }
+      
+      console.log(`[Clustering] Processed ${processed} faces...`);
     }
 
-    // Step 3: All remaining unassigned faces have no close neighbour yet.
-    // Each one becomes the seed of a new person cluster.
-    const newPeople = await query(`
-      UPDATE face_embeddings
-      SET person_id = gen_random_uuid()
-      WHERE person_id IS NULL
-      RETURNING person_id
-    `);
-    console.log(`[Clustering] Created ${newPeople.rowCount} new person seeds.`);
-
-    // Step 4: Populate the people table from all distinct person_ids now in face_embeddings.
+    // Step 3: Populate the people table from all distinct person_ids
     await query(`
       INSERT INTO people (id, name)
       SELECT DISTINCT person_id, ''
