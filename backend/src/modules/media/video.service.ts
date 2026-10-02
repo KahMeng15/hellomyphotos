@@ -36,7 +36,16 @@ function transcodeToMp4(inputPath: string, outputPath: string, useVaapi: boolean
         .inputOptions(['-hwaccel vaapi', '-hwaccel_device /dev/dri/renderD128'])
         .videoCodec('h264_vaapi')
         .audioCodec('aac')
-        .outputOptions(['-vf format=nv12,hwupload', '-qp 23', '-movflags +faststart'])
+        .outputOptions([
+          "-vf scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease,format=nv12,hwupload",
+          "-b:v 2M",
+          "-maxrate 2.5M",
+          "-bufsize 5M",
+          "-profile:v high",
+          "-c:a aac",
+          "-b:a 128k",
+          "-movflags +faststart"
+        ])
         .on('end', () => resolve())
         .on('error', (err) => {
           console.warn(`[VideoService] VAAPI MP4 encode failed (${err.message}), retrying with libx264`);
@@ -47,7 +56,17 @@ function transcodeToMp4(inputPath: string, outputPath: string, useVaapi: boolean
       cmd
         .videoCodec('libx264')
         .audioCodec('aac')
-        .outputOptions(['-preset veryfast', '-pix_fmt yuv420p', '-movflags +faststart', '-crf 23'])
+        .outputOptions([
+          "-preset veryfast",
+          "-pix_fmt yuv420p",
+          "-vf scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease,scale='trunc(iw/2)*2':'trunc(ih/2)*2'",
+          "-crf 28",
+          "-maxrate 2.5M",
+          "-bufsize 5M",
+          "-c:a aac", 
+          "-b:a 128k",
+          "-movflags +faststart"
+        ])
         .on('end', () => resolve())
         .on('error', (err) => {
           console.warn(`[VideoService] MP4 transcode failed for ${inputPath}:`, err.message);
@@ -65,13 +84,15 @@ function transcodeToMp4Software(inputPath: string, outputPath: string): Promise<
       .videoCodec('libx264')
       .audioCodec('aac')
       .outputOptions([
-        '-preset veryfast',
-        '-pix_fmt yuv420p',
-        '-movflags +faststart',
-        '-crf 23',
-        // Scale to max 1920px wide / 1080px tall, preserve aspect ratio,
-        // ensure width and height are divisible by 2 (required by libx264)
-        '-vf scale=\'min(1920,iw)\':\'min(1080,ih)\':force_original_aspect_ratio=decrease,scale=\'trunc(iw/2)*2\':\'trunc(ih/2)*2\''
+          "-preset veryfast",
+          "-pix_fmt yuv420p",
+          "-vf scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease,scale='trunc(iw/2)*2':'trunc(ih/2)*2'",
+          "-crf 28",
+          "-maxrate 2.5M",
+          "-bufsize 5M",
+          "-c:a aac", 
+          "-b:a 128k",
+          "-movflags +faststart"
       ])
       .on('end', () => resolve())
       .on('error', (err) => {
