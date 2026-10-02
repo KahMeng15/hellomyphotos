@@ -62,12 +62,12 @@ const SCHEMA_STATEMENTS = [
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(folder_path, file_name)
   )`,
-  `CREATE INDEX IF NOT EXISTS idx_media_folder ON media_files(folder_path)`,
-  `CREATE INDEX IF NOT EXISTS idx_media_files_clip_embedding ON media_files USING hnsw (clip_embedding vector_cosine_ops)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_folder ON media_files(folder_path)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_files_clip_embedding ON media_files USING hnsw (clip_embedding vector_cosine_ops)`,
 
   // M-7 Fix: text_pattern_ops index enables efficient LIKE 'prefix%' queries on folder_path.
   // Without this, every folder browse cover-image lookup degrades to a full sequential scan.
-  `CREATE INDEX IF NOT EXISTS idx_media_files_folder_path_tpo ON media_files (folder_path text_pattern_ops)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_files_folder_path_tpo ON media_files (folder_path text_pattern_ops)`,
 
   `CREATE TABLE IF NOT EXISTS face_embeddings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -77,9 +77,9 @@ const SCHEMA_STATEMENTS = [
     embedding vector(512),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
-  `CREATE INDEX IF NOT EXISTS idx_face_embeddings_person ON face_embeddings(person_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_face_embeddings_media ON face_embeddings(media_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_face_embeddings_embedding ON face_embeddings USING hnsw (embedding vector_cosine_ops)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_face_embeddings_person ON face_embeddings(person_id)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_face_embeddings_media ON face_embeddings(media_id)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_face_embeddings_embedding ON face_embeddings USING hnsw (embedding vector_cosine_ops)`,
 
   `CREATE TABLE IF NOT EXISTS shared_folders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -184,10 +184,10 @@ const SCHEMA_STATEMENTS = [
     folder_path TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
-  `CREATE INDEX IF NOT EXISTS idx_analytics_visits_created ON analytics_visits(created_at)`,
-  `CREATE INDEX IF NOT EXISTS idx_analytics_visits_share ON analytics_visits(share_token)`,
-  `CREATE INDEX IF NOT EXISTS idx_analytics_visits_ip_hash ON analytics_visits(ip_hash)`,
-  `CREATE INDEX IF NOT EXISTS idx_analytics_visits_action ON analytics_visits(action_type)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_analytics_visits_created ON analytics_visits(created_at)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_analytics_visits_share ON analytics_visits(share_token)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_analytics_visits_ip_hash ON analytics_visits(ip_hash)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_analytics_visits_action ON analytics_visits(action_type)`,
 ];
 
 // Statements not yet successfully applied. Succeeded ones are dropped so they
