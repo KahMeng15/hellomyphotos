@@ -12,7 +12,10 @@ const APP_DOMAIN = process.env.APP_DOMAIN || '';
 let cookieDomain: string | undefined = undefined;
 if (APP_DOMAIN) {
   try {
-    cookieDomain = new URL(APP_DOMAIN).hostname;
+    const hn = new URL(APP_DOMAIN).hostname;
+    if (hn !== 'localhost' && hn !== '127.0.0.1') {
+      cookieDomain = hn;
+    }
   } catch (e) {
     // Ignore invalid URL
   }

@@ -102,7 +102,12 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       const APP_DOMAIN = process.env.APP_DOMAIN || '';
       let cookieDomain = undefined;
       if (APP_DOMAIN) {
-        try { cookieDomain = new URL(APP_DOMAIN).hostname; } catch(e){}
+        try {
+          const hn = new URL(APP_DOMAIN).hostname;
+          if (hn !== 'localhost' && hn !== '127.0.0.1') {
+            cookieDomain = hn;
+          }
+        } catch(e){}
       }
       
       reply.setCookie(`ts_${token}`, '1', {
