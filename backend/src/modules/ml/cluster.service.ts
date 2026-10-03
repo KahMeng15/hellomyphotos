@@ -33,7 +33,7 @@ export class ClusterService {
     // Step 1: Wipe existing assignments ONLY if they have one. 
     // (The WHERE clause prevents Postgres from rewriting 424K rows unnecessarily)
     await query(`UPDATE face_embeddings SET person_id = NULL WHERE person_id IS NOT NULL`);
-    await query(`DELETE FROM people`);
+    await query(`TRUNCATE TABLE people CASCADE`);
     console.log('[Clustering] Cleared existing assignments.');
 
     const totalRes = await query(`SELECT COUNT(*) as total FROM face_embeddings`);

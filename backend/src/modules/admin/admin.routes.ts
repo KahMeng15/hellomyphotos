@@ -422,8 +422,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
           media_files
         RESTART IDENTITY CASCADE
       `);
-      // people uses UUID PKs (no sequences), so DELETE is correct here
-      await query(`DELETE FROM people`);
+      // people uses UUID PKs (no sequences), but TRUNCATE is physically faster
+      await query(`TRUNCATE TABLE people CASCADE`);
 
       // Clear Redis analytics cache so the cron job doesn't try to flush stats for wiped media files (which causes a foreign key error)
       const analyticsKeys = await redis.keys('analytics:*');
@@ -565,7 +565,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (!(await acquireResetLock(reply))) return;
     try {
       await query(`TRUNCATE TABLE face_embeddings CASCADE`);
-      await query(`DELETE FROM people`);
+      await query(`TRUNCATE TABLE people CASCADE`);
 
       await allQueues['face-detection'].clean(0, 10000, 'completed');
       await allQueues['face-detection'].clean(0, 10000, 'failed');

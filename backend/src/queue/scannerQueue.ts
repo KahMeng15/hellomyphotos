@@ -13,9 +13,6 @@ if (process.env.IS_WORKER === 'true') {
     if (job.name === 'cleanup-orphans') {
       console.log(`[Scanner Worker] Running orphan cleanup task...`);
       try {
-        const res = await query(`DELETE FROM people WHERE id NOT IN (SELECT person_id FROM face_embeddings WHERE person_id IS NOT NULL)`);
-        if (res.rowCount && res.rowCount > 0) console.log(`[Scanner Worker] Cleaned up ${res.rowCount} orphaned people.`);
-
         const CACHE_ROOT = process.env.CACHE_ROOT || path.join(process.cwd(), '../volumes/cache_rw');
         
         for (const [dirName, tableName] of [['thumbnails', 'media_files'], ['faces', 'face_embeddings'], ['previews', 'media_files']]) {
