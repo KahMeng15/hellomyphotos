@@ -123,8 +123,8 @@ const SCHEMA_STATEMENTS = [
     cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
-  `ALTER TABLE shared_folders ADD COLUMN IF NOT EXISTS person_id UUID REFERENCES people(id) ON DELETE SET NULL`,
-  `ALTER TABLE shared_folders ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='person_id') THEN ALTER TABLE shared_folders ADD COLUMN person_id UUID REFERENCES people(id) ON DELETE SET NULL; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='is_active') THEN ALTER TABLE shared_folders ADD COLUMN is_active BOOLEAN DEFAULT true; END IF; END $$;`,
   `INSERT INTO people (id, name) SELECT DISTINCT person_id, '' FROM face_embeddings WHERE person_id IS NOT NULL ON CONFLICT (id) DO NOTHING`,
 
   // ---- Settings / logs (03-settings-logs.sql) ----
@@ -150,15 +150,15 @@ const SCHEMA_STATEMENTS = [
    ON CONFLICT (email) DO NOTHING`,
 
   // ---- media_files column upgrades (older DBs) ----
-  `ALTER TABLE media_files ADD COLUMN IF NOT EXISTS has_1080p BOOLEAN DEFAULT false`,
-  `ALTER TABLE media_files ADD COLUMN IF NOT EXISTS has_480p BOOLEAN DEFAULT false`,
-  `ALTER TABLE media_files ADD COLUMN IF NOT EXISTS is_transcoded BOOLEAN DEFAULT false`,
-  `ALTER TABLE media_files ADD COLUMN IF NOT EXISTS transcoded_mp4_path TEXT`,
-  `ALTER TABLE media_files ADD COLUMN IF NOT EXISTS transcoded_webm_path TEXT`,
-  `ALTER TABLE media_files ADD COLUMN IF NOT EXISTS clip_embedding vector(512)`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='has_1080p') THEN ALTER TABLE media_files ADD COLUMN has_1080p BOOLEAN DEFAULT false; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='has_480p') THEN ALTER TABLE media_files ADD COLUMN has_480p BOOLEAN DEFAULT false; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='is_transcoded') THEN ALTER TABLE media_files ADD COLUMN is_transcoded BOOLEAN DEFAULT false; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='transcoded_mp4_path') THEN ALTER TABLE media_files ADD COLUMN transcoded_mp4_path TEXT; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='transcoded_webm_path') THEN ALTER TABLE media_files ADD COLUMN transcoded_webm_path TEXT; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='clip_embedding') THEN ALTER TABLE media_files ADD COLUMN clip_embedding vector(512); END IF; END $$;`,
 
-  `ALTER TABLE media_files ADD COLUMN IF NOT EXISTS img_width INTEGER`,
-  `ALTER TABLE media_files ADD COLUMN IF NOT EXISTS img_height INTEGER`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='img_width') THEN ALTER TABLE media_files ADD COLUMN img_width INTEGER; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='img_height') THEN ALTER TABLE media_files ADD COLUMN img_height INTEGER; END IF; END $$;`,
 
   `CREATE TABLE IF NOT EXISTS folder_settings (
     folder_path TEXT PRIMARY KEY,
@@ -166,7 +166,7 @@ const SCHEMA_STATEMENTS = [
     description TEXT,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
-  `ALTER TABLE folder_settings ADD COLUMN IF NOT EXISTS auto_cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_settings' AND column_name='auto_cover_media_id') THEN ALTER TABLE folder_settings ADD COLUMN auto_cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL; END IF; END $$;`,
 
   `CREATE TABLE IF NOT EXISTS analytics_visits (
     id BIGSERIAL PRIMARY KEY,
