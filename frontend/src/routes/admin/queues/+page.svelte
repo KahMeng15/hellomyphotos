@@ -323,7 +323,7 @@
   }
 
   async function triggerResetExif() {
-    customConfirm('Reset EXIF & Thumbnails', 'Are you sure you want to flush all EXIF data and thumbnails? They will be re-generated from scratch.', true, async () => {
+    customConfirm('Reset EXIF Only', 'Are you sure you want to flush all EXIF data? They will be re-generated from scratch.', true, async () => {
       await fetch(`${API_BASE}/api/admin/reset-exif`, { method: 'POST', credentials: 'include' });
       customAlert('Success', 'EXIF data reset and reprocessing initiated!');
     });
@@ -851,7 +851,7 @@
             <Activity size={16}/> Reset Everything
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetExif}>
-            <Save size={16}/> Reset EXIF & Thumbnails
+            <Save size={16}/> Reset EXIF Only
           </button>
           <button class="btn secondary" style="width: 100%; justify-content: center;" onclick={triggerResetThumbnails}>
             <Image size={16}/> Reset Thumbnails Only

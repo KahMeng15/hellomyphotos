@@ -486,33 +486,24 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.post('/api/admin/reset-exif', async (request, reply) => {
     if (!(await acquireResetLock(reply))) return;
     try {
-      await query(`UPDATE media_files SET blurhash = NULL, exif_json = NULL`);
-
-      const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
-      // M-5 Fix: async rm to avoid blocking the event loop
-      await fs.promises.rm(path.join(cacheRoot, '1080p'), { recursive: true, force: true });
-      await fs.promises.rm(path.join(cacheRoot, '480p'), { recursive: true, force: true });
-      await fs.promises.mkdir(path.join(cacheRoot, '1080p'), { recursive: true });
-      await fs.promises.mkdir(path.join(cacheRoot, '480p'), { recursive: true });
+      await query(`UPDATE media_files SET exif_json = NULL`);
 
       await allQueues['metadata'].clean(0, 10000, 'completed');
       await allQueues['metadata'].clean(0, 10000, 'failed');
-      await allQueues['thumbnail'].clean(0, 10000, 'completed');
-      await allQueues['thumbnail'].clean(0, 10000, 'failed');
 
-      // H-5 Fix: Paginated enqueue to avoid OOM
       const mediaRoot = process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro');
       await enqueuePaginated(`WHERE mime_type LIKE 'image/%'`, [], async (row) => {
         await mediaQueue.add('process-media', {
           mediaId: row.id,
           fullPath: path.resolve(mediaRoot, row.folder_path, row.file_name),
-          mimeType: row.mime_type
+          mimeType: row.mime_type,
+          skipCascade: true
         });
       });
     } finally {
       await releaseResetLock();
     }
-    return reply.send({ success: true, message: 'Media/EXIF reset initiated in the background' });
+    return reply.send({ success: true, message: 'EXIF reset initiated in the background' });
   });
 
   fastify.post('/api/admin/reset-thumbnails', async (request, reply) => {

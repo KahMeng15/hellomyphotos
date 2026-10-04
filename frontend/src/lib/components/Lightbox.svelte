@@ -36,8 +36,8 @@
   } = $props();
 
   const rawDate = $derived(getRawDate(media));
-  const mediaW = $derived(media.exif_json?.ExifImageWidth || media.exif_json?.ImageWidth || media.exif_json?.width || media.img_width || 0);
-  const mediaH = $derived(media.exif_json?.ExifImageHeight || media.exif_json?.ImageHeight || media.exif_json?.height || media.img_height || 0);
+  const mediaW = $derived(media.img_width || media.exif_json?.ExifImageWidth || media.exif_json?.ImageWidth || media.exif_json?.width || 0);
+  const mediaH = $derived(media.img_height || media.exif_json?.ExifImageHeight || media.exif_json?.ImageHeight || media.exif_json?.height || 0);
   const mediaMP = $derived(mediaW && mediaH ? Math.round((mediaW * mediaH) / 1000000) : 0);
 
   const exifIso = $derived(media.exif_json?.iso || media.exif_json?.ISO || media.exif_json?.Iso);
@@ -68,6 +68,33 @@
   }
 
   let showInfo = $state(false);
+  let showAdvanced = $state(false);
+  let rawExif = $state<any>(null);
+  let loadingExif = $state(false);
+
+  $effect(() => {
+    if (media.id) {
+      rawExif = null;
+      showAdvanced = false;
+    }
+  });
+
+  async function loadAdvancedExif() {
+    if (rawExif) return;
+    loadingExif = true;
+    try {
+      const qs = (isSharedView && token) ? `?shareToken=${token}` : "";
+      const res = await fetch(`/api/media/${media.id}/exif${qs}`);
+      if (res.ok) {
+        rawExif = await res.json();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      loadingExif = false;
+    }
+  }
+
   let showMenu = $state(false);
 
   // --- Idle management ---
@@ -555,6 +582,58 @@
               <p style="color: #888;">No faces detected.</p>
             {/if}
           </div>
+        
+          <div class="info-section">
+            <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; margin-bottom: 8px;" onclick={() => { showAdvanced = !showAdvanced; if (showAdvanced) loadAdvancedExif(); }}>
+              <h4 style="margin: 0;">ADVANCED EXIF</h4>
+              <span style="font-size: 0.75rem; color: #888;">{showAdvanced ? 'Hide' : 'Show'}</span>
+            </div>
+            {#if showAdvanced}
+              <div class="advanced-exif">
+                {#if loadingExif}
+                  <p style="color: #888; font-size: 0.8rem;">Loading...</p>
+                {:else if rawExif}
+                  {@const advDate = rawExif?.DateTimeOriginal || rawExif?.CreateDate}
+                  {@const dAdv = advDate ? new Date(advDate) : null}
+                  {@const sTime = rawExif?.ExposureTime || rawExif?.exposureTime}
+                  
+                  <div class="exif-row"><span class="exif-key">Date:</span> <span class="exif-val">{dAdv ? dAdv.toLocaleDateString('en-GB') : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Time:</span> <span class="exif-val">{dAdv ? dAdv.toLocaleTimeString('en-US') : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Latitude:</span> <span class="exif-val">{rawExif?.GPSLatitude || rawExif?.latitude || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Longitude:</span> <span class="exif-val">{rawExif?.GPSLongitude || rawExif?.longitude || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Model:</span> <span class="exif-val">{rawExif?.Model || rawExif?.model || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Serial #:</span> <span class="exif-val">{rawExif?.SerialNumber || rawExif?.BodySerialNumber || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Firmware:</span> <span class="exif-val">{rawExif?.Software || rawExif?.software || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Frame #:</span> <span class="exif-val">{rawExif?.FileNumber || rawExif?.ImageNumber || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Lens (mm):</span> <span class="exif-val">{rawExif?.FocalLength || rawExif?.focalLength || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">ISO:</span> <span class="exif-val">{rawExif?.ISO || rawExif?.iso || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Aperture:</span> <span class="exif-val">{rawExif?.FNumber || rawExif?.ApertureValue || rawExif?.aperture || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Shutter:</span> <span class="exif-val">{sTime ? (typeof sTime === 'number' && sTime < 1 ? `1/${Math.round(1/sTime)}` : sTime) : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Exp. Comp.:</span> <span class="exif-val">{rawExif?.ExposureCompensation !== undefined ? rawExif.ExposureCompensation : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Flash Comp.:</span> <span class="exif-val">{rawExif?.FlashCompensation !== undefined ? rawExif.FlashCompensation : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Program:</span> <span class="exif-val">{rawExif?.ExposureProgram || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Focus Mode:</span> <span class="exif-val">{rawExif?.FocusMode || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">White Bal.:</span> <span class="exif-val">{rawExif?.WhiteBalance || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">ICC Profile:</span> <span class="exif-val">{rawExif?.ProfileName || rawExif?.ColorSpace || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Contrast:</span> <span class="exif-val">{rawExif?.Contrast || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Sharpening:</span> <span class="exif-val">{rawExif?.Sharpness || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Quality:</span> <span class="exif-val">{rawExif?.Quality || ''}</span></div>
+
+                  <div class="exif-row" style="margin-top: 12px; color: #e2e8f0; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;"><strong>All Raw Data</strong></div>
+                  {#each Object.entries(rawExif || {}) as [key, val]}
+                    {#if typeof val !== 'object' && key !== 'MakerNote'}
+                      <div class="exif-row">
+                        <span class="exif-key">{key}:</span>
+                        <span class="exif-val">{String(val)}</span>
+                      </div>
+                    {/if}
+                  {/each}
+                {:else}
+                  <p style="color: #888; font-size: 0.8rem;">No EXIF data available.</p>
+                {/if}
+              </div>
+            {/if}
+          </div>
         </div>
       </div>
     {/if}
@@ -927,4 +1006,29 @@
       box-shadow: -10px 0 30px rgba(0,0,0,0.7);
     }
   }
+
+  .advanced-exif {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .exif-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    gap: 8px;
+  }
+  .exif-key {
+    color: #94a3b8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 45%;
+  }
+  .exif-val {
+    color: #e2e8f0;
+    text-align: right;
+    word-break: break-all;
+  }
+
 </style>

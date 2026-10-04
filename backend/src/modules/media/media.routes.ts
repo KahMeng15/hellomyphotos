@@ -312,4 +312,34 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       return reply.send({ message: 'Repair initiated' });
     }
   });
+
+  fastify.get<{ Params: { id: string }, Querystring: { shareToken?: string } }>('/api/media/:id/exif', async (request, reply) => {
+    const { id } = request.params;
+    if (!(await verifyMediaAccess(request, reply, id))) return;
+
+    const result = await query(
+      `SELECT folder_path, file_name, mime_type FROM media_files WHERE id = $1`,
+      [id]
+    );
+    if (result.rows.length === 0) return reply.status(404).send({ error: 'File not found' });
+
+    const file = result.rows[0];
+    const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+    if (!fs.existsSync(fullPath)) return reply.status(404).send({ error: 'Source file missing' });
+
+    try {
+      const exifrModule = await import('exifr'); const exifr = exifrModule.default || exifrModule;
+      const rawData = await exifr.parse(fullPath, {
+        tiff: true,
+        exif: true,
+        translateKeys: true,
+        translateValues: true,
+        reviveValues: true
+      });
+      return reply.send(rawData || {});
+    } catch (e: any) {
+      return reply.status(500).send({ error: 'Failed to parse EXIF', details: e.message });
+    }
+  });
+
 }

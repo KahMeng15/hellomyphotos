@@ -11,7 +11,7 @@ export const metadataQueue = new Queue('metadata', { connection: redis });
 export let metadataWorker: Worker | undefined;
 if (process.env.IS_WORKER === 'true') {
   metadataWorker = new Worker('metadata', async (job) => {
-  const { mediaId, fullPath, mimeType } = job.data;
+  const { mediaId, fullPath, mimeType, skipCascade } = job.data;
   console.log(`[Metadata Worker] Extracting metadata for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   const existing = await query('SELECT exif_json FROM media_files WHERE id = $1', [mediaId]);
@@ -23,7 +23,7 @@ if (process.env.IS_WORKER === 'true') {
 
   // Pipeline handoff: chain to next stage per-image
   const mode = await getExecutionMode();
-  if (mode === 'pipeline') {
+  if (mode === 'pipeline' && !skipCascade) {
     if (mimeType && mimeType.startsWith('video/')) {
       await videoQueue.add('process-video', { mediaId, fullPath, mimeType });
     } else {
