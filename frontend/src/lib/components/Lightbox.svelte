@@ -597,33 +597,33 @@
                   {@const dAdv = advDate ? new Date(advDate) : null}
                   {@const sTime = rawExif?.ExposureTime || rawExif?.exposureTime}
                   
-                  <div class="exif-row"><span class="exif-key">Date:</span> <span class="exif-val">{dAdv ? dAdv.toLocaleDateString('en-GB') : ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Time:</span> <span class="exif-val">{dAdv ? dAdv.toLocaleTimeString('en-US') : ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Latitude:</span> <span class="exif-val">{rawExif?.GPSLatitude || rawExif?.latitude || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Longitude:</span> <span class="exif-val">{rawExif?.GPSLongitude || rawExif?.longitude || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Model:</span> <span class="exif-val">{rawExif?.Model || rawExif?.model || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Serial #:</span> <span class="exif-val">{rawExif?.SerialNumber || rawExif?.BodySerialNumber || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Firmware:</span> <span class="exif-val">{rawExif?.Software || rawExif?.software || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Frame #:</span> <span class="exif-val">{rawExif?.FileNumber || rawExif?.ImageNumber || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Lens (mm):</span> <span class="exif-val">{rawExif?.FocalLength || rawExif?.focalLength || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">ISO:</span> <span class="exif-val">{rawExif?.ISO || rawExif?.iso || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Aperture:</span> <span class="exif-val">{rawExif?.FNumber || rawExif?.ApertureValue || rawExif?.aperture || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Shutter:</span> <span class="exif-val">{sTime ? (typeof sTime === 'number' && sTime < 1 ? `1/${Math.round(1/sTime)}` : sTime) : ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Exp. Comp.:</span> <span class="exif-val">{rawExif?.ExposureCompensation !== undefined ? rawExif.ExposureCompensation : ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Flash Comp.:</span> <span class="exif-val">{rawExif?.FlashCompensation !== undefined ? rawExif.FlashCompensation : ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Program:</span> <span class="exif-val">{rawExif?.ExposureProgram || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Focus Mode:</span> <span class="exif-val">{rawExif?.FocusMode || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">White Bal.:</span> <span class="exif-val">{rawExif?.WhiteBalance || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">ICC Profile:</span> <span class="exif-val">{rawExif?.ProfileName || rawExif?.ColorSpace || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Contrast:</span> <span class="exif-val">{rawExif?.Contrast || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Sharpening:</span> <span class="exif-val">{rawExif?.Sharpness || ''}</span></div>
-                  <div class="exif-row"><span class="exif-key">Quality:</span> <span class="exif-val">{rawExif?.Quality || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Date</span> <span class="exif-val">{dAdv ? dAdv.toLocaleDateString('en-GB') : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Time</span> <span class="exif-val">{dAdv ? dAdv.toLocaleTimeString('en-US') : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Latitude</span> <span class="exif-val">{rawExif?.GPSLatitude || rawExif?.latitude || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Longitude</span> <span class="exif-val">{rawExif?.GPSLongitude || rawExif?.longitude || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Model</span> <span class="exif-val">{rawExif?.Model || rawExif?.model || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Serial #</span> <span class="exif-val">{rawExif?.SerialNumber || rawExif?.BodySerialNumber || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Firmware</span> <span class="exif-val">{rawExif?.Software || rawExif?.software || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Frame #</span> <span class="exif-val">{rawExif?.FileNumber || rawExif?.ImageNumber || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Lens (mm)</span> <span class="exif-val">{rawExif?.FocalLength || rawExif?.focalLength || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">ISO</span> <span class="exif-val">{rawExif?.ISO || rawExif?.iso || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Aperture</span> <span class="exif-val">{rawExif?.FNumber || rawExif?.ApertureValue || rawExif?.aperture || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Shutter</span> <span class="exif-val">{sTime ? (typeof sTime === 'number' && sTime < 1 ? `1/${Math.round(1/sTime)}` : sTime) : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Exp. Comp.</span> <span class="exif-val">{rawExif?.ExposureCompensation !== undefined ? rawExif.ExposureCompensation : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Flash Comp.</span> <span class="exif-val">{rawExif?.FlashCompensation !== undefined ? rawExif.FlashCompensation : ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Program</span> <span class="exif-val">{rawExif?.ExposureProgram || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Focus Mode</span> <span class="exif-val">{rawExif?.FocusMode || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">White Bal.</span> <span class="exif-val">{rawExif?.WhiteBalance || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">ICC Profile</span> <span class="exif-val">{rawExif?.ProfileName || rawExif?.ColorSpace || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Contrast</span> <span class="exif-val">{rawExif?.Contrast || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Sharpening</span> <span class="exif-val">{rawExif?.Sharpness || ''}</span></div>
+                  <div class="exif-row"><span class="exif-key">Quality</span> <span class="exif-val">{rawExif?.Quality || ''}</span></div>
 
                   <div class="exif-row" style="margin-top: 12px; color: #e2e8f0; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;"><strong>All Raw Data</strong></div>
                   {#each Object.entries(rawExif || {}) as [key, val]}
                     {#if typeof val !== 'object' && key !== 'MakerNote'}
                       <div class="exif-row">
-                        <span class="exif-key">{key}:</span>
+                        <span class="exif-key">{key}</span>
                         <span class="exif-val">{String(val)}</span>
                       </div>
                     {/if}
@@ -1020,10 +1020,9 @@
   }
   .exif-key {
     color: #94a3b8;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 45%;
+    flex-shrink: 0;
+    max-width: 70%;
+    word-break: break-word;
   }
   .exif-val {
     color: #e2e8f0;
