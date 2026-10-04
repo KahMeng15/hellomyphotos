@@ -16,18 +16,20 @@ export function getSortDate(file: { exif_json?: Record<string, unknown> | null; 
   return new Date(file.created_at || 0).getTime() || 0;
 }
 
-export function formatDate(file: { exif_json?: Record<string, unknown> | null; created_at?: string | null }): string {
+export function getRawDate(file: { exif_json?: Record<string, unknown> | null; created_at?: string | null }): Date {
   for (const key of DATE_FIELDS) {
     const val = file.exif_json?.[key];
     if (val) {
       const d = new Date(normalizeExifDate(String(val)));
-      if (!isNaN(d.getTime())) {
-        return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-      }
+      if (!isNaN(d.getTime())) return d;
     }
   }
-  const d = new Date(file.created_at || 0);
-  if (!isNaN(d.getTime())) {
+  return new Date(file.created_at || 0);
+}
+
+export function formatDate(file: { exif_json?: Record<string, unknown> | null; created_at?: string | null }): string {
+  const d = getRawDate(file);
+  if (!isNaN(d.getTime()) && d.getTime() !== 0) {
     return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   }
   return 'Unknown Date';

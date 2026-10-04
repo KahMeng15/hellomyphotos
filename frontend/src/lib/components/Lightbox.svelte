@@ -10,7 +10,7 @@
   import { toast } from '$lib/stores/toast';
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut, Clock } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
-  import { formatDate } from '$lib/utils/date';
+  import { formatDate, getRawDate } from '$lib/utils/date';
 
   let { 
     media, 
@@ -34,6 +34,20 @@
     onprev?: () => void,
     onsetcover?: (id: string) => void
   } = $props();
+
+  const rawDate = $derived(getRawDate(media));
+  const mediaW = $derived(media.exif_json?.ExifImageWidth || media.exif_json?.ImageWidth || media.exif_json?.width || media.img_width || 0);
+  const mediaH = $derived(media.exif_json?.ExifImageHeight || media.exif_json?.ImageHeight || media.exif_json?.height || media.img_height || 0);
+  const mediaMP = $derived(mediaW && mediaH ? Math.round((mediaW * mediaH) / 1000000) : 0);
+
+  const exifIso = $derived(media.exif_json?.iso || media.exif_json?.ISO || media.exif_json?.Iso);
+  const exifMake = $derived(media.exif_json?.make || media.exif_json?.Make);
+  const exifModel = $derived(media.exif_json?.model || media.exif_json?.Model);
+  const exifLens = $derived(media.exif_json?.lensModel || media.exif_json?.LensModel);
+  const exifFocal = $derived(media.exif_json?.focalLength || media.exif_json?.FocalLength);
+  const exifAperture = $derived(media.exif_json?.fNumber || media.exif_json?.FNumber || media.exif_json?.aperture || media.exif_json?.ApertureValue);
+  const exifShutter = $derived(media.exif_json?.exposureTime || media.exif_json?.ExposureTime);
+
 
   const pathSegments = $derived(media.folder_path ? media.folder_path.split('/').filter(Boolean) : []);
 
@@ -442,9 +456,38 @@
           <h3>Info</h3>
           <div class="info-section">
             <h4>DETAILS</h4>
-            <p><strong>Filename:</strong> {media.file_name}</p>
-            <p><strong>Size:</strong> {(media.size_bytes / 1024 / 1024).toFixed(2)} MB</p>
-            <p><strong>Date Taken:</strong> {formatDate(media)}</p>
+            <div class="details-grid">
+              <div class="detail-block">
+                
+                <div class="detail-header">{isNaN(rawDate.getTime()) || rawDate.getTime() === 0 ? 'Unknown Date' : rawDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                <div class="detail-subheader">{isNaN(rawDate.getTime()) || rawDate.getTime() === 0 ? '-' : rawDate.toLocaleDateString('en-GB', { weekday: 'long' }) + ', ' + rawDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}</div>
+              </div>
+              <div class="detail-block">
+                <div class="detail-header">{media.file_name}</div>
+                <div class="detail-subheader">
+                  
+                  
+                  
+                  {mediaMP > 0 ? `${mediaMP} MP ` : ''}{mediaW > 0 && mediaH > 0 ? `${mediaW}x${mediaH} ` : ''}{(media.size_bytes / 1024 / 1024).toFixed(1)} MB
+                </div>
+              </div>
+              {#if exifMake || exifModel || exifIso || exifShutter}
+              <div class="detail-block">
+                <div class="detail-header">{exifMake || ''} {exifModel || 'Unknown Camera'}</div>
+                <div class="detail-subheader">
+                  {exifShutter ? (typeof exifShutter === "number" && exifShutter < 1 ? `1/${Math.round(1/exifShutter)}s ` : `${exifShutter}s `) : ''}{exifIso ? `ISO ${exifIso}` : ''}
+                </div>
+              </div>
+              {/if}
+              {#if exifLens || exifAperture || exifFocal}
+              <div class="detail-block">
+                <div class="detail-header">{exifLens || 'Unknown Lens'}</div>
+                <div class="detail-subheader">
+                  {exifAperture ? `f/${exifAperture} ` : ''}{exifFocal ? `${exifFocal}mm` : ''}
+                </div>
+              </div>
+              {/if}
+            </div>
           </div>
           {#if media.folder_path}
           <div class="info-section">
@@ -470,22 +513,6 @@
                 <a href={pathUrl(pathSegments)} class="album-name" onclick={close}>{pathSegments.at(-1)}</a>
               </div>
             </div>
-          </div>
-          {/if}
-          {#if media.exif_json?.make || media.exif_json?.model || media.exif_json?.lensModel || media.exif_json?.iso || media.exif_json?.exposureTime || media.exif_json?.fNumber}
-          <div class="info-section">
-            <h4>CAMERA</h4>
-            <p><strong>Device:</strong> {media.exif_json?.make || ''} {media.exif_json?.model || 'Unknown'}</p>
-            <p><strong>Lens:</strong> {media.exif_json?.lensModel || 'Unknown'}</p>
-            <p><strong>Settings:</strong> 
-              {#if media.exif_json?.iso || media.exif_json?.exposureTime || media.exif_json?.fNumber}
-                ISO {media.exif_json.iso || '-'} / 
-                {media.exif_json.exposureTime ? `1/${Math.round(1/media.exif_json.exposureTime)}s` : '-'} / 
-                {media.exif_json.fNumber ? `f/${media.exif_json.fNumber}` : '-'}
-              {:else}
-                Unknown ISO / Shutter / Aperture
-              {/if}
-            </p>
           </div>
           {/if}
           <div class="info-section">
@@ -700,6 +727,29 @@
     font-size: 0.75rem;
     letter-spacing: 0.05em;
     margin-bottom: 8px;
+  }
+
+  .details-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .detail-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .detail-header {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #e2e8f0;
+  }
+
+  .detail-subheader {
+    font-size: 0.75rem;
+    color: #94a3b8;
   }
 
   .info-section p {
