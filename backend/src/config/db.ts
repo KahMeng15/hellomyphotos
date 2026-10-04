@@ -78,6 +78,7 @@ const SCHEMA_STATEMENTS = [
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_face_embeddings_person ON face_embeddings(person_id)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_face_embeddings_person_id_covering ON face_embeddings (person_id) INCLUDE (media_id, bounding_box, created_at)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_face_embeddings_media ON face_embeddings(media_id)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_face_embeddings_embedding ON face_embeddings USING hnsw (embedding vector_cosine_ops)`,
 

@@ -111,7 +111,21 @@ function parseBoundingBox(box: any): { left: number; top: number; width: number;
 export async function mlRoutes(fastify: FastifyInstance) {
   
   // Get all unique people clusters (with a representative face image and face count)
-  fastify.get('/api/faces', { preHandler: requireAuth }, async (request, reply) => {
+  fastify.get<{ Querystring: { page?: string, limit?: string, sort?: string } }>('/api/faces', { preHandler: requireAuth }, async (request, reply) => {
+    const page = parseInt(request.query.page || '1', 10);
+    const limit = parseInt(request.query.limit || '50', 10);
+    const offset = (page - 1) * limit;
+    const sort = request.query.sort || 'named';
+
+    let orderByClause = 'ORDER BY pc.face_count DESC, pc.latest_created DESC';
+    if (sort === 'named') {
+      orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, pc.face_count DESC, pc.latest_created DESC";
+    } else if (sort === 'a-z') {
+      orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, p.name ASC, pc.face_count DESC";
+    } else if (sort === 'z-a') {
+      orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, p.name DESC, pc.face_count DESC";
+    }
+
     const result = await query(`
       WITH person_clusters AS (
         SELECT 
@@ -150,8 +164,9 @@ export async function mlRoutes(fastify: FastifyInstance) {
       JOIN rep_faces rf ON pc.person_id = rf.person_id
       JOIN media_files m ON m.id = rf.media_id
       LEFT JOIN people p ON p.id = pc.person_id
-      ORDER BY pc.face_count DESC, pc.latest_created DESC
-    `);
+      ${orderByClause}
+      LIMIT $1 OFFSET $2
+    `, [limit, offset]);
     
     return reply.send(result.rows);
   });

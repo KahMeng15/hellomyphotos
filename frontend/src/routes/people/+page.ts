@@ -3,12 +3,12 @@ import type { PageLoad } from './$types';
 
 export const load: PageLoad = async ({ fetch }) => {
   try {
-    const res = await fetch(`${API_BASE}/api/faces`);
+    const res = await fetch(`${API_BASE}/api/faces?page=1&limit=50&sort=named`, { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to fetch faces');
     const faces = await res.json();
-    return { faces };
+    return { initialFaces: faces };
   } catch (error) {
     console.error(error);
-    return { faces: [] };
+    return { initialFaces: [] };
   }
 };
