@@ -5,7 +5,7 @@
   import { decode } from 'blurhash';
   import { Play } from '@lucide/svelte';
 
-  let { hash, src, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, targetHeight = 250, priority = false, onclick, initialAspectRatio }: { hash: string, src: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, targetHeight?: number, priority?: boolean, onclick?: (e: MouseEvent) => void, initialAspectRatio?: number } = $props();
+  let { hash, src, fallbackSrc, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, targetHeight = 250, priority = false, onclick, initialAspectRatio }: { hash: string, src: string, fallbackSrc?: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, targetHeight?: number, priority?: boolean, onclick?: (e: MouseEvent) => void, initialAspectRatio?: number } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
@@ -31,7 +31,7 @@
     const img = e.target as HTMLImageElement;
     if (img.naturalWidth && img.naturalHeight) {
       aspectRatio = img.naturalWidth / img.naturalHeight;
-      if (faceBox) {
+      if (faceBox && (isUsingFallback || !fallbackSrc)) {
         const cx = (faceBox.x1 + faceBox.x2) / 2;
         const cy = (faceBox.y1 + faceBox.y2) / 2;
         const imgW = img.naturalWidth;
@@ -58,6 +58,11 @@
   }
 
   function handleError() {
+    if (fallbackSrc && !isUsingFallback) {
+      isUsingFallback = true;
+      retrySrc = fallbackSrc;
+      return;
+    }
     // Only retry for video thumbnails that may still be processing
     if (isVideo && retryCount < MAX_RETRIES) {
       retryTimeout = setTimeout(() => {
@@ -74,6 +79,7 @@
   }
 
   let retrySrc = $state('');
+  let isUsingFallback = $state(false);
   let effectiveSrc = $derived(retrySrc || src);
 
   $effect(() => {
@@ -123,7 +129,7 @@
   <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'}; aspect-ratio: {objectFit === 'cover' ? (square ? 1 : aspectRatio) : aspectRatio};">
     <div class="zoom-wrapper {visible ? '' : 'skeleton'}" style="animation-delay: -{randomDelay}s;">
       {#if visible}
-        <canvas bind:this={canvas} width="16" height="16" class:loaded={imgLoaded}></canvas>
+        <canvas bind:this={canvas} width="16" height="16" class:loaded={imgLoaded} style="{faceBox && transformString ? `transform: ${transformString};` : ''}"></canvas>
         <img src={effectiveSrc} {alt} onload={handleLoad} onerror={handleError} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox && transformString ? `transform: ${transformString};` : ''}" />
       {/if}
     </div>

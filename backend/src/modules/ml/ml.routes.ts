@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import { query } from '../../config/db';
 import { requireAuth, verifyMediaAccess } from '../../utils/auth';
 import { SmartSearchService } from './smartSearch.service';
+import { faceThumbnailQueue } from '../../queue/faceThumbnailQueue';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
@@ -168,6 +169,17 @@ export async function mlRoutes(fastify: FastifyInstance) {
       LIMIT $1 OFFSET $2
     `, [limit, offset]);
     
+    const facesDir = path.join(CACHE_ROOT, 'faces');
+    for (const row of result.rows) {
+      const cachedPath = path.join(facesDir, `${row.person_id}.webp`);
+      row.has_thumbnail = fs.existsSync(cachedPath);
+      if (!row.has_thumbnail) {
+        // Enqueue background generation non-blockingly so it doesn't freeze the backend!
+        // We require the queue here to avoid circular imports if any
+
+        faceThumbnailQueue.add('generate-face-thumbnails', { mediaId: row.media_id }).catch((err: any) => console.error(err));
+      }
+    }
     return reply.send(result.rows);
   });
 
@@ -375,16 +387,11 @@ export async function mlRoutes(fastify: FastifyInstance) {
       return sendDefaultAvatar(reply);
     }
 
-    // Generate face thumbnail synchronously and stream it immediately
-    await generateFaceThumbnailAsync(id, faceToUse, fullPathToUse, cachedPath);
 
-    if (fs.existsSync(cachedPath)) {
-      reply.header('Content-Type', 'image/webp');
-      reply.header('Cache-Control', 'public, max-age=86400');
-      return reply.send(fs.createReadStream(cachedPath));
-    }
 
-    return sendDefaultAvatar(reply);
+    // Return 404 so the frontend falls back to the CSS-cropped full image thumbnail
+    reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return reply.status(404).send({ error: 'Thumbnail is generating' });
   });
 
   // Get all faces in a specific media file

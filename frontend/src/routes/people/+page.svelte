@@ -18,6 +18,12 @@ import { updatePreferences } from '$lib/api/auth';
   let editingId = $state<string | null>(null);
   let editValue = $state('');
   let showSortMenu = $state(false);
+  let scrollProgress = $state(0);
+  function handleScroll(e: Event) {
+    const target = e.target as HTMLElement;
+    const threshold = 60; // Fixed threshold since no cover image
+    scrollProgress = Math.min(1, Math.max(0, target.scrollTop / threshold));
+  }
   let sortMode = $state<'named' | 'a-z' | 'z-a'>('named');
   let viewMode = $state<'small-grid' | 'medium-grid' | 'large-grid' | 'list'>('small-grid');
   let showViewMenu = $state(false);
@@ -52,6 +58,10 @@ import { updatePreferences } from '$lib/api/auth';
 
   import { onMount } from 'svelte';
   onMount(() => {
+    const mainContent = document.querySelector('.main-content');
+    if (mainContent) {
+      mainContent.addEventListener('scroll', handleScroll);
+    }
     const savedSortMode = loadPref<'named' | 'a-z' | 'z-a'>('peopleSortMode', 'named');
     viewMode = loadPref<'small-grid' | 'medium-grid' | 'large-grid' | 'list'>('peopleViewMode', 'small-grid');
     
@@ -139,6 +149,14 @@ import { updatePreferences } from '$lib/api/auth';
     }
   }
 
+  import { onDestroy } from 'svelte';
+  onDestroy(() => {
+    if (typeof document !== 'undefined') {
+      const mainContent = document.querySelector('.main-content');
+      if (mainContent) mainContent.removeEventListener('scroll', handleScroll);
+    }
+  });
+
   function clickOutside(node: HTMLElement, callback: () => void) {
     function handler(e: MouseEvent) {
       if (!node.contains(e.target as Node)) callback();
@@ -182,41 +200,56 @@ import { updatePreferences } from '$lib/api/auth';
   }
 </script>
 
-<div class="header">
-  <h2>People</h2>
-  <div class="header-right">
-    <span class="count">{faces.length} people loaded</span>
 
-    <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
-      <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
-        <LayoutGrid size={18} />
-      </button>
-      {#if showViewMenu}
-        <div class="dropdown-menu">
-          <button class:active={viewMode === 'small-grid'} onclick={() => { viewMode = 'small-grid'; showViewMenu = false; }}>Small Grid</button>
-          <button class:active={viewMode === 'medium-grid'} onclick={() => { viewMode = 'medium-grid'; showViewMenu = false; }}>Medium Grid</button>
-          <button class:active={viewMode === 'large-grid'} onclick={() => { viewMode = 'large-grid'; showViewMenu = false; }}>Large Grid</button>
-          <button class:active={viewMode === 'list'} onclick={() => { viewMode = 'list'; showViewMenu = false; }}>List</button>
-        </div>
-      {/if}
+<div class="sticky-header" style="
+  background: linear-gradient(to bottom, rgba(15,23,42,calc(0.95 * {scrollProgress})) 0%, rgba(15,23,42,calc(0.85 * {scrollProgress})) 100%);
+  backdrop-filter: blur(calc(16px * {scrollProgress}));
+  -webkit-backdrop-filter: blur(calc(16px * {scrollProgress}));
+  border-bottom-color: rgba(255,255,255,calc(0.08 * {scrollProgress}));
+  z-index: {showSortMenu || showViewMenu ? 105 : 50};
+">
+  <div class="header-content">
+    <div class="header-left">
+      <div class="header-text-container" style="--scroll-prog: {scrollProgress};">
+        <h2>People</h2>
+      </div>
     </div>
-
-    <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
-      <button class="icon-btn" onclick={() => showSortMenu = !showSortMenu} title="Sort">
-        <ArrowDownUp size={18} />
-      </button>
-      {#if showSortMenu}
-        <div class="dropdown-menu">
-          <button class:active={sortMode === 'named'} onclick={() => { if(sortMode !== 'named') { sortMode = 'named'; fetchFaces(true); } showSortMenu = false; }}>Named first</button>
-          <button class:active={sortMode === 'a-z'} onclick={() => { if(sortMode !== 'a-z') { sortMode = 'a-z'; fetchFaces(true); } showSortMenu = false; }}>A to Z</button>
-          <button class:active={sortMode === 'z-a'} onclick={() => { if(sortMode !== 'z-a') { sortMode = 'z-a'; fetchFaces(true); } showSortMenu = false; }}>Z to A</button>
+    
+    <div class="header-right">
+      <div class="toolbar">
+        <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
+          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
+            <LayoutGrid size={18} />
+          </button>
+          {#if showViewMenu}
+            <div class="dropdown-menu">
+              <button class:active={viewMode === 'small-grid'} onclick={() => { viewMode = 'small-grid'; showViewMenu = false; }}>Small Grid</button>
+              <button class:active={viewMode === 'medium-grid'} onclick={() => { viewMode = 'medium-grid'; showViewMenu = false; }}>Medium Grid</button>
+              <button class:active={viewMode === 'large-grid'} onclick={() => { viewMode = 'large-grid'; showViewMenu = false; }}>Large Grid</button>
+              <button class:active={viewMode === 'list'} onclick={() => { viewMode = 'list'; showViewMenu = false; }}>List</button>
+            </div>
+          {/if}
         </div>
-      {/if}
+
+        <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
+          <button class="icon-btn" onclick={() => showSortMenu = !showSortMenu} title="Sort">
+            <ArrowDownUp size={18} />
+          </button>
+          {#if showSortMenu}
+            <div class="dropdown-menu">
+              <button class:active={sortMode === 'named'} onclick={() => { if(sortMode !== 'named') { sortMode = 'named'; fetchFaces(true); } showSortMenu = false; }}>Named first</button>
+              <button class:active={sortMode === 'a-z'} onclick={() => { if(sortMode !== 'a-z') { sortMode = 'a-z'; fetchFaces(true); } showSortMenu = false; }}>A to Z</button>
+              <button class:active={sortMode === 'z-a'} onclick={() => { if(sortMode !== 'z-a') { sortMode = 'z-a'; fetchFaces(true); } showSortMenu = false; }}>Z to A</button>
+            </div>
+          {/if}
+        </div>
+      </div>
+      <span class="count" style="display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 4px;">
+        <span style="white-space: nowrap;">{faces.length} people loaded</span>
+      </span>
     </div>
   </div>
 </div>
-
-
 <div class="dir-grid folder-mode-{viewMode}">
   {#each faces as face, i}
     <div class="dir-card" style="animation-delay: {i * 40}ms;" role="link" tabindex="0" onclick={(e) => { if ((e.target).closest('button, input')) return; window.location.href = `/people/${face.person_id}`; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.href = `/people/${face.person_id}`; } }}>
@@ -227,10 +260,10 @@ import { updatePreferences } from '$lib/api/auth';
                <div style="width: 32px; height: 32px; border-radius: 4px; overflow: hidden; flex-shrink: 0;">
                  <BlurhashImage 
                     hash={face.blurhash || ''}
-                    src={getThumbnailUrl(face.media_id)} 
+                    src={face.has_thumbnail ? `${API_BASE}/api/faces/${face.person_id}/thumbnail` : getThumbnailUrl(face.media_id)}
                     alt={face.name || 'unnamed'}
                     objectFit="cover"
-                    faceBox={face.bounding_box}
+                    faceBox={face.has_thumbnail ? undefined : face.bounding_box}
                     square={true}
                  />
                </div>
@@ -262,10 +295,10 @@ import { updatePreferences } from '$lib/api/auth';
         <div class="dir-cover" style="border-radius: 0; overflow: hidden;">
           <BlurhashImage 
             hash={face.blurhash || ''}
-            src={getThumbnailUrl(face.media_id)} 
+            src={face.has_thumbnail ? `${API_BASE}/api/faces/${face.person_id}/thumbnail` : getThumbnailUrl(face.media_id)}
             alt={face.name || 'unnamed'}
             objectFit="cover"
-            faceBox={face.bounding_box}
+            faceBox={face.has_thumbnail ? undefined : face.bounding_box}
             square={true}
             priority={i < 8}
           />
@@ -536,30 +569,62 @@ import { updatePreferences } from '$lib/api/auth';
     to { opacity: 1; transform: translateY(0); }
   }
 
-  .header {
+  .sticky-header {
+    position: sticky;
+    top: -25px;
+    z-index: 50;
+    margin: 0 -24px 24px -24px;
+    padding: 24px 24px;
+    border-bottom: 1px solid transparent;
+  }
+
+  .header-content {
+    position: relative;
+    z-index: 2;
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--glass-border);
+    align-items: flex-start;
   }
-  
-  .header h2 {
-    font-weight: 600;
-    font-size: 1.5rem;
-    color: #e2e8f0;
+
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-text-container {
+    overflow: hidden;
+  }
+
+  .header-content h2 {
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    color: var(--text-color);
+    background: transparent;
+    font-weight: 700;
+    font-size: 2.5rem;
+    margin-bottom: 0;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.5);
   }
 
   .header-right {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-end;
     gap: 12px;
   }
-  
+
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
   .count {
-    color: #94a3b8;
+    color: #a1a1aa;
     font-size: 0.875rem;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
   }
 
   .dropdown-container {
@@ -568,57 +633,57 @@ import { updatePreferences } from '$lib/api/auth';
 
   .dropdown-menu {
     position: absolute;
+    top: 44px;
     right: 0;
-    top: 100%;
-    margin-top: 4px;
-    min-width: 140px;
-    background: #1e293b;
-    border: 1px solid rgba(255,255,255,0.1);
+    background: #000;
+    border: 1px solid rgba(255,255,255,0.15);
     border-radius: 8px;
+    min-width: 140px;
     overflow: hidden;
-    z-index: 50;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 100;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
   }
-
+  
   .dropdown-menu button {
-    display: block;
     width: 100%;
-    padding: 8px 14px;
+    text-align: left;
+    padding: 12px 16px;
     background: none;
     border: none;
-    color: #cbd5e1;
-    font-size: 0.85rem;
-    text-align: left;
+    color: #ccc;
     cursor: pointer;
-    font-family: inherit;
+    font-size: 0.875rem;
+    transition: background 0.2s, color 0.2s;
   }
-
+  
   .dropdown-menu button:hover {
-    background: rgba(255,255,255,0.06);
-    color: #fff;
+    background: rgba(255,255,255,0.1);
+    color: white;
   }
-
+  
   .dropdown-menu button.active {
-    color: var(--accent-color);
-    background: rgba(168,85,247,0.1);
+    background: rgba(255,255,255,0.15);
+    color: white;
+    font-weight: 500;
   }
 
   .icon-btn {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 6px;
-    color: #94a3b8;
-    cursor: pointer;
+    background: transparent;
+    border: none;
+    color: #a1a1aa;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
     display: flex;
-    align-items: center;
     justify-content: center;
-    padding: 6px;
-    transition: background 0.15s, color 0.15s;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s;
   }
 
   .icon-btn:hover {
-    background: rgba(255,255,255,0.12);
-    color: #e2e8f0;
+    background: rgba(255,255,255,0.1);
+    color: white;
   }
 
   
@@ -689,4 +754,24 @@ import { updatePreferences } from '$lib/api/auth';
 
   
 
+  @media (max-width: 768px) {
+    .header-content {
+      flex-direction: column;
+      gap: 16px;
+    }
+    .header-right {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+    .count {
+      text-align: right;
+    }
+    .header-text-container {
+      max-height: calc((1 - var(--scroll-prog)) * 120px + 4px);
+      opacity: calc(1 - var(--scroll-prog));
+      overflow: hidden;
+    }
+  }
 </style>
