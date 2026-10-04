@@ -26,7 +26,7 @@ export async function timelineRoutes(fastify: FastifyInstance) {
     const result = await query(`
       SELECT 
         m.id, m.folder_path, m.file_name, m.mime_type, m.size_bytes, m.blurhash, m.exif_json, m.created_at, m.is_transcoded,
-        fs.cover_media_id AS folder_cover_id,
+        COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id,
         COALESCE(
           (m.exif_json->>'dateTimeOriginal')::timestamp,
           (m.exif_json->>'DateTimeOriginal')::timestamp,

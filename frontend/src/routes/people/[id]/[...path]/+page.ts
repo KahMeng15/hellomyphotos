@@ -1,9 +1,13 @@
 import { API_BASE } from '$lib/api/media';
 import type { PageLoad } from './$types';
+import { error } from '@sveltejs/kit';
 
 export const load: PageLoad = async ({ params, fetch }) => {
   const { id, path } = params;
   const selectedMediaId = path || undefined;
+  if (id === 'null' || id === 'undefined') {
+    throw error(404, 'Person not found');
+  }
   try {
     const [mediaRes, personRes, coverRes] = await Promise.all([
       fetch(`${API_BASE}/api/faces/${id}/media`),

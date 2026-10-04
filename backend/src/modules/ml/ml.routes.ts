@@ -216,7 +216,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
     const { id } = request.params;
     
     const result = await query(`
-      SELECT m.*, f.bounding_box, fs.cover_media_id AS folder_cover_id
+      SELECT m.*, f.bounding_box, COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id
       FROM media_files m
       JOIN face_embeddings f ON m.id = f.media_id
       LEFT JOIN folder_settings fs ON fs.folder_path = m.folder_path

@@ -145,8 +145,10 @@ export class SmartSearchService {
 
     const result = await query(`
       SELECT m.id, m.folder_path, m.file_name, m.mime_type, m.blurhash, m.created_at,
+             COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id,
              (m.clip_embedding <=> $1::vector) as distance
       FROM media_files m
+      LEFT JOIN folder_settings fs ON fs.folder_path = m.folder_path
       WHERE m.clip_embedding IS NOT NULL
       ORDER BY m.clip_embedding <=> $1::vector ASC
       LIMIT $2

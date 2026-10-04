@@ -1,4 +1,6 @@
 <script lang="ts">
+import { replaceState } from '$app/navigation';
+
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import CoverImage from '$lib/components/CoverImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
@@ -176,7 +178,7 @@
 
   function syncUrl(index: number | null) {
     const url = index !== null ? mediaUrl(index) : personUrl();
-    history.replaceState(history.state, '', url);
+    replaceState(url, history.state);
   }
 
   async function handleSetCover(mediaId: string) {
@@ -404,7 +406,7 @@
 </div>
 
 {#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
-  <Lightbox
+  <Lightbox 
     media={sortedFiles[selectedMediaIndex]}
     onclose={closeLightbox}
     onnext={nextMedia}

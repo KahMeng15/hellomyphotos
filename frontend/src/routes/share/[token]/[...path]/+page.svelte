@@ -1,4 +1,6 @@
 <script lang="ts">
+import { replaceState } from '$app/navigation';
+
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import CoverImage from '$lib/components/CoverImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
@@ -99,7 +101,7 @@
 
   function syncUrl(index: number | null) {
     const url = index !== null ? mediaUrl(index) : folderUrl();
-    history.replaceState(history.state, '', url);
+    replaceState(url, history.state);
   }
 
   function openLightbox(index: number) {
@@ -576,7 +578,7 @@
 {/key}
 
 {#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
-  <Lightbox media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={$page.params.token} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
+  <Lightbox folderCoverId={data.folderCoverId} media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={$page.params.token} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
 {/if}
 {/if}
 

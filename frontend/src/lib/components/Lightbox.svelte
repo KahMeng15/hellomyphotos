@@ -17,7 +17,7 @@
     allowDownload = true, 
     isSharedView = false, 
     token,
-    baseFolderPath,
+    baseFolderPath, folderCoverId,
     onclose,
     onnext,
     onprev,
@@ -333,11 +333,11 @@
   });
 </script>
 
-<div class="lightbox" style="opacity: 1;" onmousemove={onActivity} onmousedown={onActivity} ontouchstart={onActivity} onclick={close}>
+<div class="lightbox" style="opacity: 1;" onmousemove={onActivity} onmousedown={onActivity} ontouchstart={onActivity} onclick={(e) => { const t = e.target as HTMLElement; if (t.classList.contains('lightbox') || t.classList.contains('layout-wrapper') || t.classList.contains('main-area') || t.classList.contains('content')) close(); }}>
   <div class="layout-wrapper">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="main-area" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
-      <div class="top-bar" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'} onclick={(e) => e.stopPropagation()}>
+      <div class="top-bar" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'}>
         {#if allowDownload}
           <button class="icon-btn" onclick={download} title="Download">
             <Download size={20} strokeWidth={2} />
@@ -358,7 +358,7 @@
               <ZoomIn size={20} strokeWidth={2} />
             </button>
             {#if showZoomSlider}
-              <div transition:fade={{ duration: 150 }} style="background: rgba(0,0,0,0.5); padding: 8px 12px; border-radius: 22px; display: flex; align-items: center; gap: 8px;" onclick={(e) => e.stopPropagation()}>
+              <div transition:fade={{ duration: 150 }} style="background: rgba(0,0,0,0.5); padding: 8px 12px; border-radius: 22px; display: flex; align-items: center; gap: 8px;">
                 <input type="range" min="1" max="5" step="0.1" bind:value={currentZoom} oninput={handleZoomSlider} style="width: 100px; accent-color: white;" />
                 <span style="color: white; font-size: 0.75rem; min-width: 3ch; text-align: right;">{currentZoom.toFixed(1)}x</span>
               </div>
@@ -385,11 +385,11 @@
         </button>
       </div>
 
-      <button class="nav-btn prev-btn" style:opacity={isIdle ? 0 : 1} onclick={(e) => { e.stopPropagation(); if (onprev) onprev(); }}>
+      <button class="nav-btn prev-btn" style:opacity={isIdle ? 0 : 1} onclick={() => { if (onprev) onprev(); }}>
         <ChevronLeft size={32} strokeWidth={2} />
       </button>
       
-      <div class="content" onclick={(e) => e.stopPropagation()}>
+      <div class="content">
         {#if media.mime_type.startsWith('video/')}
           {#key media.id}
             {#if media.is_transcoded === false}
@@ -431,13 +431,13 @@
         {/if}
       </div>
       
-      <button class="nav-btn next-btn" style:opacity={isIdle ? 0 : 1} onclick={(e) => { e.stopPropagation(); if (onnext) onnext(); }}>
+      <button class="nav-btn next-btn" style:opacity={isIdle ? 0 : 1} onclick={() => { if (onnext) onnext(); }}>
         <ChevronRight size={32} strokeWidth={2} />
       </button>
     </div>
 
     {#if showInfo}
-      <div class="sidebar" transition:slide={{ axis: 'x', duration: 300 }} onclick={(e) => e.stopPropagation()}>
+      <div class="sidebar" transition:slide={{ axis: 'x', duration: 300 }}>
         <div class="sidebar-inner">
           <h3>Info</h3>
           <div class="info-section">
@@ -450,9 +450,9 @@
           <div class="info-section">
             <h4>SOURCE</h4>
             <div class="album-info">
-              <div class="album-cover">
+              <a href={pathUrl(pathSegments)} class="album-cover" onclick={close}>
                 <BlurhashImage hash={''} src={getThumbnailUrl(folderCoverId || media.folder_cover_id || media.id)} objectFit="cover" square={true} />
-              </div>
+              </a>
               <div class="album-details">
                 {#if pathSegments.length > 1}
                   <div class="breadcrumb-path">
@@ -460,14 +460,14 @@
                       {#if i > 0}<span class="breadcrumb-sep"> &gt; </span>{/if}
                       {@const url = pathUrl(pathSegments.slice(0, i + 1))}
                       {#if url}
-                        <a href={url} onclick={(e) => e.stopPropagation()}>{segment}</a>
+                        <a href={url} onclick={close}>{segment}</a>
                       {:else}
                         <span style="color: #888; cursor: default;">{segment}</span>
                       {/if}
                     {/each}
                   </div>
                 {/if}
-                <p class="album-name">{pathSegments.at(-1)}</p>
+                <a href={pathUrl(pathSegments)} class="album-name" onclick={close}>{pathSegments.at(-1)}</a>
               </div>
             </div>
           </div>
@@ -495,18 +495,33 @@
             {:else if faces.length > 0}
               <div class="face-list">
                 {#each faces as face}
-                  <a href={`/people/${face.person_id}`} class="face-item" onclick={(e) => e.stopPropagation()}>
-                    <span class="face-avatar">
-                      <BlurhashImage 
-                        hash={''}
-                        src={getThumbnailUrl(item.id)} 
-                        faceBox={face.bounding_box}
-                        objectFit="cover" 
-                        square={true} 
-                      />
-                    </span>
-                    <span class="face-item-name">{face.name || 'Add name...'}</span>
-                  </a>
+                  {#if face.person_id}
+                    <a href={`/people/${face.person_id}`} class="face-item" onclick={close}>
+                      <span class="face-avatar">
+                        <BlurhashImage 
+                          hash={''}
+                          src={getThumbnailUrl(media.id)} 
+                          faceBox={face.bounding_box}
+                          objectFit="cover" 
+                          square={true} 
+                        />
+                      </span>
+                      <span class="face-item-name">{face.name || 'Add name...'}</span>
+                    </a>
+                  {:else}
+                    <div class="face-item" style="cursor: default;">
+                      <span class="face-avatar">
+                        <BlurhashImage 
+                          hash={''}
+                          src={getThumbnailUrl(media.id)} 
+                          faceBox={face.bounding_box}
+                          objectFit="cover" 
+                          square={true} 
+                        />
+                      </span>
+                      <span class="face-item-name">Unknown</span>
+                    </div>
+                  {/if}
                 {/each}
               </div>
             {:else}
@@ -700,12 +715,32 @@
   }
 
   .album-cover {
-    width: 48px;
-    height: 48px;
-    border-radius: 6px;
+    width: 80px;
+    height: 80px;
+    border-radius: 0;
     overflow: hidden;
     flex-shrink: 0;
     background: rgba(255,255,255,0.05);
+    transition: filter 0.2s ease;
+  }
+  
+  .album-cover:hover {
+    filter: brightness(1.2);
+  }
+
+  .album-name {
+    color: inherit;
+    text-decoration: none;
+    font-weight: 500;
+    display: block;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .album-name:hover {
+    text-decoration: underline;
   }
 
   .album-details {
@@ -744,71 +779,37 @@
   .face-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 8px;
   }
 
   .face-item {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     gap: 4px;
     text-decoration: none;
     color: inherit;
-    width: 64px;
+    width: 80px;
   }
 
   .face-avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
+    width: 80px;
+    height: 80px;
+    border-radius: 0;
     overflow: hidden;
     display: block;
-    border: 2px solid transparent;
-    transition: border-color 0.15s;
+    background: rgba(255,255,255,0.05);
+    transition: filter 0.2s ease;
   }
 
   .face-item:hover .face-avatar {
-    border-color: var(--accent-color);
+    filter: brightness(1.2);
   }
 
   .face-item-name {
     font-size: 0.75rem;
     color: #e2e8f0;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-
-  .face-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    text-decoration: none;
-    color: inherit;
-    width: 64px;
-  }
-
-  .face-avatar {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    overflow: hidden;
-    display: block;
-    border: 2px solid transparent;
-    transition: border-color 0.15s;
-  }
-
-  .face-item:hover .face-avatar {
-    border-color: var(--accent-color);
-  }
-
-  .face-item-name {
-    font-size: 0.75rem;
-    color: #e2e8f0;
-    text-align: center;
+    text-align: left;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

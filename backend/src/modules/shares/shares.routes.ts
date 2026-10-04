@@ -168,7 +168,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     if (share.person_id) {
       if (subPath) return reply.status(404).send({ error: 'Not a folder share' });
       const fileRes = await query(`
-        SELECT m.*, f.bounding_box, fs.cover_media_id AS folder_cover_id
+        SELECT m.*, f.bounding_box, COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id
         FROM media_files m
         JOIN face_embeddings f ON m.id = f.media_id
         LEFT JOIN folder_settings fs ON fs.folder_path = m.folder_path
