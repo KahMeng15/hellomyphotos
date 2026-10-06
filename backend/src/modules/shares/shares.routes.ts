@@ -273,7 +273,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
 
     // Fetch folder contents
     const filesResult = await query(
-      `SELECT * FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
+      `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
       [targetPath]
     );
     const files = filesResult.rows;

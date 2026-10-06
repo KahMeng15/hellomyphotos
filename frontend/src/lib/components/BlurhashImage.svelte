@@ -63,8 +63,8 @@
       retrySrc = fallbackSrc;
       return;
     }
-    // Only retry for video thumbnails that may still be processing
-    if (isVideo && retryCount < MAX_RETRIES) {
+    // Retry for all thumbnails (images or videos) that may still be processing
+    if (retryCount < MAX_RETRIES) {
       retryTimeout = setTimeout(() => {
         retryCount += 1;
         // Append/update a retry counter as cache-buster so the browser re-fetches

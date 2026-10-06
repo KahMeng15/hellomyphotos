@@ -8,8 +8,11 @@ import { query } from '../../config/db';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { WatermarkService } from './watermark.service';
 
-const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
-const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'));
+const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
+const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
+
+const defaultMediaDir = fs.existsSync('/app/media') ? '/app/media' : path.resolve(process.cwd(), '../volumes/media_ro');
+const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || defaultMediaDir);
 
 import { verifyMediaAccess } from '../../utils/auth';
 import { thumbnailQueue } from '../../queue/thumbnailQueue';
@@ -57,17 +60,19 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       }
 
       if (fs.existsSync(fullPath) && file.mime_type.startsWith('image/')) {
-        reply.header('Content-Type', file.mime_type);
-        reply.header('Cache-Control', 'public, max-age=30'); // Short cache so they upgrade to webp later
-        return sendThrottled(request, reply, fs.createReadStream(fullPath));
+        const stats = fs.statSync(fullPath);
+        // Only serve original as a thumbnail if it is less than 1MB to prevent network stalling on 4G
+        if (stats.size < 1024 * 1024) {
+          reply.header('Content-Type', file.mime_type);
+          reply.header('Cache-Control', 'public, max-age=30'); // Short cache so they upgrade to webp later
+          return sendThrottled(request, reply, fs.createReadStream(fullPath));
+        }
       }
 
-      // For videos still being processed: return 202 so browsers know to retry
-      if (file.mime_type.startsWith('video/')) {
-        reply.header('Cache-Control', 'no-cache');
-        reply.header('Retry-After', '5');
-        return reply.status(202).send({ message: 'Thumbnail is being generated, please retry shortly' });
-      }
+      // For media still being processed: return 202 so browsers know to retry
+      reply.header('Cache-Control', 'no-cache');
+      reply.header('Retry-After', '5');
+      return reply.status(202).send({ message: 'Thumbnail is being generated, please retry shortly' });
     }
 
     return reply.status(404).send({ error: 'Thumbnail not found' });
