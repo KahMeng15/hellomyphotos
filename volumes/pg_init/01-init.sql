@@ -35,6 +35,9 @@ CREATE TABLE face_embeddings (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_face_embeddings_person_id_created_at 
+ON face_embeddings(person_id, created_at) 
+WHERE person_id IS NOT NULL;
 -- Public Shares
 CREATE TABLE shared_folders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

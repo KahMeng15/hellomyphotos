@@ -30,11 +30,8 @@ export class ClusterService {
 
     console.log(`[Clustering] Starting safe batched pgvector clustering (eps=${eps})...`);
 
-    // Step 1: Wipe existing assignments ONLY if they have one. 
-    // (The WHERE clause prevents Postgres from rewriting 424K rows unnecessarily)
-    await query(`UPDATE face_embeddings SET person_id = NULL WHERE person_id IS NOT NULL`);
-    await query(`TRUNCATE TABLE people CASCADE`);
-    console.log('[Clustering] Cleared existing assignments.');
+    // Step 1: Incremental mode (wipe queries removed)
+    console.log('[Clustering] Running in incremental mode (existing assignments kept).');
 
     const totalRes = await query(`SELECT COUNT(*) as total FROM face_embeddings`);
     const total = parseInt(totalRes.rows[0].total, 10);

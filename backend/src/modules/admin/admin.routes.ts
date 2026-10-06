@@ -577,6 +577,18 @@ export async function adminRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, message: 'Face reset initiated in the background' });
   });
 
+  fastify.post('/api/admin/recluster-reset', async (request, reply) => {
+    if (!(await acquireResetLock(reply))) return;
+    try {
+      await query(`UPDATE face_embeddings SET person_id = NULL WHERE person_id IS NOT NULL`);
+      await query(`TRUNCATE TABLE people CASCADE`);
+      ClusterService.reclusterFaces().catch(console.error);
+    } finally {
+      await releaseResetLock();
+    }
+    return reply.send({ success: true, message: 'Cluster reset initiated in the background' });
+  });
+
   fastify.post('/api/admin/recluster-faces', async (request, reply) => {
     try {
       await ClusterService.reclusterFaces();
