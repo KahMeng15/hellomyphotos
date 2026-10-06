@@ -1,13 +1,15 @@
 import { API_BASE } from '$lib/api/media';
 import type { PageLoad } from './$types';
 
-export const load: PageLoad = async ({ url, fetch }) => {
+export const load: PageLoad = async (event) => {
+  const { url, fetch } = event;
+  const signal = (event as any).signal;
   const q = url.searchParams.get('q') || '';
   if (!q) {
     return { q, results: [] };
   }
   try {
-    const res = await fetch(`${API_BASE}/api/media/search?q=${encodeURIComponent(q)}&limit=50`);
+    const res = await fetch(`${API_BASE}/api/media/search?q=${encodeURIComponent(q)}&limit=50`, { signal });
     if (!res.ok) throw new Error('Search failed');
     const results = await res.json();
     return { q, results };

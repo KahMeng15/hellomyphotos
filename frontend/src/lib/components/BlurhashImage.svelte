@@ -109,7 +109,7 @@
           visible = true;
           observer.disconnect();
         }
-      }, { rootMargin: '800px' });
+      }, { rootMargin: '200px' });
 
       if (container) observer.observe(container);
 

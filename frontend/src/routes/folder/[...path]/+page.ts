@@ -6,7 +6,8 @@ const MEDIA_EXTENSIONS = new Set([
   'mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'm4v'
 ]);
 
-export const load: PageLoad = async ({ params, fetch }) => {
+export const load: PageLoad = async (event) => {
+  const { params, fetch } = event;
   let folderPath = params.path || '';
   let selectedFile: string | undefined;
 
@@ -22,7 +23,7 @@ export const load: PageLoad = async ({ params, fetch }) => {
   }
 
   try {
-    const data = await fetchFolderContent(folderPath, fetch);
+    const data = await fetchFolderContent(folderPath, fetch, (event as any).signal);
     return {
       folderPath,
       selectedFile,

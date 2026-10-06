@@ -22,8 +22,23 @@ export interface DirectoryInfo {
   cover_img_height?: number | null;
 }
 
-export async function fetchFolderContent(folderPath: string, fetchFn: typeof fetch = fetch): Promise<{ files: MediaFile[], directories: DirectoryInfo[], scanning: boolean, isProcessing: boolean, folderCoverId: string | null, folderCoverBoundingBox: any, folderCoverImgWidth: number | null, folderCoverImgHeight: number | null, folderDescription: string, hostError?: string | null }> {
-  const res = await fetchFn(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`, { credentials: 'include' });
+export async function fetchFolderContent(
+  folderPath: string, 
+  fetchFn: typeof fetch = fetch, 
+  signal?: AbortSignal
+): Promise<{ 
+  files: MediaFile[], 
+  directories: DirectoryInfo[], 
+  scanning: boolean, 
+  isProcessing: boolean, 
+  folderCoverId: string | null, 
+  folderCoverBoundingBox: any, 
+  folderCoverImgWidth: number | null, 
+  folderCoverImgHeight: number | null, 
+  folderDescription: string, 
+  hostError?: string | null 
+}> {
+  const res = await fetchFn(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`, { credentials: 'include', signal });
   if (!res.ok) throw new Error('Failed to fetch folder');
   const data = await res.json();
   return { 
@@ -106,8 +121,8 @@ export async function setFolderCover(folderPath: string, mediaId: string): Promi
   if (!res.ok) throw new Error('Failed to set folder cover');
 }
 
-export async function fetchTimeline(fetchFn: typeof fetch = fetch): Promise<MediaFile[]> {
-  const res = await fetchFn(`${API_BASE}/api/timeline`, { credentials: 'include' });
+export async function fetchTimeline(fetchFn: typeof fetch = fetch, signal?: AbortSignal): Promise<MediaFile[]> {
+  const res = await fetchFn(`${API_BASE}/api/timeline`, { credentials: 'include', signal });
   if (!res.ok) throw new Error('Failed to fetch timeline');
   const data = await res.json();
   return data.files || [];

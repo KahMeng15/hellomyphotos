@@ -2,7 +2,9 @@ import { API_BASE } from '$lib/api/media';
 import type { PageLoad } from './$types';
 import { error } from '@sveltejs/kit';
 
-export const load: PageLoad = async ({ params, fetch }) => {
+export const load: PageLoad = async (event) => {
+  const { params, fetch } = event;
+  const signal = (event as any).signal;
   const { id, path } = params;
   const selectedMediaId = path || undefined;
   if (id === 'null' || id === 'undefined') {
@@ -10,9 +12,9 @@ export const load: PageLoad = async ({ params, fetch }) => {
   }
   try {
     const [mediaRes, personRes, coverRes] = await Promise.all([
-      fetch(`${API_BASE}/api/faces/${id}/media`),
-      fetch(`${API_BASE}/api/faces/${id}`),
-      fetch(`${API_BASE}/api/faces/${id}/cover`)
+      fetch(`${API_BASE}/api/faces/${id}/media`, { signal }),
+      fetch(`${API_BASE}/api/faces/${id}`, { signal }),
+      fetch(`${API_BASE}/api/faces/${id}/cover`, { signal })
     ]);
     
     if (!mediaRes.ok) throw new Error('Failed to fetch person media');
