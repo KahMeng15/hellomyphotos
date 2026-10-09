@@ -35,6 +35,24 @@ for (const [name, worker] of allWorkers) {
   }
 }
 
+// Gracefully close all workers on shutdown
+const gracefulShutdown = async (signal: string) => {
+  logger.info(`Received ${signal}, closing workers...`);
+  
+  const closePromises = allWorkers
+    .map(([_, worker]) => worker)
+    .filter((worker): worker is Worker => worker !== undefined)
+    .map(worker => worker.close());
+    
+  await Promise.all(closePromises);
+  
+  logger.info('Workers closed successfully.');
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 export {
   scannerQueue, scannerWorker,
   metadataQueue, metadataWorker,

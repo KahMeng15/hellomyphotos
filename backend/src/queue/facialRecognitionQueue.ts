@@ -19,8 +19,17 @@ async function scheduleRecluster(): Promise<void> {
     return;
   }
   // Arm the debounce timer for 30 seconds (lock TTL of 35s gives a 5s buffer)
-  await facialRecognitionQueue.add('recluster-all', {}, { jobId: 'debounce-recluster', delay: 30000,
-    removeOnComplete: true, removeOnFail: { age: 3600 } });
+  await facialRecognitionQueue.add('recluster-all', {}, { 
+    jobId: 'debounce-recluster', 
+    delay: 30000,
+    attempts: 3,
+    backoff: {
+      type: 'exponential',
+      delay: 5000
+    },
+    removeOnComplete: true, 
+    removeOnFail: { age: 3600 } 
+  });
 }
 
 export let facialRecognitionWorker: Worker | undefined;
