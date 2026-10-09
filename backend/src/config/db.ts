@@ -158,6 +158,9 @@ const SCHEMA_STATEMENTS = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='transcoded_mp4_path') THEN ALTER TABLE media_files ADD COLUMN transcoded_mp4_path TEXT; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='transcoded_webm_path') THEN ALTER TABLE media_files ADD COLUMN transcoded_webm_path TEXT; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='clip_embedding') THEN ALTER TABLE media_files ADD COLUMN clip_embedding vector(512); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='file_identifier') THEN ALTER TABLE media_files ADD COLUMN file_identifier VARCHAR(255); END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='media_files_file_identifier_key') THEN ALTER TABLE media_files ADD CONSTRAINT media_files_file_identifier_key UNIQUE (file_identifier); END IF; END $$;`,
+  `DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='media_files_folder_path_file_name_key') THEN ALTER TABLE media_files DROP CONSTRAINT media_files_folder_path_file_name_key; END IF; END $$;`,
 
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='img_width') THEN ALTER TABLE media_files ADD COLUMN img_width INTEGER; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='img_height') THEN ALTER TABLE media_files ADD COLUMN img_height INTEGER; END IF; END $$;`,
@@ -169,6 +172,7 @@ const SCHEMA_STATEMENTS = [
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_settings' AND column_name='auto_cover_media_id') THEN ALTER TABLE folder_settings ADD COLUMN auto_cover_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL; END IF; END $$;`,
+
 
   `CREATE TABLE IF NOT EXISTS analytics_visits (
     id BIGSERIAL PRIMARY KEY,

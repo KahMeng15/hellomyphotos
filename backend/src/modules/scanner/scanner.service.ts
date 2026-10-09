@@ -36,6 +36,8 @@ export class ScannerService {
       // Invalidate the auto-cover cache for this folder so it can be recomputed after scan
       await query(`UPDATE folder_settings SET auto_cover_media_id = NULL WHERE folder_path = $1`, [folderPath]);
 
+      let folderHealed = false;
+
       const files = await fs.promises.readdir(fullPath, { withFileTypes: true });
       const currentFilesOnDisk: string[] = [];
       // Track whether any directory entries were seen (even if all filtered out)
@@ -62,15 +64,50 @@ export class ScannerService {
           if (ALLOWED_MIME_TYPES.has(mimeType)) {
             const stat = await fs.promises.stat(path.join(fullPath, file.name));
             currentFilesOnDisk.push(file.name);
+            
+            // Highly stable cross-platform signature (works on :ro Docker mounts unlike inodes)
+            const fileIdentifier = `sz-${stat.size}-mt-${Math.floor(stat.mtimeMs)}`;
 
-            // Upsert file into DB, returning the record ID
+            // Folder Rename Heuristic & Self-Healing
+            if (!folderHealed) {
+              const oldRow = await query(`SELECT folder_path FROM media_files WHERE file_identifier = $1 LIMIT 1`, [fileIdentifier]);
+              if (oldRow.rows.length > 0) {
+                const oldFolder = oldRow.rows[0].folder_path;
+                if (oldFolder && oldFolder !== folderPath) {
+                  // The file moved from oldFolder to folderPath. Did the entire folder rename?
+                  const oldFullPath = path.join(MEDIA_ROOT, oldFolder);
+                  const oldFolderExists = await fs.promises.access(oldFullPath).then(() => true).catch(() => false);
+                  
+                  if (!oldFolderExists) {
+                    console.log(`[Scanner] Detected folder rename from ${oldFolder} to ${folderPath}. Healing metadata...`);
+                    await query(`UPDATE shared_folders SET folder_path = $1 WHERE folder_path = $2`, [folderPath, oldFolder]);
+                    await query(`UPDATE folder_settings SET folder_path = $1 WHERE folder_path = $2`, [folderPath, oldFolder]);
+                    // Update all files en masse to speed up the loop
+                    await query(`UPDATE media_files SET folder_path = $1 WHERE folder_path = $2`, [folderPath, oldFolder]);
+                  }
+                }
+              }
+              folderHealed = true;
+            }
+
+            // Legacy Backfill: If the row exists but has no file_identifier, update it first.
+            await query(`
+              UPDATE media_files 
+              SET file_identifier = $1 
+              WHERE folder_path = $2 AND file_name = $3 AND file_identifier IS NULL
+            `, [fileIdentifier, folderPath, file.name]);
+
+            // Upsert file into DB based on stable file_identifier
             const result = await query(`
-              INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes)
-              VALUES ($1, $2, $3, $4)
-              ON CONFLICT (folder_path, file_name) DO UPDATE 
-              SET size_bytes = EXCLUDED.size_bytes, updated_at = NOW()
+              INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes, file_identifier)
+              VALUES ($1, $2, $3, $4, $5)
+              ON CONFLICT (file_identifier) DO UPDATE 
+              SET folder_path = EXCLUDED.folder_path, 
+                  file_name = EXCLUDED.file_name,
+                  size_bytes = EXCLUDED.size_bytes,
+                  updated_at = NOW()
               RETURNING id, xmax, blurhash
-            `, [folderPath, file.name, mimeType, stat.size]);
+            `, [folderPath, file.name, mimeType, stat.size, fileIdentifier]);
 
             // If this was an INSERT (xmax is 0) OR it failed processing previously (blurhash is null)
             if (result.rows.length > 0 && (result.rows[0].xmax == 0 || !result.rows[0].blurhash)) {

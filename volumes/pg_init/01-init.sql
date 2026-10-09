@@ -17,9 +17,10 @@ CREATE TABLE media_files (
     transcoded_mp4_path TEXT,
     transcoded_webm_path TEXT,
     clip_embedding vector(512),
+    file_identifier VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(folder_path, file_name)
+    UNIQUE(file_identifier)
 );
 
 CREATE INDEX idx_media_folder ON media_files(folder_path);
