@@ -100,4 +100,16 @@
     background: rgba(255, 255, 255, 0.1);
     color: white;
   }
+  @media (max-width: 768px) {
+    .toast-container {
+      left: 16px;
+      right: 16px;
+      bottom: 24px;
+      align-items: stretch;
+    }
+    .toast {
+      min-width: 0;
+      width: auto;
+    }
+  }
 </style>

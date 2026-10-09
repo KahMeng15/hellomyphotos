@@ -194,7 +194,7 @@
               onclick={() => openLightbox(entry.index)}
               objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
               square={viewMode.includes('square')}
-              targetHeight={viewMode.includes('small') ? (windowWidth <= 430 ? 100 : 150) : viewMode.includes('large') ? 350 : 250}
+              targetHeight={viewMode.includes('small') ? (windowWidth <= 768 ? 100 : 150) : viewMode.includes('large') ? (windowWidth <= 768 ? 200 : 350) : 250}
               priority={i < 8}
               initialAspectRatio={getAspectRatio(entry.file)}
             />
@@ -213,7 +213,7 @@
           onclick={() => openLightbox(i)}
           objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
           square={viewMode.includes('square')}
-          targetHeight={viewMode.includes('small') ? (windowWidth <= 430 ? 100 : 150) : viewMode.includes('large') ? 350 : 250}
+          targetHeight={viewMode.includes('small') ? (windowWidth <= 768 ? 100 : 150) : viewMode.includes('large') ? (windowWidth <= 768 ? 200 : 350) : 250}
           priority={i < 8}
           initialAspectRatio={getAspectRatio(file)}
         />
@@ -408,6 +408,12 @@
     flex-grow: 999999999;
   }
   @media (max-width: 768px) {
+    .sticky-header {
+      padding: 10px 24px;
+    }
+    .grid {
+      margin: 0 -24px;
+    }
     .header-content {
       flex-direction: column;
       align-items: flex-start;

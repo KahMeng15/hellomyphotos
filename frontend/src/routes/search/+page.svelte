@@ -198,7 +198,7 @@
       onclick={() => openLightbox(i)}
       objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
       square={viewMode.includes('square')}
-      targetHeight={viewMode.includes('small') ? (windowWidth <= 430 ? 100 : 150) : viewMode.includes('large') ? 350 : 250}
+      targetHeight={viewMode.includes('small') ? (windowWidth <= 768 ? 100 : 150) : viewMode.includes('large') ? (windowWidth <= 768 ? 200 : 350) : 250}
       priority={i < 8}
       initialAspectRatio={getAspectRatio(file)}
     />
@@ -374,17 +374,16 @@
   }
 
   @media (max-width: 768px) {
+    .grid {
+      margin: 0 -24px;
+    }
     .grid.small-square {
       grid-template-columns: repeat(3, 1fr);
     }
-  }
-
-  @media (max-width: 430px) {
     .sticky-header {
-      margin: -16px -16px 16px -16px;
-      padding: 16px;
+      margin: -24px -24px 16px -24px;
+      padding: 10px 24px;
     }
-    
     .header-text-container h2 {
       font-size: 1.5rem;
     }

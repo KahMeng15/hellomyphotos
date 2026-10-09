@@ -755,6 +755,9 @@ import { updatePreferences } from '$lib/api/auth';
   
 
   @media (max-width: 768px) {
+    .dir-grid.list-view .dir-card {
+      width: 100%;
+    }
     .header-content {
       flex-direction: column;
       gap: 16px;

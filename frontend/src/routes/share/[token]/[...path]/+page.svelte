@@ -422,13 +422,15 @@ import { replaceState } from '$app/navigation';
 </div>
 
 <div class="sticky-header" style="
+  --scroll-prog: {scrollProgress};
   background: linear-gradient(to bottom, rgba(0,0,0,calc(0.9 * {scrollProgress})) 0%, rgba(0,0,0,calc(0.6 * {scrollProgress})) 100%);
   backdrop-filter: blur(calc(16px * {scrollProgress}));
   -webkit-backdrop-filter: blur(calc(16px * {scrollProgress}));
   border-bottom-color: rgba(255,255,255,calc(0.05 * {scrollProgress}));
 ">
-  <div class="header-content">
+  <div class="header-content" class:frozen-mobile={scrollProgress === 1}>
     <div class="header-left">
+      <div style="display: flex; flex-direction: row; align-items: center;">
       <div class="header-text-container" style="--scroll-prog: {scrollProgress};">
         {#key personName || data.folderPath}
           {#if personName}
@@ -457,10 +459,23 @@ import { replaceState } from '$app/navigation';
           {/if}
         {/key}
       </div>
+      </div>
     </div>
     
     <div class="header-right">
       <div class="toolbar">
+        {#if !personName && data.folderPath && data.folderPath !== data.baseFolderPath}
+          {@const parts = data.folderPath.split('/')}
+          {@const parentPath = parts.slice(0, -1).join('/')}
+          {@const isParentBase = parentPath === data.baseFolderPath}
+          {@const targetUrl = isParentBase ? `/share/${$page.params.token}` : `/share/${$page.params.token}/${parentPath.substring(data.baseFolderPath.length + 1)}`}
+          <a href={targetUrl} 
+             class="icon-btn mobile-only-back" 
+             style="opacity: {scrollProgress === 1 ? 1 : 0}; width: {scrollProgress === 1 ? '36px' : '0'}; padding: {scrollProgress === 1 ? '8px' : '0'}; margin-right: {scrollProgress === 1 ? '0' : '-8px'}; overflow: hidden; transition: width 0.2s, opacity 0.2s, margin 0.2s, padding 0.2s; pointer-events: {scrollProgress === 1 ? 'auto' : 'none'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" 
+             title="Go to parent folder">
+            <ChevronLeft size={24} />
+          </a>
+        {/if}
         <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
           <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort">
             <ArrowDownUp size={18} />
@@ -570,7 +585,7 @@ import { replaceState } from '$app/navigation';
       onclick={() => openLightbox(i)}
       objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
       square={viewMode.includes('square')}
-      targetHeight={viewMode.includes('small') ? (windowWidth <= 430 ? 100 : 150) : viewMode.includes('large') ? 350 : 250}
+      targetHeight={viewMode.includes('small') ? (windowWidth <= 768 ? 100 : 150) : viewMode.includes('large') ? (windowWidth <= 768 ? 200 : 350) : 250}
       priority={i < 8}
     />
   {/each}
@@ -916,10 +931,35 @@ import { replaceState } from '$app/navigation';
     flex-grow: 999999999;
   }
   @media (max-width: 768px) {
+    .sticky-header {
+      padding: calc(24px - (14px * var(--scroll-prog))) 24px;
+      margin-bottom: calc(24px - (14px * var(--scroll-prog)));
+    }
+    .dir-grid.list-view .dir-card {
+      width: 100%;
+    }
+    .grid {
+      margin: 0 -24px;
+    }
     .header-content {
       flex-direction: column;
       align-items: flex-start;
       gap: 4px;
+    }
+    .header-content.frozen-mobile {
+      flex-direction: row;
+      align-items: center;
+    }
+    .header-content.frozen-mobile .header-left {
+      display: none !important;
+    }
+    .header-content.frozen-mobile .header-right {
+      width: auto;
+      flex: 1;
+      justify-content: flex-start;
+    }
+    .header-content.frozen-mobile .count {
+      display: none !important;
     }
     .header-right {
       flex-direction: row;
@@ -953,4 +993,9 @@ import { replaceState } from '$app/navigation';
     min-height: 400px;
   }
 
+  @media (min-width: 769px) {
+    .mobile-only-back {
+      display: none !important;
+    }
+  }
 </style>
