@@ -62,60 +62,69 @@ export class ScannerService {
           if (ext === '.mov') mimeType = 'video/quicktime';
 
           if (ALLOWED_MIME_TYPES.has(mimeType)) {
-            const stat = await fs.promises.stat(path.join(fullPath, file.name));
-            currentFilesOnDisk.push(file.name);
-            
-            // Highly stable cross-platform signature (works on :ro Docker mounts unlike inodes)
-            const fileIdentifier = `sz-${stat.size}-mt-${Math.floor(stat.mtimeMs)}`;
+            try {
+              const stat = await fs.promises.stat(path.join(fullPath, file.name));
+              currentFilesOnDisk.push(file.name);
+              
+              // Cross-platform stable signature including inode when available to distinguish files with identical size and timestamp
+              const inoPart = stat.ino ? `ino-${stat.ino}-` : '';
+              const fileIdentifier = `${inoPart}sz-${stat.size}-mt-${Math.floor(stat.mtimeMs)}`;
 
-            // Folder Rename Heuristic & Self-Healing
-            if (!folderHealed) {
-              const oldRow = await query(`SELECT folder_path FROM media_files WHERE file_identifier = $1 LIMIT 1`, [fileIdentifier]);
-              if (oldRow.rows.length > 0) {
-                const oldFolder = oldRow.rows[0].folder_path;
-                if (oldFolder && oldFolder !== folderPath) {
-                  // The file moved from oldFolder to folderPath. Did the entire folder rename?
-                  const oldFullPath = path.join(MEDIA_ROOT, oldFolder);
-                  const oldFolderExists = await fs.promises.access(oldFullPath).then(() => true).catch(() => false);
-                  
-                  if (!oldFolderExists) {
-                    console.log(`[Scanner] Detected folder rename from ${oldFolder} to ${folderPath}. Healing metadata...`);
-                    await query(`UPDATE shared_folders SET folder_path = $1 WHERE folder_path = $2`, [folderPath, oldFolder]);
-                    await query(`UPDATE folder_settings SET folder_path = $1 WHERE folder_path = $2`, [folderPath, oldFolder]);
-                    // Update all files en masse to speed up the loop
-                    await query(`UPDATE media_files SET folder_path = $1 WHERE folder_path = $2`, [folderPath, oldFolder]);
+              // Folder Rename Heuristic & Self-Healing
+              if (!folderHealed) {
+                const oldRow = await query(`SELECT folder_path FROM media_files WHERE file_identifier = $1 LIMIT 1`, [fileIdentifier]);
+                if (oldRow.rows.length > 0) {
+                  const oldFolder = oldRow.rows[0].folder_path;
+                  if (oldFolder && oldFolder !== folderPath) {
+                    // The file moved from oldFolder to folderPath. Did the entire folder rename?
+                    const oldFullPath = path.join(MEDIA_ROOT, oldFolder);
+                    const oldFolderExists = await fs.promises.access(oldFullPath).then(() => true).catch(() => false);
+                    
+                    if (!oldFolderExists) {
+                      console.log(`[Scanner] Detected folder rename from ${oldFolder} to ${folderPath}. Healing metadata...`);
+                      await query(`UPDATE shared_folders SET folder_path = $1 WHERE folder_path = $2`, [folderPath, oldFolder]);
+                      await query(`UPDATE folder_settings SET folder_path = $1 WHERE folder_path = $2`, [folderPath, oldFolder]);
+                      // Update all files en masse to speed up the loop
+                      await query(`UPDATE media_files SET folder_path = $1 WHERE folder_path = $2`, [folderPath, oldFolder]);
+                    }
                   }
                 }
+                folderHealed = true;
               }
-              folderHealed = true;
-            }
 
-            // Legacy Backfill: If the row exists but has no file_identifier, update it first.
-            await query(`
-              UPDATE media_files 
-              SET file_identifier = $1 
-              WHERE folder_path = $2 AND file_name = $3 AND file_identifier IS NULL
-            `, [fileIdentifier, folderPath, file.name]);
+              // Backfill / update: If the row exists for this path, ensure its file_identifier matches
+              try {
+                await query(`
+                  UPDATE media_files 
+                  SET file_identifier = $1 
+                  WHERE folder_path = $2 AND file_name = $3 AND (file_identifier IS NULL OR file_identifier != $1)
+                `, [fileIdentifier, folderPath, file.name]);
+              } catch (backfillErr: any) {
+                // If unique constraint conflict occurs on file_identifier, ignore and proceed
+              }
 
-            // Upsert file into DB based on stable file_identifier
-            const result = await query(`
-              INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes, file_identifier)
-              VALUES ($1, $2, $3, $4, $5)
-              ON CONFLICT (file_identifier) DO UPDATE 
-              SET folder_path = EXCLUDED.folder_path, 
-                  file_name = EXCLUDED.file_name,
-                  size_bytes = EXCLUDED.size_bytes,
-                  updated_at = NOW()
-              RETURNING id, xmax, blurhash
-            `, [folderPath, file.name, mimeType, stat.size, fileIdentifier]);
+              // Upsert file into DB based on stable file_identifier
+              const result = await query(`
+                INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes, file_identifier)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (file_identifier) DO UPDATE 
+                SET folder_path = EXCLUDED.folder_path, 
+                    file_name = EXCLUDED.file_name,
+                    size_bytes = EXCLUDED.size_bytes,
+                    updated_at = NOW()
+                RETURNING id, xmax, blurhash
+              `, [folderPath, file.name, mimeType, stat.size, fileIdentifier]);
 
-            // If this was an INSERT (xmax is 0) OR it failed processing previously (blurhash is null)
-            if (result.rows.length > 0 && (result.rows[0].xmax == 0 || !result.rows[0].blurhash)) {
-              await dispatchMediaFile({ 
-                mediaId: result.rows[0].id, 
-                fullPath: path.join(fullPath, file.name),
-                mimeType 
-              });
+              // If this was an INSERT (xmax is 0) OR it failed processing previously (blurhash is null)
+              if (result.rows.length > 0 && (result.rows[0].xmax == 0 || !result.rows[0].blurhash)) {
+                await dispatchMediaFile({ 
+                  mediaId: result.rows[0].id, 
+                  fullPath: path.join(fullPath, file.name),
+                  mimeType 
+                });
+              }
+            } catch (fileErr: any) {
+              console.error(`Error processing file ${file.name} in ${fullPath}:`, fileErr.message);
             }
           }
         } else if (file.isDirectory()) {

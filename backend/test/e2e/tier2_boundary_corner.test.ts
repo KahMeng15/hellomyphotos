@@ -56,12 +56,15 @@ export async function runTier2Tests(): Promise<{ passed: number; failed: number;
     const gcDir = path.join(MEDIA_ROOT, 'e2e_gc_dir');
     fs.mkdirSync(gcDir, { recursive: true });
 
-    const jpeg = await sharp({
+    const jpegKeep = await sharp({
       create: { width: 64, height: 64, channels: 3, background: { r: 80, g: 120, b: 160 } }
     }).jpeg().toBuffer();
+    const jpegDelete = await sharp({
+      create: { width: 80, height: 80, channels: 3, background: { r: 90, g: 130, b: 170 } }
+    }).jpeg().toBuffer();
 
-    fs.writeFileSync(path.join(gcDir, 'keep.jpg'), jpeg);
-    fs.writeFileSync(path.join(gcDir, 'delete.jpg'), jpeg);
+    fs.writeFileSync(path.join(gcDir, 'keep.jpg'), jpegKeep);
+    fs.writeFileSync(path.join(gcDir, 'delete.jpg'), jpegDelete);
 
     await query("INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes) VALUES ('e2e_gc_dir', 'keep.jpg', 'image/jpeg', 100)");
     await query("INSERT INTO media_files (folder_path, file_name, mime_type, size_bytes) VALUES ('e2e_gc_dir', 'delete.jpg', 'image/jpeg', 100)");
