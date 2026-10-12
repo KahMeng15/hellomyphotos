@@ -15,7 +15,7 @@ if (process.env.IS_WORKER === 'true') {
       try {
         const CACHE_ROOT = process.env.CACHE_ROOT || path.join(process.cwd(), '../volumes/cache_rw');
         
-        for (const [dirName, tableName] of [['thumbnails', 'media_files'], ['faces', 'face_embeddings'], ['previews', 'media_files']]) {
+        for (const [dirName, tableName] of [['thumbnails', 'media_files'], ['faces', 'people'], ['previews', 'media_files']]) {
           const dirPath = path.join(CACHE_ROOT, dirName);
           if (!fs.existsSync(dirPath)) continue;
           const files = await fs.promises.readdir(dirPath);
@@ -27,7 +27,11 @@ if (process.env.IS_WORKER === 'true') {
           const validIds = new Set<string>();
           for (let i = 0; i < uuids.length; i += chunkSize) {
             const chunk = uuids.slice(i, i + chunkSize);
-            const dbIdsRes = await query(`SELECT id FROM ${tableName} WHERE id = ANY($1::uuid[])`, [chunk]);
+            let querySql = `SELECT id FROM ${tableName} WHERE id = ANY($1::uuid[])`;
+            if (tableName === 'people') {
+              querySql = `SELECT id FROM people WHERE id = ANY($1::uuid[]) UNION SELECT DISTINCT person_id AS id FROM face_embeddings WHERE person_id = ANY($1::uuid[])`;
+            }
+            const dbIdsRes = await query(querySql, [chunk]);
             dbIdsRes.rows.forEach(r => validIds.add(r.id));
           }
 

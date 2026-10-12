@@ -554,8 +554,11 @@
                       <span class="face-avatar">
                         <BlurhashImage 
                           hash={''}
-                          src={getThumbnailUrl(media.id)} 
+                          src={`${API_BASE}/api/faces/${face.person_id}/thumbnail`}
+                          fallbackSrc={getThumbnailUrl(media.id)} 
                           faceBox={face.bounding_box}
+                          origWidth={mediaW}
+                          origHeight={mediaH}
                           objectFit="cover" 
                           square={true} 
                         />
@@ -569,6 +572,8 @@
                           hash={''}
                           src={getThumbnailUrl(media.id)} 
                           faceBox={face.bounding_box}
+                          origWidth={mediaW}
+                          origHeight={mediaH}
                           objectFit="cover" 
                           square={true} 
                         />

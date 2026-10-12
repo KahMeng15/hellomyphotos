@@ -5,7 +5,7 @@
   import { decode } from 'blurhash';
   import { Play } from '@lucide/svelte';
 
-  let { hash, src, fallbackSrc, alt = '', isVideo = false, objectFit = 'contain', faceBox, square = false, targetHeight = 250, priority = false, onclick, initialAspectRatio }: { hash: string, src: string, fallbackSrc?: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1: number, y1: number, x2: number, y2: number}, square?: boolean, targetHeight?: number, priority?: boolean, onclick?: (e: MouseEvent) => void, initialAspectRatio?: number } = $props();
+  let { hash, src, fallbackSrc, alt = '', isVideo = false, objectFit = 'contain', faceBox, origWidth, origHeight, square = false, targetHeight = 250, priority = false, onclick, initialAspectRatio }: { hash: string, src: string, fallbackSrc?: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1?: number, y1?: number, x2?: number, y2?: number, x?: number, y?: number, w?: number, h?: number}, origWidth?: number, origHeight?: number, square?: boolean, targetHeight?: number, priority?: boolean, onclick?: (e: MouseEvent) => void, initialAspectRatio?: number } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
@@ -32,21 +32,34 @@
     if (img.naturalWidth && img.naturalHeight) {
       aspectRatio = img.naturalWidth / img.naturalHeight;
       if (faceBox && (isUsingFallback || !fallbackSrc)) {
-        const cx = (faceBox.x1 + faceBox.x2) / 2;
-        const cy = (faceBox.y1 + faceBox.y2) / 2;
+        const box = faceBox as any;
+        const x1 = box.x1 ?? box.x ?? 0;
+        const y1 = box.y1 ?? box.y ?? 0;
+        const x2 = box.x2 ?? (x1 + (box.w || 0));
+        const y2 = box.y2 ?? (y1 + (box.h || 0));
+
+        const cx = (x1 + x2) / 2;
+        const cy = (y1 + y2) / 2;
+        const faceW = Math.max(1, x2 - x1);
+        const faceH = Math.max(1, y2 - y1);
+
         const imgW = img.naturalWidth;
         const imgH = img.naturalHeight;
-        const relX = cx / imgW;
-        const relY = cy / imgH;
-        const faceW = faceBox.x2 - faceBox.x1;
-        const faceH = faceBox.y2 - faceBox.y1;
-        const maxFaceDim = Math.max(faceW, faceH, 1);
         const minDim = Math.min(imgW, imgH);
 
-        const N = Math.max(1, Math.min(15, 0.4 * minDim / maxFaceDim));
+        const origW = origWidth || imgW;
+        const origH = origHeight || imgH;
 
-        const tx = -(relX - 0.5) * imgW / minDim * 100;
-        const ty = -(relY - 0.5) * imgH / minDim * 100;
+        const relX = cx / origW;
+        const relY = cy / origH;
+        const relFaceW = faceW / origW;
+        const relFaceH = faceH / origH;
+        const maxFaceRel = Math.max(relFaceW, relFaceH, 0.01);
+
+        const N = Math.max(1, Math.min(15, 0.4 / maxFaceRel));
+
+        const tx = -(relX - 0.5) * (imgW / minDim) * 100;
+        const ty = -(relY - 0.5) * (imgH / minDim) * 100;
 
         objectPosition = '50% 50%';
         transformString = `scale(${N}) translate(${tx}%, ${ty}%)`;

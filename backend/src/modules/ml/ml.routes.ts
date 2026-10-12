@@ -47,22 +47,40 @@ async function generateFaceThumbnailAsync(personId: string, face: any, fullPath:
     if (fs.existsSync(cachedPath)) return;
     
     let sourcePath = fullPath;
-    const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
-    const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
-    if (fs.existsSync(cache480)) {
-      sourcePath = cache480;
-    } else if (fs.existsSync(cache1080)) {
-      sourcePath = cache1080;
+    let isDownscaled = false;
+    if (!fs.existsSync(sourcePath)) {
+      const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
+      const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
+      if (fs.existsSync(cache1080)) {
+        sourcePath = cache1080;
+        isDownscaled = true;
+      } else if (fs.existsSync(cache480)) {
+        sourcePath = cache480;
+        isDownscaled = true;
+      }
     }
+    if (!fs.existsSync(sourcePath)) return;
 
     const crop = parseBoundingBox(face.bounding_box);
     const meta = await sharp(sourcePath).metadata();
     const imgW = meta.width || 1;
     const imgH = meta.height || 1;
-    crop.left = Math.min(crop.left, imgW - 1);
-    crop.top = Math.min(crop.top, imgH - 1);
-    crop.width = Math.min(crop.width, imgW - crop.left);
-    crop.height = Math.min(crop.height, imgH - crop.top);
+
+    if (isDownscaled) {
+      const origW = face.img_width || imgW;
+      const origH = face.img_height || imgH;
+      const scaleX = imgW / origW;
+      const scaleY = imgH / origH;
+      crop.left = Math.round(crop.left * scaleX);
+      crop.top = Math.round(crop.top * scaleY);
+      crop.width = Math.round(crop.width * scaleX);
+      crop.height = Math.round(crop.height * scaleY);
+    }
+
+    crop.left = Math.max(0, Math.min(crop.left, imgW - 1));
+    crop.top = Math.max(0, Math.min(crop.top, imgH - 1));
+    crop.width = Math.max(1, Math.min(crop.width, imgW - crop.left));
+    crop.height = Math.max(1, Math.min(crop.height, imgH - crop.top));
     
     await sharp(sourcePath)
       .extract(crop)
@@ -156,6 +174,8 @@ export async function mlRoutes(fastify: FastifyInstance) {
         pc.face_count,
         rf.media_id,
         rf.bounding_box,
+        COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+        COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
         m.blurhash,
         m.file_name,
         m.folder_path,
@@ -341,7 +361,9 @@ export async function mlRoutes(fastify: FastifyInstance) {
 
     if (coverResult.rows.length > 0 && coverResult.rows[0].cover_media_id) {
       const mediaResult = await query(`
-        SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name
+        SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name,
+               COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+               COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height
         FROM face_embeddings fe
         JOIN media_files m ON m.id = fe.media_id
         WHERE fe.person_id = $1 AND fe.media_id = $2
@@ -363,7 +385,9 @@ export async function mlRoutes(fastify: FastifyInstance) {
     if (!faceToUse) {
       // Fall back to best solo photo (fewest other faces)
       const repResult = await query(`
-        SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name
+        SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name,
+               COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+               COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height
         FROM face_embeddings fe
         JOIN media_files m ON m.id = fe.media_id
         WHERE fe.person_id = $1
@@ -387,11 +411,15 @@ export async function mlRoutes(fastify: FastifyInstance) {
       return sendDefaultAvatar(reply);
     }
 
+    await generateFaceThumbnailAsync(id, faceToUse, fullPathToUse, cachedPath);
 
+    if (fs.existsSync(cachedPath)) {
+      reply.header('Content-Type', 'image/webp');
+      reply.header('Cache-Control', 'public, max-age=86400');
+      return reply.send(fs.createReadStream(cachedPath));
+    }
 
-    // Return 404 so the frontend falls back to the CSS-cropped full image thumbnail
-    reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
-    return reply.status(404).send({ error: 'Thumbnail is generating' });
+    return sendDefaultAvatar(reply);
   });
 
   // Get all faces in a specific media file

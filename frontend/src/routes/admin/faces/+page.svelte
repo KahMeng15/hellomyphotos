@@ -122,10 +122,13 @@
       >
         <BlurhashImage 
           hash={face.blurhash || ''}
-          src={getThumbnailUrl(face.media_id)} 
+          src={`${API_BASE}/api/faces/${face.person_id}/thumbnail`}
+          fallbackSrc={getThumbnailUrl(face.media_id)} 
           alt="Person {face.person_id}"
           objectFit="cover"
           faceBox={face.bounding_box}
+          origWidth={face.img_width}
+          origHeight={face.img_height}
           square={true}
         />
         {#if selectedFaces.has(face.person_id)}

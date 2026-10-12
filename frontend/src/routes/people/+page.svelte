@@ -260,10 +260,13 @@ import { updatePreferences } from '$lib/api/auth';
                <div style="width: 32px; height: 32px; border-radius: 4px; overflow: hidden; flex-shrink: 0;">
                  <BlurhashImage 
                     hash={face.blurhash || ''}
-                    src={face.has_thumbnail ? `${API_BASE}/api/faces/${face.person_id}/thumbnail` : getThumbnailUrl(face.media_id)}
+                    src={`${API_BASE}/api/faces/${face.person_id}/thumbnail`}
+                    fallbackSrc={getThumbnailUrl(face.media_id)}
                     alt={face.name || 'unnamed'}
                     objectFit="cover"
-                    faceBox={face.has_thumbnail ? undefined : face.bounding_box}
+                    faceBox={face.bounding_box}
+                    origWidth={face.img_width}
+                    origHeight={face.img_height}
                     square={true}
                  />
                </div>
@@ -295,10 +298,13 @@ import { updatePreferences } from '$lib/api/auth';
         <div class="dir-cover" style="border-radius: 0; overflow: hidden;">
           <BlurhashImage 
             hash={face.blurhash || ''}
-            src={face.has_thumbnail ? `${API_BASE}/api/faces/${face.person_id}/thumbnail` : getThumbnailUrl(face.media_id)}
+            src={`${API_BASE}/api/faces/${face.person_id}/thumbnail`}
+            fallbackSrc={getThumbnailUrl(face.media_id)}
             alt={face.name || 'unnamed'}
             objectFit="cover"
-            faceBox={face.has_thumbnail ? undefined : face.bounding_box}
+            faceBox={face.bounding_box}
+            origWidth={face.img_width}
+            origHeight={face.img_height}
             square={true}
             priority={i < 8}
           />
