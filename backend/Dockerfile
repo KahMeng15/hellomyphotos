@@ -1,4 +1,4 @@
-FROM node:25-trixie-slim AS builder
+FROM node:26-trixie-slim AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -25,7 +25,7 @@ COPY . .
 RUN g++ -O2 -o /usr/local/bin/heic-primary-decode src/utils/heic_primary_decode.cpp -lheif
 RUN npx esbuild src/server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js --sourcemap
 
-FROM node:25-trixie-slim
+FROM node:26-trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
