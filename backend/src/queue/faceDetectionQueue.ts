@@ -22,7 +22,13 @@ if (process.env.IS_WORKER === 'true') {
         await MLService.detectFaces(mediaId, fullPath);
       } catch (err: any) {
         if (err.message.includes('Thumbnail not yet available')) {
-          console.log(`[Face Detection Worker] Thumbnail not ready for ${mediaId}, delaying job for 10 seconds...`);
+          const delayCount = ((job.data?._delayAttempts as number) || 0) + 1;
+          if (delayCount >= 3 || (job.attemptsMade && job.attemptsMade >= 3)) {
+            console.warn(`[Face Detection Worker] Thumbnail not ready for ${mediaId} after ${delayCount} attempts. Skipping face detection.`);
+            return { skipped: true, reason: 'Thumbnail not available' };
+          }
+          console.log(`[Face Detection Worker] Thumbnail not ready for ${mediaId}, delaying job for 10 seconds (attempt ${delayCount}/3)...`);
+          await job.updateData({ ...job.data, _delayAttempts: delayCount });
           await job.moveToDelayed(Date.now() + 10000, job.token);
           throw new DelayedError();
         }

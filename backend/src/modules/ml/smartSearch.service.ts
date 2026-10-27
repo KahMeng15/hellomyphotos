@@ -8,6 +8,7 @@ import {
 import fs from 'fs';
 import path from 'path';
 import { query } from '../../config/db';
+import { VideoService } from '../media/video.service';
 
 const MODEL_NAME = 'Xenova/clip-vit-base-patch32';
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
@@ -124,6 +125,18 @@ export class SmartSearchService {
       const supportedNatively = ['.jpg', '.jpeg', '.png', '.webp', '.tiff', '.bmp', '.gif'];
       if (supportedNatively.includes(ext)) {
         targetFile = fullPath;
+      } else {
+        const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v', '.3gp', '.wmv', '.mts', '.m2ts', '.flv'];
+        if (videoExts.includes(ext)) {
+          try {
+            await VideoService.extractThumbnail(mediaId, fullPath);
+            if (fs.existsSync(cachedThumbnail)) {
+              targetFile = cachedThumbnail;
+            }
+          } catch (e: any) {
+            console.warn(`[SmartSearchService] On-demand video thumbnail extraction failed for ${mediaId}:`, e.message);
+          }
+        }
       }
     }
 

@@ -1,7 +1,16 @@
 const DATE_FIELDS = ['dateTimeOriginal', 'DateTimeOriginal', 'createDate', 'CreateDate', 'modifyDate', 'ModifyDate', 'timestamp'];
 
-function normalizeExifDate(val: string): string {
-  return val.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+export function normalizeExifDate(val: string): string {
+  // If formatted as "YYYY:MM:DD HH:MM:SS" -> replace colons in date part with hyphens
+  let normalized = val.trim().replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+
+  // If ends with Z or .000Z and does not have an explicit +/- timezone offset, strip the trailing Z
+  // to prevent treating local camera wall-clock time as UTC, which causes inadvertent timezone/day shifts.
+  if (/T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/i.test(normalized) && !/[+-]\d{2}:?\d{2}$/.test(normalized)) {
+    normalized = normalized.replace(/Z$/i, '');
+  }
+
+  return normalized;
 }
 
 export function getSortDate(file: { exif_json?: Record<string, unknown> | null; created_at?: string | null }): number {
@@ -27,10 +36,56 @@ export function getRawDate(file: { exif_json?: Record<string, unknown> | null; c
   return new Date(file.created_at || 0);
 }
 
-export function formatDate(file: { exif_json?: Record<string, unknown> | null; created_at?: string | null }): string {
+export function formatDate(file: { exif_json?: Record<string, unknown> | null; created_at?: string | null }, serverTimezone?: string): string {
   const d = getRawDate(file);
   if (!isNaN(d.getTime()) && d.getTime() !== 0) {
-    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    const clientLocale = typeof navigator !== 'undefined' && navigator.language ? navigator.language : undefined;
+    let clientTimezone: string | undefined;
+    try {
+      clientTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      clientTimezone = serverTimezone || undefined;
+    }
+
+    return d.toLocaleDateString(clientLocale, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: clientTimezone || serverTimezone
+    });
   }
   return 'Unknown Date';
+}
+
+export function formatLocalDateTime(dateInput: Date | string | number, serverTimezone?: string): string {
+  let d: Date;
+  if (dateInput instanceof Date) {
+    d = dateInput;
+  } else if (typeof dateInput === 'string') {
+    d = new Date(normalizeExifDate(dateInput));
+  } else {
+    d = new Date(dateInput);
+  }
+
+  if (isNaN(d.getTime()) || d.getTime() === 0) return 'Unknown Date';
+
+  // Detect client locale & timezone
+  const clientLocale = typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'default';
+  let clientTimezone: string | undefined;
+  try {
+    clientTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    clientTimezone = serverTimezone || 'UTC';
+  }
+
+  return new Intl.DateTimeFormat(clientLocale, {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: clientTimezone || serverTimezone
+  }).format(d);
 }

@@ -486,8 +486,8 @@
             <div class="details-grid">
               <div class="detail-block">
                 
-                <div class="detail-header">{isNaN(rawDate.getTime()) || rawDate.getTime() === 0 ? 'Unknown Date' : rawDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
-                <div class="detail-subheader">{isNaN(rawDate.getTime()) || rawDate.getTime() === 0 ? '-' : rawDate.toLocaleDateString('en-GB', { weekday: 'long' }) + ', ' + rawDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}</div>
+                <div class="detail-header">{isNaN(rawDate.getTime()) || rawDate.getTime() === 0 ? 'Unknown Date' : rawDate.toLocaleDateString(typeof navigator !== 'undefined' && navigator.language ? navigator.language : undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                <div class="detail-subheader">{isNaN(rawDate.getTime()) || rawDate.getTime() === 0 ? '-' : rawDate.toLocaleDateString(typeof navigator !== 'undefined' && navigator.language ? navigator.language : undefined, { weekday: 'long' }) + ', ' + rawDate.toLocaleTimeString(typeof navigator !== 'undefined' && navigator.language ? navigator.language : undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
               </div>
               <div class="detail-block">
                 <div class="detail-header">{media.file_name}</div>

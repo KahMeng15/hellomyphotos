@@ -142,7 +142,7 @@ export async function queueRoutes(fastify: FastifyInstance) {
       query('SELECT COUNT(DISTINCT folder_path)::int as folders, COUNT(*)::int as files FROM media_files').catch(() => ({ rows: [{ folders: 0, files: 0 }] })),
       query('SELECT COUNT(*)::int as total, COUNT(exif_json)::int as completed FROM media_files').catch(() => ({ rows: [{ total: 0, completed: 0 }] })),
       query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE has_1080p AND has_480p)::int as completed FROM media_files WHERE mime_type LIKE 'image/%'`).catch(() => ({ rows: [{ total: 0, completed: 0 }] })),
-      query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE has_480p IS NOT NULL)::int as completed FROM media_files WHERE mime_type LIKE 'video/%'`).catch(() => ({ rows: [{ total: 0, completed: 0 }] })),
+      query(`SELECT COUNT(*)::int as total, COUNT(*) FILTER (WHERE has_480p = true)::int as completed FROM media_files WHERE mime_type LIKE 'video/%'`).catch(() => ({ rows: [{ total: 0, completed: 0 }] })),
       query(`SELECT COUNT(*)::int as total, COUNT(clip_embedding)::int as completed FROM media_files WHERE mime_type LIKE 'image/%'`).catch(() => ({ rows: [{ total: 0, completed: 0 }] })),
       query(`SELECT (SELECT COUNT(*)::int FROM media_files WHERE mime_type LIKE 'image/%') as total, COALESCE((SELECT COUNT(DISTINCT media_id)::int FROM face_embeddings), 0) as completed`).catch(() => ({ rows: [{ total: 0, completed: 0 }] })),
       query(`SELECT (SELECT COUNT(*)::int FROM face_embeddings) as total, (SELECT COUNT(*)::int FROM face_embeddings WHERE person_id IS NOT NULL) as completed`).catch(() => ({ rows: [{ total: 0, completed: 0 }] })),
@@ -336,8 +336,8 @@ export async function queueRoutes(fastify: FastifyInstance) {
     } else if (name === 'video') {
       const total = await streamEnqueue(
         videoQueue,
-        `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL`,
-        `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
+        `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'video/%' AND (has_480p IS NULL OR has_480p = false)`,
+        `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'video/%' AND (has_480p IS NULL OR has_480p = false) ORDER BY id LIMIT $1 OFFSET $2`,
         toJob('process-video')
       );
       await recordEtaStart(name, total);
@@ -484,8 +484,8 @@ export async function queueRoutes(fastify: FastifyInstance) {
           ),
           streamEnqueue(
             videoQueue,
-            `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL`,
-            `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'video/%' AND has_480p IS NULL ORDER BY id LIMIT $1 OFFSET $2`,
+            `SELECT COUNT(*)::text as count FROM media_files WHERE mime_type LIKE 'video/%' AND (has_480p IS NULL OR has_480p = false)`,
+            `SELECT id, folder_path, file_name, mime_type FROM media_files WHERE mime_type LIKE 'video/%' AND (has_480p IS NULL OR has_480p = false) ORDER BY id LIMIT $1 OFFSET $2`,
             toJob('process-video')
           )
         ]);
