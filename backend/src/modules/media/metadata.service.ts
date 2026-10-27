@@ -249,16 +249,9 @@ export class MetadataService {
         }
       }
 
-      const width = exifJson?.width || null;
-      const height = exifJson?.height || null;
       await query(
-        `UPDATE media_files 
-         SET exif_json = $1, 
-             img_width = COALESCE(img_width, $2), 
-             img_height = COALESCE(img_height, $3), 
-             updated_at = NOW() 
-         WHERE id = $4`,
-        [exifJson ? JSON.stringify(exifJson) : '{}', width, height, mediaId]
+        `UPDATE media_files SET exif_json = $1, updated_at = NOW() WHERE id = $2`,
+        [exifJson ? JSON.stringify(exifJson) : '{}', mediaId]
       );
 
       return exifJson;

@@ -46,29 +46,27 @@ async function generateFaceThumbnailAsync(personId: string, face: any, fullPath:
     await faceThumbSemaphore.acquire();
     if (fs.existsSync(cachedPath)) return;
     
-    let sourcePath = fullPath;
-    let isDownscaled = false;
-    if (!fs.existsSync(sourcePath)) {
-      const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
-      const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
-      if (fs.existsSync(cache1080)) {
-        sourcePath = cache1080;
-        isDownscaled = true;
-      } else if (fs.existsSync(cache480)) {
-        sourcePath = cache480;
-        isDownscaled = true;
-      }
+    // Prefer the 480p/1080p thumbnail where face detection was performed
+    const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
+    const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
+    let sourcePath = '';
+    if (fs.existsSync(cache480)) {
+      sourcePath = cache480;
+    } else if (fs.existsSync(cache1080)) {
+      sourcePath = cache1080;
+    } else if (fs.existsSync(fullPath)) {
+      sourcePath = fullPath;
     }
-    if (!fs.existsSync(sourcePath)) return;
+    if (!sourcePath) return;
 
     const crop = parseBoundingBox(face.bounding_box);
     const meta = await sharp(sourcePath).metadata();
     const imgW = meta.width || 1;
     const imgH = meta.height || 1;
 
-    if (isDownscaled) {
-      const origW = face.img_width || imgW;
-      const origH = face.img_height || imgH;
+    const origW = face.img_width || imgW;
+    const origH = face.img_height || imgH;
+    if (origW && origH && (origW !== imgW || origH !== imgH)) {
       const scaleX = imgW / origW;
       const scaleY = imgH / origH;
       crop.left = Math.round(crop.left * scaleX);
