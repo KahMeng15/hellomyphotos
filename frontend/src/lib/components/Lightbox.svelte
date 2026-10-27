@@ -3,7 +3,7 @@
   import { env } from '$env/dynamic/public';
   import { fade, slide } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
-  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, getFaceThumbnailUrl, fetchMediaFaces, repairMedia, getMediaQueueStatus } from '$lib/api/media';
+  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, getFaceThumbnailUrl, fetchMediaFaces, repairMedia, getMediaQueueStatus, API_BASE } from '$lib/api/media';
   import { createShare } from '$lib/api/shares';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import BlurhashImage from './BlurhashImage.svelte';
@@ -554,7 +554,7 @@
                       <span class="face-avatar">
                         <BlurhashImage 
                           hash={''}
-                          src={`${API_BASE}/api/faces/${face.person_id}/thumbnail`}
+                          src={getFaceThumbnailUrl(face.person_id)}
                           fallbackSrc={getThumbnailUrl(media.id)} 
                           faceBox={face.bounding_box}
                           origWidth={mediaW}
