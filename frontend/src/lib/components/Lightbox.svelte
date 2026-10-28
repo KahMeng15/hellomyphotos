@@ -312,10 +312,17 @@
 
   // --- Download, share, cover ---
 
-  function download() {
+  const downloadUrl = $derived.by(() => {
+    if (!media?.id) return '';
     const base = getStreamUrl(media.id, token);
     const separator = base.includes('?') ? '&' : '?';
-    window.location.href = base + separator + 'download=1';
+    return base + separator + 'download=1';
+  });
+
+  function download() {
+    if (downloadUrl) {
+      window.location.href = downloadUrl;
+    }
   }
 
   let isSharing = $state(false);
@@ -363,7 +370,7 @@
     lastActivity = Date.now();
     isIdle = false;
     const interval = setInterval(() => {
-      if (!showInfo && Date.now() - lastActivity > 2500) {
+      if (!showInfo && Date.now() - lastActivity > 4000) {
         isIdle = true;
       }
     }, 300);
@@ -380,9 +387,9 @@
     <div class="main-area" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
       <div class="top-bar" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'}>
         {#if allowDownload}
-          <button class="icon-btn" onclick={download} title="Download">
+          <a href={downloadUrl} download={media.file_name} class="icon-btn" title="Download">
             <Download size={20} strokeWidth={2} />
-          </button>
+          </a>
         {/if}
         {#if !isSharedView}
           <button class="icon-btn {justShared ? 'success' : ''}" onclick={share} title="Share">
@@ -689,6 +696,7 @@
     justify-content: center;
     align-items: center;
     transition: background 0.2s;
+    text-decoration: none;
   }
   
   .icon-btn:hover, .icon-btn.active {
@@ -992,6 +1000,9 @@
     max-height: 100%;
     object-fit: contain;
     border-radius: 0;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   @media (max-width: 768px) {
