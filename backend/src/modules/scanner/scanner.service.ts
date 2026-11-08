@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { query } from '../../config/db';
+import { redis } from '../../config/redis';
 import { dispatchMediaFile } from '../../queue/dispatch';
 
 const defaultMediaDir = fs.existsSync('/app/media') ? '/app/media' : path.resolve(process.cwd(), '../volumes/media_ro');
@@ -158,6 +159,37 @@ export class ScannerService {
         } else {
           console.warn(`[Scanner] Folder ${fullPath} appears empty (0 entries). Skipping GC to avoid data loss on transient mount issue.`);
         }
+      }
+
+      // Pre-compute auto_cover_media_id if not set, so API requests don't calculate on the fly
+      try {
+        const coverCheck = await query(`SELECT cover_media_id, auto_cover_media_id FROM folder_settings WHERE folder_path = $1`, [folderPath]);
+        if (!coverCheck.rows[0]?.cover_media_id && !coverCheck.rows[0]?.auto_cover_media_id) {
+          const bestCover = await query(`
+            SELECT id FROM media_files
+            WHERE folder_path = $1 OR folder_path LIKE $1 || '/%'
+            ORDER BY (blurhash IS NOT NULL) DESC, id ASC
+            LIMIT 1
+          `, [folderPath]);
+          if (bestCover.rows.length > 0) {
+            await query(`
+              INSERT INTO folder_settings (folder_path, auto_cover_media_id)
+              VALUES ($1, $2)
+              ON CONFLICT (folder_path) DO UPDATE SET auto_cover_media_id = EXCLUDED.auto_cover_media_id
+            `, [folderPath, bestCover.rows[0].id]);
+          }
+        }
+      } catch (coverErr) {
+        // non-critical
+      }
+
+      // Invalidate directory cache for this folder and its parent
+      try {
+        const parent = folderPath.includes('/') ? folderPath.substring(0, folderPath.lastIndexOf('/')) : '';
+        await redis.del(`folder_dirs_v2:${folderPath}`).catch(() => {});
+        await redis.del(`folder_dirs_v2:${parent}`).catch(() => {});
+      } catch (cacheErr) {
+        // non-critical
       }
 
     } catch (err: any) {

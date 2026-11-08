@@ -695,7 +695,17 @@ import { replaceState } from '$app/navigation';
 {#if data.directories.length > 0}
   <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (data.files.length > 0 ? 'list-view' : '')}">
     {#each sortedDirectories as dir, i}
-      <div class="dir-card" style="animation-delay: {i * 40}ms; z-index: {activeFolderMenu === dir.name ? 50 : 'auto'};" role="link" tabindex="0" onclick={(e) => { if ((e.target as HTMLElement).closest('button')) return; goto(`/folder/${data.folderPath ? data.folderPath + '/' + dir.name : dir.name}`); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goto(`/folder/${data.folderPath ? data.folderPath + '/' + dir.name : dir.name}`); } }}>
+      <a 
+        class="dir-card" 
+        style="animation-delay: {i * 40}ms; z-index: {activeFolderMenu === dir.name ? 50 : 'auto'};" 
+        href="/folder/{data.folderPath ? data.folderPath + '/' + dir.name : dir.name}"
+        onclick={(e) => { 
+          if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.dropdown-menu')) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+      >
         {#if isFolderOnly && folderViewMode === 'list'}
           <div class="dir-info">
             <div class="dir-label">
@@ -757,7 +767,7 @@ import { replaceState } from '$app/navigation';
             {/if}
           </div>
         {/if}
-      </div>
+      </a>
     {/each}
   </div>
 {/if}

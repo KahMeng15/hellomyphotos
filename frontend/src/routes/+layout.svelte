@@ -280,7 +280,7 @@
     </aside>
   {/if}
 
-  <main class="main-content {($page.url.pathname === '/login' || (!$currentUser && $page.url.pathname === '/')) ? 'no-padding' : ''}">
+  <main class="main-content {($page.url.pathname === '/login' || (!$currentUser && $page.url.pathname === '/')) ? 'no-padding' : ''} {$navigating ? 'is-navigating' : ''}">
     {#if $navigating}
       <div class="nav-loading-bar"></div>
     {/if}
@@ -547,9 +547,10 @@
     top: 0;
     left: 0;
     width: 100%;
-    height: 2px;
+    height: 3px;
     overflow: hidden;
     z-index: 9999;
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.7);
   }
 
   .nav-loading-bar::after {
@@ -557,8 +558,14 @@
     display: block;
     width: 100%;
     height: 100%;
-    background: linear-gradient(90deg, transparent 0%, var(--accent-color, #6366f1) 50%, transparent 100%);
-    animation: navBarSlide 1s ease infinite;
+    background: linear-gradient(90deg, transparent 0%, var(--accent-color, #6366f1) 40%, #a855f7 70%, transparent 100%);
+    animation: navBarSlide 0.8s ease infinite;
+  }
+
+  .main-content.is-navigating {
+    opacity: 0.82;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
   }
 
   @keyframes navBarSlide {
