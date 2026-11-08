@@ -24,6 +24,15 @@ fs.mkdirSync(path.join(CACHE_ROOT, 'transcoded', 'webm'), { recursive: true });
 export class MediaService {
   static async processImage(mediaId: string, fullPath: string) {
     try {
+      if (!fs.existsSync(fullPath)) {
+        console.warn(`[MediaService] File does not exist on disk: ${fullPath}`);
+        await query(
+          `UPDATE media_files SET processing_error = 'FILE_NOT_FOUND', failed_attempts = COALESCE(failed_attempts, 0) + 1, updated_at = NOW() WHERE id = $1`,
+          [mediaId]
+        ).catch(() => {});
+        return null;
+      }
+
       const dir1080 = path.join(CACHE_ROOT, '1080p');
       const dir480 = path.join(CACHE_ROOT, '480p');
       await fs.promises.mkdir(dir1080, { recursive: true });
@@ -111,7 +120,7 @@ export class MediaService {
       // 4. Save blurhash, has_1080p, has_480p status to media_files DB table
       await query(
         `UPDATE media_files 
-         SET blurhash = $1, has_1080p = true, has_480p = true, updated_at = NOW() 
+         SET blurhash = $1, has_1080p = true, has_480p = true, processing_error = NULL, updated_at = NOW() 
          WHERE id = $2`,
         [bHash, mediaId]
       );

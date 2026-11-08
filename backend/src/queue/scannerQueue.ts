@@ -45,6 +45,9 @@ if (process.env.IS_WORKER === 'true') {
           }
           if (delCount > 0) console.log(`[Scanner Worker] Deleted ${delCount} orphaned files in ${dirName}.`);
         }
+
+        // Also prune any non-existent folders from DB
+        await ScannerService.cleanupDeletedFolders();
       } catch (err) {
         console.error('[Scanner Worker] Cleanup error:', err);
       }

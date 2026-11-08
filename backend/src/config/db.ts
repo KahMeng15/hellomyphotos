@@ -58,6 +58,8 @@ const SCHEMA_STATEMENTS = [
     transcoded_mp4_path TEXT,
     transcoded_webm_path TEXT,
     clip_embedding vector(512),
+    failed_attempts INTEGER DEFAULT 0,
+    processing_error TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(folder_path, file_name)
@@ -164,6 +166,8 @@ const SCHEMA_STATEMENTS = [
 
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='img_width') THEN ALTER TABLE media_files ADD COLUMN img_width INTEGER; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='img_height') THEN ALTER TABLE media_files ADD COLUMN img_height INTEGER; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='processing_error') THEN ALTER TABLE media_files ADD COLUMN processing_error TEXT; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='failed_attempts') THEN ALTER TABLE media_files ADD COLUMN failed_attempts INTEGER DEFAULT 0; END IF; END $$;`,
 
   `CREATE TABLE IF NOT EXISTS folder_settings (
     folder_path TEXT PRIMARY KEY,

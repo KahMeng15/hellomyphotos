@@ -9,7 +9,51 @@ const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || defaultMediaDir);
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'video/mp4', 'video/quicktime']);
 
 export class ScannerService {
+  static async cleanupDeletedFolders() {
+    try {
+      // Safety Tip: Verify that MEDIA_ROOT itself exists and is readable before pruning
+      await fs.promises.access(MEDIA_ROOT, fs.constants.R_OK);
+      const rootEntries = await fs.promises.readdir(MEDIA_ROOT);
+      if (rootEntries.length === 0) {
+        const countRes = await query(`SELECT COUNT(*)::int as count FROM media_files`);
+        if (countRes.rows[0]?.count > 0) {
+          console.warn(`[Scanner GC] MEDIA_ROOT is empty but database contains ${countRes.rows[0].count} files. Mount might be disconnected. Aborting folder pruning.`);
+          return;
+        }
+      }
+
+      const result = await query(`
+        SELECT DISTINCT folder_path 
+        FROM (
+          SELECT folder_path FROM media_files WHERE folder_path IS NOT NULL AND folder_path != ''
+          UNION
+          SELECT folder_path FROM folder_settings WHERE folder_path IS NOT NULL AND folder_path != ''
+        ) f
+      `);
+
+      for (const row of result.rows) {
+        const fullPath = path.join(MEDIA_ROOT, row.folder_path);
+        const exists = await fs.promises.access(fullPath).then(() => true).catch(() => false);
+        if (!exists) {
+          console.log(`[Scanner GC] Pruning deleted folder from DB: ${row.folder_path}`);
+          await query(`DELETE FROM media_files WHERE folder_path = $1`, [row.folder_path]);
+          await query(`DELETE FROM folder_settings WHERE folder_path = $1`, [row.folder_path]);
+          try {
+            await redis.del(`folder_dirs_v2:${row.folder_path}`).catch(() => {});
+            const parent = row.folder_path.includes('/') ? row.folder_path.substring(0, row.folder_path.lastIndexOf('/')) : '';
+            await redis.del(`folder_dirs_v2:${parent}`).catch(() => {});
+          } catch {}
+        }
+      }
+    } catch (err: any) {
+      console.error(`[Scanner GC] Error during deleted folders cleanup:`, err.message);
+    }
+  }
+
   static async scanAllDirectories(basePath = '') {
+    if (basePath === '') {
+      await this.cleanupDeletedFolders();
+    }
     const fullPath = path.join(MEDIA_ROOT, basePath);
     try {
       const files = await fs.promises.readdir(fullPath, { withFileTypes: true });
@@ -112,6 +156,7 @@ export class ScannerService {
                 SET folder_path = EXCLUDED.folder_path, 
                     file_name = EXCLUDED.file_name,
                     size_bytes = EXCLUDED.size_bytes,
+                    processing_error = NULL,
                     updated_at = NOW()
                 RETURNING id, xmax, blurhash
               `, [folderPath, file.name, mimeType, stat.size, fileIdentifier]);

@@ -69,6 +69,14 @@ export function parseExifDateTime(dateVal: any, offsetVal?: string | null): stri
 export class MetadataService {
   static async extractMetadata(mediaId: string, fullPath: string, mimeType?: string): Promise<ExifMetadata | null> {
     if (!fullPath) return null;
+    if (!fs.existsSync(fullPath)) {
+      console.warn(`[MetadataService] File does not exist on disk: ${fullPath}`);
+      await query(
+        `UPDATE media_files SET processing_error = 'FILE_NOT_FOUND', failed_attempts = COALESCE(failed_attempts, 0) + 1, updated_at = NOW() WHERE id = $1`,
+        [mediaId]
+      ).catch(() => {});
+      return null;
+    }
 
     try {
       const isImage = mimeType ? mimeType.startsWith('image/') : !mimeType?.startsWith('video/');

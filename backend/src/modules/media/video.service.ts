@@ -177,7 +177,7 @@ export class VideoService {
     }
 
     await query(
-      `UPDATE media_files SET has_480p = $1, blurhash = COALESCE(blurhash, $2), updated_at = NOW() WHERE id = $3`,
+      `UPDATE media_files SET has_480p = $1, blurhash = COALESCE(blurhash, $2), processing_error = NULL, updated_at = NOW() WHERE id = $3`,
       [has480p, bHash, mediaId]
     );
 
@@ -186,6 +186,15 @@ export class VideoService {
 
   static async processVideo(mediaId: string, fullPath: string) {
     try {
+      if (!fs.existsSync(fullPath)) {
+        console.warn(`[VideoService] File does not exist on disk: ${fullPath}`);
+        await query(
+          `UPDATE media_files SET processing_error = 'FILE_NOT_FOUND', failed_attempts = COALESCE(failed_attempts, 0) + 1, updated_at = NOW() WHERE id = $1`,
+          [mediaId]
+        ).catch(() => {});
+        return { has480p: false, blurhash: null, isTranscoded: false };
+      }
+
       const dirMp4 = path.join(CACHE_ROOT, 'transcoded', 'mp4');
       const dirWebm = path.join(CACHE_ROOT, 'transcoded', 'webm');
       await fs.promises.mkdir(dirMp4, { recursive: true });

@@ -37,8 +37,15 @@ if (process.env.IS_WORKER === 'true') {
   removeOnFail: { age: 86400 }
 });
 
-  metadataWorker.on('failed', (job, err) => {
-  console.error(`[Metadata Worker] Failed for ${(job?.data?.fullPath || job?.data?.mediaId).replace(/^.*\/media_ro\//, '')}:`, err);
-});
+  metadataWorker.on('failed', async (job, err) => {
+    console.error(`[Metadata Worker] Failed for ${(job?.data?.fullPath || job?.data?.mediaId).replace(/^.*\/media_ro\//, '')}:`, err);
+    if (job?.data?.mediaId) {
+      const errCode = (err as any)?.code || (err?.message?.includes('ENOENT') ? 'FILE_NOT_FOUND' : err?.message?.slice(0, 100));
+      await query(
+        `UPDATE media_files SET processing_error = $1, failed_attempts = COALESCE(failed_attempts, 0) + 1, updated_at = NOW() WHERE id = $2`,
+        [errCode, job.data.mediaId]
+      ).catch(() => {});
+    }
+  });
 
 }

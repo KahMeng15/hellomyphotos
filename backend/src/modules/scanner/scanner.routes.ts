@@ -608,7 +608,10 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     const processingRes = await query(`
       SELECT 1 
       FROM media_files 
-      WHERE (folder_path = $1 OR folder_path LIKE $2 ESCAPE '\\') AND (exif_json IS NULL OR blurhash IS NULL)
+      WHERE (folder_path = $1 OR folder_path LIKE $2 ESCAPE '\\') 
+        AND (exif_json IS NULL OR blurhash IS NULL)
+        AND processing_error IS NULL
+        AND created_at > NOW() - INTERVAL '2 hours'
       LIMIT 1
     `, [folder || '', `${escapedFolderForProc}/%`]);
     const isProcessing = processingRes.rows.length > 0;
