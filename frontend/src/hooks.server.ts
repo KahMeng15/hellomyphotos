@@ -1,4 +1,4 @@
-import type { Handle } from '@sveltejs/kit';
+import type { Handle } from '@sveltejs/kit/hooks';
 
 const BACKEND_URL = process.env.BACKEND_PROXY_URL || 'http://localhost:3000';
 

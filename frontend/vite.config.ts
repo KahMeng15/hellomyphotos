@@ -1,34 +1,40 @@
 import adapter from '@sveltejs/adapter-node';
-import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
-import { SvelteKitPWA } from '@vite-pwa/sveltekit';
+import { withPwa } from '@vite-pwa/sveltekit';
 
 export default defineConfig({
 	plugins: [
-		sveltekit({
-			compilerOptions: {
-				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
-				runes: ({ filename }) =>
-					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
-			},
+		withPwa(
+			{
+				compilerOptions: {
+					// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
+					runes: ({ filename }) =>
+						filename.split(/[/\\]/).includes('node_modules') ? undefined : true
+				},
+				alias: {
+					'$lib': 'src/lib',
+					'$lib/*': 'src/lib/*'
+				},
 
-			// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
-			// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
-			// See https://svelte.dev/docs/kit/adapters for more information about adapters.
-			adapter: adapter()
-		}),
-		SvelteKitPWA({
-			registerType: 'autoUpdate',
-			workbox: {
-				navigateFallbackDenylist: [/^\/api\//]
+				// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
+				// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
+				// See https://svelte.dev/docs/kit/adapters for more information about adapters.
+				adapter: adapter()
 			},
-			manifest: {
-				name: 'hellomyphotos',
-				short_name: 'hellomyphotos',
-				description: 'Your beautiful photo gallery',
-				theme_color: '#ffffff'
+			{
+				registerType: 'autoUpdate',
+				generateSW: {
+					navigateFallbackDenylist: [/^\/api\//],
+					globStrict: false
+				},
+				manifest: {
+					name: 'hellomyphotos',
+					short_name: 'hellomyphotos',
+					description: 'Your beautiful photo gallery',
+					theme_color: '#ffffff'
+				}
 			}
-		})
+		)
 	],
 	server: {
 		allowedHosts: ['test.kmeng.ddnsgeek.com'],
