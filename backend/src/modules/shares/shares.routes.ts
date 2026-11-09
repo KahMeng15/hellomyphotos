@@ -10,6 +10,8 @@ import { thumbnailQueue } from '../../queue/thumbnailQueue';
 import { videoQueue } from '../../queue/videoQueue';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
+const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
+const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 
 import { requireAuth, hasFolderAccess } from '../../utils/auth';
 import { getClientIp } from '../../utils/getIp';
@@ -533,7 +535,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       // Synchronously generate and serve the OG image if requested (cached by OgService)
       const imagePath = await OgService.generateForFolder(token, targetFolder);
       const resolvedImagePath = path.resolve(imagePath);
-      const allowedCache = path.resolve(CACHE_ROOT || (fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw')));
+      const allowedCache = CACHE_ROOT;
       if (!resolvedImagePath.startsWith(allowedCache)) {
         return reply.status(400).send({ error: 'Invalid image path' });
       }
