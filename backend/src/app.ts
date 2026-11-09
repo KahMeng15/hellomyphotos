@@ -9,6 +9,7 @@ import { timelineRoutes } from './modules/timeline/timeline.routes';
 import { authRoutes } from './modules/auth/auth.routes';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import './queue';
 
 import { logger } from './utils/logger';
@@ -48,6 +49,15 @@ app.register(cors, {
 
 app.register(cookie, {
   secret: process.env.COOKIE_SECRET || 'super_secret_cookie_key',
+});
+
+// Global Rate Limiting to protect sensitive routes and resolve CodeQL missing-rate-limiting alerts
+app.register(rateLimit, {
+  max: process.env.DISABLE_RATE_LIMIT === 'true'
+    ? 1_000_000
+    : parseInt(process.env.RATE_LIMIT_MAX || '1000', 10),
+  timeWindow: '1 minute',
+  allowList: ['127.0.0.1', '::1'],
 });
 
 import { zipRoutes } from './modules/media/zip.routes';

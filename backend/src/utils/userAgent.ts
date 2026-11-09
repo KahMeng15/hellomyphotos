@@ -10,15 +10,25 @@ export interface ParsedUserAgent {
 export function parseUserAgent(userAgent?: string | null): ParsedUserAgent {
   if (!userAgent) return { os: 'Unknown', browser: 'Unknown', deviceType: 'unknown' };
 
-  const s = userAgent.toLowerCase();
+  // Limit length to prevent any ReDoS on arbitrarily long strings
+  const s = userAgent.slice(0, 1024).toLowerCase();
 
   // --- Device type ---
   let deviceType: ParsedUserAgent['deviceType'] = 'desktop';
+  const isAndroid = s.includes('android');
+  const isMobile = s.includes('mobile');
+
   if (/bot|crawler|spider|slurp|bingpreview|facebookexternalhit|whatsapp|curl|wget|postman|python|okhttp|headless|pagespeed|preview/i.test(s)) {
     deviceType = 'bot';
-  } else if (/iphone|ipod|android.*mobile|windows phone|blackberry|opera mini|opera mobi|mobile safari/i.test(s)) {
+  } else if (
+    (isAndroid && isMobile) ||
+    /iphone|ipod|windows phone|blackberry|opera mini|opera mobi|mobile safari/i.test(s)
+  ) {
     deviceType = 'mobile';
-  } else if (/ipad|tablet|kindle|silk|playbook|android(?!.*mobile)/i.test(s)) {
+  } else if (
+    (isAndroid && !isMobile) ||
+    /ipad|tablet|kindle|silk|playbook/i.test(s)
+  ) {
     deviceType = 'tablet';
   }
 
@@ -37,7 +47,7 @@ export function parseUserAgent(userAgent?: string | null): ParsedUserAgent {
   // --- Browser ---
   let browser = 'Unknown';
   if (/edg\//.test(s)) browser = 'Edge';
-  else if (/edg[a|ios]?\//.test(s)) browser = 'Edge';
+  else if (/edga?\/|edgios\//.test(s)) browser = 'Edge';
   else if (/opr\/|opera mini|opera\//.test(s)) browser = 'Opera';
   else if (/samsungbrowser/.test(s)) browser = 'Samsung Internet';
   else if (/ucbrowser/.test(s)) browser = 'UC Browser';
