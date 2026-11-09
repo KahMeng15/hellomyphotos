@@ -35,8 +35,12 @@ const SCHEMA_STATEMENTS = [
     preferences JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
-  `ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`,
-  `ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user', 'viewer', 'super_admin'))`,
+  `DO $$ BEGIN
+    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+    ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user', 'viewer', 'super_admin'));
+  EXCEPTION WHEN duplicate_object THEN
+    NULL;
+  END $$;`,
   `CREATE TABLE IF NOT EXISTS user_folder_access (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     folder_path TEXT NOT NULL,
@@ -205,11 +209,18 @@ const SCHEMA_STATEMENTS = [
 // app role lacks privileges) are retried on the next ensureSchema call instead
 // of aborting the whole bootstrap.
 let pendingStatements: string[] | null = SCHEMA_STATEMENTS;
+let lastSchemaCheck = 0;
+const RETRY_COOLDOWN_MS = 30_000;
 
 export const ensureSchema = async (): Promise<void> => {
   if (pendingStatements === null) return;
+  // Throttle retries if statements are pending to avoid flooding logs and DB queries on every request
+  const now = Date.now();
+  if (now - lastSchemaCheck < RETRY_COOLDOWN_MS && lastSchemaCheck !== 0) return;
+
   if (!schemaPromise) {
     schemaPromise = (async () => {
+      lastSchemaCheck = Date.now();
       const stillPending: string[] = [];
       for (const statement of pendingStatements) {
         try {
