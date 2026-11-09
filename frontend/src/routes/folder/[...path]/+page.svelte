@@ -12,7 +12,6 @@ import { replaceState } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import { env } from '$env/dynamic/public';
-  import { navigating } from '$app/stores';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
   import { currentUser } from '$lib/stores/auth';

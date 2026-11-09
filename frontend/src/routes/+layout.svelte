@@ -2,7 +2,7 @@
   import '../app.css';
   import { slide, fly, fade } from 'svelte/transition';
   import { onMount, untrack } from 'svelte';
-  import { page, navigating } from '$app/stores';
+  import { page, navigating } from '$app/state';
   import { goto, afterNavigate } from '$app/navigation';
   import { logout } from '$lib/api/auth';
   import { BackendError } from '$lib/api/auth';
@@ -26,7 +26,7 @@
   import { toast } from '$lib/stores/toast';
   
   const initialSidebarState = () => {
-    if ($page.url.pathname.startsWith('/share/') || $page.url.pathname === '/login') return false;
+    if (page.url.pathname.startsWith('/share/') || page.url.pathname === '/login') return false;
     if (typeof window === 'undefined') return undefined;
     if (window.innerWidth <= 768) return false;
     try {
@@ -42,7 +42,7 @@
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
   $effect(() => {
-    const path = $page.url.pathname;
+    const path = page.url.pathname;
     if (path.startsWith('/share/') || path === '/login') {
       isSidebarOpen = false;
     } else {
@@ -75,10 +75,10 @@
     window.addEventListener('resize', updateWidth);
 
     window.addEventListener('error', (e) => {
-      frontendLogger.error(`Uncaught error: ${e.message}`, $page.url.pathname);
+      frontendLogger.error(`Uncaught error: ${e.message}`, page.url.pathname);
     });
     window.addEventListener('unhandledrejection', (e) => {
-      frontendLogger.error(`Unhandled rejection: ${e.reason}`, $page.url.pathname);
+      frontendLogger.error(`Unhandled rejection: ${e.reason}`, page.url.pathname);
     });
 
     const checkHistory = () => {
@@ -112,7 +112,7 @@
   onMount(async () => {
     try {
       const user = await loadAuthUser();
-      const path = $page.url.pathname;
+      const path = page.url.pathname;
       if (user) {
         // Authenticated user on root → send straight to the folder browser
         if (path === '/') goto('/folder');
@@ -123,7 +123,7 @@
         }
       }
     } catch (err: any) {
-      const path = $page.url.pathname;
+      const path = page.url.pathname;
       if (err instanceof BackendError) {
         // Backend is unreachable — stay on the current page but warn the user
         toast.error(`Backend unreachable: ${err.message}`);
@@ -146,7 +146,7 @@
     const el = document.querySelector('.main-content');
     if (el) {
       el.addEventListener('scroll', () => {
-        const key = $page.url.pathname;
+        const key = page.url.pathname;
         scrollPositions.set(key, el.scrollTop);
         try { sessionStorage.setItem(`scroll:${key}`, String(el.scrollTop)); } catch {}
       }, { passive: true });
@@ -154,11 +154,11 @@
     window.addEventListener('popstate', () => {
       isPopState = true;
     });
-    prevScrollPath = $page.url.pathname;
+    prevScrollPath = page.url.pathname;
   });
 
   $effect.pre(() => {
-    const path = $page.url.pathname;
+    const path = page.url.pathname;
     
     if (prevScrollPath && path !== prevScrollPath) {
       const el = document.querySelector('.main-content');
@@ -170,7 +170,7 @@
   });
 
   $effect(() => {
-    const path = $page.url.pathname;
+    const path = page.url.pathname;
     if (prevScrollPath && path !== prevScrollPath) {
       if (isPopState) {
         let saved = scrollPositions.get(path);
@@ -225,7 +225,7 @@
 </svelte:head>
 
 <div class="app-layout">
-  {#if $page.url.pathname !== '/login' && ($currentUser || $page.url.pathname !== '/')}
+  {#if page.url.pathname !== '/login' && ($currentUser || page.url.pathname !== '/')}
     {#if isSidebarOpen && windowWidth <= 768}
       <div class="sidebar-backdrop" onclick={() => toggleSidebar(false)} transition:fade={{duration: 200}}></div>
     {/if}
@@ -280,12 +280,12 @@
     </aside>
   {/if}
 
-  <main class="main-content {($page.url.pathname === '/login' || (!$currentUser && $page.url.pathname === '/')) ? 'no-padding' : ''} {$navigating ? 'is-navigating' : ''}">
-    {#if $navigating}
+  <main class="main-content {(page.url.pathname === '/login' || (!$currentUser && page.url.pathname === '/')) ? 'no-padding' : ''} {Boolean(navigating.to) ? 'is-navigating' : ''}">
+    {#if Boolean(navigating.to)}
       <div class="nav-loading-bar"></div>
     {/if}
 
-    {#if isAuthChecking && !$page.url.pathname.startsWith('/share/') && $page.url.pathname !== '/login'}
+    {#if isAuthChecking && !page.url.pathname.startsWith('/share/') && page.url.pathname !== '/login'}
       <div class="loading-overlay">
         <div class="spinner"></div>
       </div>
@@ -299,11 +299,11 @@
       <MandatorySetupModal />
     {/if}
 
-    {#if $page.url.pathname !== '/' && $page.url.pathname !== '/login' && !$page.url.pathname.startsWith('/admin') && !$page.url.pathname.startsWith('/settings')}
-      {#key $page.url.pathname}
-        <footer class="app-footer {$page.url.pathname.startsWith('/folder') || $page.url.pathname.startsWith('/share') ? 'animate-footer' : ''}">
+    {#if page.url.pathname !== '/' && page.url.pathname !== '/login' && !page.url.pathname.startsWith('/admin') && !page.url.pathname.startsWith('/settings')}
+      {#key page.url.pathname}
+        <footer class="app-footer {page.url.pathname.startsWith('/folder') || page.url.pathname.startsWith('/share') ? 'animate-footer' : ''}">
           <p>
-            {#if $page.url.pathname.startsWith('/share/')}
+            {#if page.url.pathname.startsWith('/share/')}
               Shared with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a>
             {:else}
               Hosted with hellomyphotos, a webapp by <a href="https://kahmeng15.github.io" target="_blank" rel="noopener noreferrer">kahmeng</a>
@@ -316,7 +316,7 @@
     {/if}
   </main>
 
-  {#if isSidebarOpen === false && $page.url.pathname !== '/login' && ($currentUser || $page.url.pathname !== '/')}
+  {#if isSidebarOpen === false && page.url.pathname !== '/login' && ($currentUser || page.url.pathname !== '/')}
     <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => toggleSidebar(true)} title="Open sidebar">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg>
     </button>

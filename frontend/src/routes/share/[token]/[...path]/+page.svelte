@@ -9,7 +9,7 @@ import { replaceState } from '$app/navigation';
   import { getSortDate } from '$lib/utils/date';
   import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
   import { invalidateAll } from '$app/navigation';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
   import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder, AlertCircle } from '@lucide/svelte';
@@ -81,7 +81,7 @@ import { replaceState } from '$app/navigation';
 
   function folderUrl() {
     const fp = data.folderPath || '';
-    const base = `/share/${$page.params.token}`;
+    const base = `/share/${page.params.token}`;
     if (!fp) return base;
     const basePath = data.baseFolderPath || '';
     // The backend expects the sub-path relative to the share's base folder, so strip
@@ -346,7 +346,7 @@ import { replaceState } from '$app/navigation';
     if (baseUrl.startsWith('http://') && !baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1')) {
       baseUrl = baseUrl.replace('http://', 'https://');
     }
-    const currentPath = $page.url.pathname;
+    const currentPath = page.url.pathname;
     return baseUrl ? `${baseUrl}${currentPath}` : currentPath;
   });
 </script>
@@ -406,7 +406,7 @@ import { replaceState } from '$app/navigation';
     {@const parts = data.folderPath.split('/')}
     {@const parentPath = parts.slice(0, -1).join('/')}
     {@const isParentBase = parentPath === data.baseFolderPath}
-    {@const targetUrl = isParentBase ? `/share/${$page.params.token}` : `/share/${$page.params.token}/${parentPath.substring(data.baseFolderPath.length + 1)}`}
+    {@const targetUrl = isParentBase ? `/share/${page.params.token}` : `/share/${page.params.token}/${parentPath.substring(data.baseFolderPath.length + 1)}`}
     <a href={targetUrl} 
        style="position: absolute; top: 24px; left: 24px; z-index: 20; color: rgba(255,255,255,0.4); text-decoration: none; display: flex; align-items: center; justify-content: center; padding: 0; margin: 0; line-height: 0; transition: color 0.2s, transform 0.2s;"
        onmouseover={(e) => { e.currentTarget.style.color = 'white'; e.currentTarget.style.transform = 'scale(1.1)'; }}
@@ -443,9 +443,9 @@ import { replaceState } from '$app/navigation';
                   {@const currentPath = data.folderPath.split('/').slice(0, index + 1).join('/')}
                   {#if index > 0}<span class="separator"> &gt; </span>{/if}
                   {#if currentPath === data.baseFolderPath}
-                    <a href="/share/{$page.params.token}">{part}</a>
+                    <a href="/share/{page.params.token}">{part}</a>
                   {:else if currentPath.startsWith(data.baseFolderPath + '/')}
-                    <a href="/share/{$page.params.token}/{currentPath.substring(data.baseFolderPath.length + 1)}">{part}</a>
+                    <a href="/share/{page.params.token}/{currentPath.substring(data.baseFolderPath.length + 1)}">{part}</a>
                   {:else}
                     <span class="breadcrumb unclickable" style="color: #888; cursor: default;">{part}</span>
                   {/if}
@@ -468,7 +468,7 @@ import { replaceState } from '$app/navigation';
           {@const parts = data.folderPath.split('/')}
           {@const parentPath = parts.slice(0, -1).join('/')}
           {@const isParentBase = parentPath === data.baseFolderPath}
-          {@const targetUrl = isParentBase ? `/share/${$page.params.token}` : `/share/${$page.params.token}/${parentPath.substring(data.baseFolderPath.length + 1)}`}
+          {@const targetUrl = isParentBase ? `/share/${page.params.token}` : `/share/${page.params.token}/${parentPath.substring(data.baseFolderPath.length + 1)}`}
           <a href={targetUrl} 
              class="icon-btn mobile-only-back" 
              style="opacity: {scrollProgress === 1 ? 1 : 0}; width: {scrollProgress === 1 ? '36px' : '0'}; padding: {scrollProgress === 1 ? '8px' : '0'}; margin-right: {scrollProgress === 1 ? '0' : '-8px'}; overflow: hidden; transition: width 0.2s, opacity 0.2s, margin 0.2s, padding 0.2s; pointer-events: {scrollProgress === 1 ? 'auto' : 'none'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" 
@@ -544,7 +544,7 @@ import { replaceState } from '$app/navigation';
 {#if data.directories && data.directories.length > 0}
   <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (data.files.length > 0 ? 'list-view' : '')}">
     {#each sortedDirectories as dir, i}
-      <a href="{$page.url.pathname.endsWith('/') ? $page.url.pathname + encodeURIComponent(dir.name) : $page.url.pathname + '/' + encodeURIComponent(dir.name)}" class="dir-card" style="animation-delay: {i * 40}ms">
+      <a href="{page.url.pathname.endsWith('/') ? page.url.pathname + encodeURIComponent(dir.name) : page.url.pathname + '/' + encodeURIComponent(dir.name)}" class="dir-card" style="animation-delay: {i * 40}ms">
         <div class="dir-cover">
           {#if dir.cover_id}
             <BlurhashImage 
@@ -593,7 +593,7 @@ import { replaceState } from '$app/navigation';
 {/key}
 
 {#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
-  <Lightbox folderCoverId={data.folderCoverId} media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={$page.params.token} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
+  <Lightbox folderCoverId={data.folderCoverId} media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={page.params.token} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
 {/if}
 {/if}
 

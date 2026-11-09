@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import { API_BASE } from '$lib/api/media';
   import ExpandableList from '$lib/components/ExpandableList.svelte';
   import KpiCard from '$lib/components/KpiCard.svelte';
@@ -34,8 +34,8 @@
     FolderOpen
   } from '@lucide/svelte';
 
-  const folderPath = $derived($page.params.path || '');
-  const fromFolder = $derived($page.url.searchParams.get('from'));
+  const folderPath = $derived(page.params.path || '');
+  const fromFolder = $derived(page.url.searchParams.get('from'));
 
   let data = $state<any>(null);
   let loading = $state(true);
