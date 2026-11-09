@@ -263,10 +263,11 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       return reply.send({ share, files: fileRes.rows, person, personCoverMediaId, personCoverBoundingBox, personCoverImgWidth, personCoverImgHeight, defaultShareViewMode: 'small-fit', defaultShareSortMode: 'oldest', defaultShareFolderViewMode: 'small-grid' });
     }
     
-    let targetPath = share.folder_path || '';
+    let targetPath = (share.folder_path || '').replace(/\\/g, '/');
     const baseFolderPath = targetPath;
     if (subPath) {
-      targetPath = targetPath ? `${targetPath}/${subPath}` : subPath;
+      const cleanSub = path.normalize(subPath).replace(/^(\.\.[\/\\])+/, '');
+      targetPath = targetPath ? path.join(targetPath, cleanSub).replace(/\\/g, '/') : cleanSub;
     }
     // Update share.folder_path to targetPath so the frontend sees the current folder
     share.folder_path = targetPath;
@@ -298,7 +299,11 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       }
     })).catch(err => console.error('Failed to queue thumbnail jobs', err));
 
-    const fullPath = path.join(MEDIA_ROOT, targetPath);
+    const resolvedMediaRoot = path.resolve(MEDIA_ROOT);
+    const fullPath = path.resolve(resolvedMediaRoot, targetPath);
+    if (!fullPath.startsWith(resolvedMediaRoot)) {
+      return reply.status(400).send({ error: 'Invalid folder path' });
+    }
     let directories: { name: string, cover_id: string | null, blurhash: string | null }[] = [];
     try {
       if (fs.existsSync(fullPath)) {
@@ -348,7 +353,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
         directories.sort((a, b) => a.name.localeCompare(b.name));
       }
     } catch (e) {
-      console.error(`Failed to read directory: ${fullPath}`, e);
+      console.error('Failed to read directory:', fullPath, e);
     }
 
     let folderCoverId = null;
@@ -519,19 +524,25 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const baseFolderPath = res.rows[0].folder_path;
     let targetFolder = baseFolderPath;
     if (subPath) {
-      targetFolder = path.join(baseFolderPath, subPath).replace(/\\/g, '/');
+      const cleanSub = path.normalize(subPath).replace(/^(\.\.[\/\\])+/, '');
+      targetFolder = path.join(baseFolderPath, cleanSub).replace(/\\/g, '/');
     }
 
     const { OgService } = await import('../media/og.service');
     try {
       // Synchronously generate and serve the OG image if requested (cached by OgService)
       const imagePath = await OgService.generateForFolder(token, targetFolder);
+      const resolvedImagePath = path.resolve(imagePath);
+      const allowedCache = path.resolve(CACHE_ROOT || (fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw')));
+      if (!resolvedImagePath.startsWith(allowedCache)) {
+        return reply.status(400).send({ error: 'Invalid image path' });
+      }
       
-      const stat = fs.statSync(imagePath);
+      const stat = fs.statSync(resolvedImagePath);
       reply.header('Content-Type', 'image/png');
       reply.header('Content-Length', stat.size);
       reply.header('Cache-Control', 'public, max-age=86400');
-      return reply.send(fs.createReadStream(imagePath));
+      return reply.send(fs.createReadStream(resolvedImagePath));
     } catch (err: any) {
       request.log.error(err);
       return reply.status(500).send({ error: 'Failed to generate OG image' });

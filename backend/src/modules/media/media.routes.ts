@@ -35,10 +35,16 @@ export async function mediaRoutes(fastify: FastifyInstance) {
   
   fastify.get<{ Params: { id: string }, Querystring: { shareToken?: string } }>('/api/media/:id/thumbnail', async (request, reply) => {
     const { id } = request.params;
+    const safeId = path.basename(id).replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!safeId || safeId !== id) return reply.status(400).send({ error: 'Invalid ID' });
     
-    if (!(await verifyMediaAccess(request, reply, id))) return;
+    if (!(await verifyMediaAccess(request, reply, safeId))) return;
 
-    const filePath = path.join(CACHE_ROOT, '480p', `${id}.webp`);
+    const cache480Dir = path.resolve(CACHE_ROOT, '480p');
+    const filePath = path.resolve(cache480Dir, `${safeId}.webp`);
+    if (!filePath.startsWith(cache480Dir + path.sep)) {
+      return reply.status(400).send({ error: 'Invalid ID' });
+    }
     
     if (fs.existsSync(filePath)) {
       reply.header('Content-Type', 'image/webp');
@@ -47,16 +53,16 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     }
     
     // Fallback: serve original if processing isn't done (for images only)
-    const result = await query(`SELECT folder_path, file_name, mime_type FROM media_files WHERE id = $1`, [id]);
+    const result = await query(`SELECT folder_path, file_name, mime_type FROM media_files WHERE id = $1`, [safeId]);
     if (result.rows.length > 0) {
       const file = result.rows[0];
       const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
       
       // Enqueue high-priority job for missing thumbnail
       if (file.mime_type.startsWith('video/')) {
-        await videoQueue.add('process-video', { mediaId: id, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
+        await videoQueue.add('process-video', { mediaId: safeId, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
       } else if (file.mime_type.startsWith('image/')) {
-        await thumbnailQueue.add('generate-thumbnail', { mediaId: id, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
+        await thumbnailQueue.add('generate-thumbnail', { mediaId: safeId, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
       }
 
       if (fs.existsSync(fullPath) && file.mime_type.startsWith('image/')) {
@@ -80,16 +86,22 @@ export async function mediaRoutes(fastify: FastifyInstance) {
 
   fastify.get<{ Params: { id: string }, Querystring: { watermark?: string, shareToken?: string, context?: string } }>('/api/media/:id/preview', async (request, reply) => {
     const { id } = request.params;
+    const safeId = path.basename(id).replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!safeId || safeId !== id) return reply.status(400).send({ error: 'Invalid ID' });
     
-    if (!(await verifyMediaAccess(request, reply, id))) return;
+    if (!(await verifyMediaAccess(request, reply, safeId))) return;
 
     const { watermark, shareToken, context } = request.query;
-    const filePath = path.join(CACHE_ROOT, '1080p', `${id}.webp`);
+    const cache1080Dir = path.resolve(CACHE_ROOT, '1080p');
+    const filePath = path.resolve(cache1080Dir, `${safeId}.webp`);
+    if (!filePath.startsWith(cache1080Dir + path.sep)) {
+      return reply.status(400).send({ error: 'Invalid ID' });
+    }
     
     if (context === 'lightbox') {
-      AnalyticsService.logView(id, 'VIEW_1080P', 120000, shareToken);
+      AnalyticsService.logView(safeId, 'VIEW_1080P', 120000, shareToken);
       AnalyticsService.logVisit({
-        mediaId: id,
+        mediaId: safeId,
         shareToken,
         actionType: 'preview',
         ip: getClientIp(request),
@@ -113,23 +125,27 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       }
     }
     // Fallback to 480p if 1080p isn't ready or doesn't exist (e.g. video thumbs)
-    const fallback = path.join(CACHE_ROOT, '480p', `${id}.webp`);
+    const cache480Dir = path.resolve(CACHE_ROOT, '480p');
+    const fallback = path.resolve(cache480Dir, `${safeId}.webp`);
+    if (!fallback.startsWith(cache480Dir + path.sep)) {
+      return reply.status(400).send({ error: 'Invalid ID' });
+    }
     if (fs.existsSync(fallback)) {
       reply.header('Content-Type', 'image/webp');
       return sendThrottled(request, reply, fs.createReadStream(fallback));
     }
     
     // Fallback to original image
-    const result = await query(`SELECT folder_path, file_name, mime_type FROM media_files WHERE id = $1`, [id]);
+    const result = await query(`SELECT folder_path, file_name, mime_type FROM media_files WHERE id = $1`, [safeId]);
     if (result.rows.length > 0) {
       const file = result.rows[0];
       const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
       
       // Enqueue high-priority job for missing preview
       if (file.mime_type.startsWith('video/')) {
-        await videoQueue.add('process-video', { mediaId: id, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
+        await videoQueue.add('process-video', { mediaId: safeId, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
       } else if (file.mime_type.startsWith('image/')) {
-        await thumbnailQueue.add('generate-thumbnail', { mediaId: id, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
+        await thumbnailQueue.add('generate-thumbnail', { mediaId: safeId, fullPath, mimeType: file.mime_type }, { priority: 1 }).catch(() => {});
       }
 
       if (fs.existsSync(fullPath) && file.mime_type.startsWith('image/')) {

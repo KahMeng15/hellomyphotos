@@ -40,11 +40,15 @@ const faceThumbSemaphore = new Semaphore(4);
 const currentlyGeneratingFaceThumbs = new Set<string>();
 
 async function generateFaceThumbnailAsync(personId: string, face: any, fullPath: string, cachedPath: string) {
+  const resolvedCache = path.resolve(cachedPath);
+  const allowedFaces = path.resolve(CACHE_ROOT, 'faces');
+  if (!resolvedCache.startsWith(allowedFaces + path.sep)) return;
+
   if (currentlyGeneratingFaceThumbs.has(personId)) return;
   currentlyGeneratingFaceThumbs.add(personId);
   try {
     await faceThumbSemaphore.acquire();
-    if (fs.existsSync(cachedPath)) return;
+    if (fs.existsSync(resolvedCache)) return;
     
     // Prefer the 480p/1080p thumbnail where face detection was performed
     const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
@@ -84,9 +88,9 @@ async function generateFaceThumbnailAsync(personId: string, face: any, fullPath:
       .extract(crop)
       .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
       .webp({ quality: 75 })
-      .toFile(cachedPath);
+      .toFile(resolvedCache);
   } catch (err: any) {
-    console.error(`[Face Thumbnail Async] Failed for ${personId}:`, err.message);
+    console.error('[Face Thumbnail Async] Failed for %s:', personId, err.message);
   } finally {
     currentlyGeneratingFaceThumbs.delete(personId);
     faceThumbSemaphore.release();
@@ -316,16 +320,22 @@ export async function mlRoutes(fastify: FastifyInstance) {
   // Explicitly set the cover image for a person
   fastify.post<{ Params: { id: string }, Body: { mediaId: string } }>('/api/faces/:id/cover', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
+    const safeId = path.basename(id).replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!safeId || safeId !== id) return reply.status(400).send({ error: 'Invalid ID' });
     const { mediaId } = request.body;
 
     await query(`
       INSERT INTO people (id, name, cover_media_id)
       VALUES ($1, '', $2)
       ON CONFLICT (id) DO UPDATE SET cover_media_id = EXCLUDED.cover_media_id
-    `, [id, mediaId]);
+    `, [safeId, mediaId]);
 
     // Delete cached face thumbnail so it regenerates from the new cover photo
-    const cachedPath = path.join(CACHE_ROOT, 'faces', `${id}.webp`);
+    const facesDir = path.resolve(CACHE_ROOT, 'faces');
+    const cachedPath = path.resolve(facesDir, `${safeId}.webp`);
+    if (!cachedPath.startsWith(facesDir + path.sep)) {
+      return reply.status(400).send({ error: 'Invalid ID' });
+    }
     if (fs.existsSync(cachedPath)) {
       await fs.promises.unlink(cachedPath);
     }
@@ -336,13 +346,18 @@ export async function mlRoutes(fastify: FastifyInstance) {
   // Serve or generate a face thumbnail for a person
   fastify.get<{ Params: { id: string } }>('/api/faces/:id/thumbnail', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
-    const facesDir = path.join(CACHE_ROOT, 'faces');
+    const safeId = path.basename(id).replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!safeId || safeId !== id) return reply.status(400).send({ error: 'Invalid ID' });
+    const facesDir = path.resolve(CACHE_ROOT, 'faces');
     await fs.promises.mkdir(facesDir, { recursive: true });
-    const cachedPath = path.join(facesDir, `${id}.webp`);
+    const cachedPath = path.resolve(facesDir, `${safeId}.webp`);
+    if (!cachedPath.startsWith(facesDir + path.sep)) {
+      return reply.status(400).send({ error: 'Invalid ID' });
+    }
 
     if (fs.existsSync(cachedPath)) {
       const mtime = fs.statSync(cachedPath).mtimeMs;
-      const etag = `"${id}-${Math.floor(mtime)}"`;
+      const etag = `"${safeId}-${Math.floor(mtime)}"`;
       reply.header('ETag', etag);
       if (request.headers['if-none-match'] === etag) {
         return reply.status(304).send();

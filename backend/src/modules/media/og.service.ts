@@ -19,8 +19,14 @@ const subheadingFontData = fs.existsSync(subheadingFontPath) ? fs.readFileSync(s
 
 export class OgService {
   static async generateForFolder(token: string, folderPath: string): Promise<string> {
-    const safePath = folderPath.replace(/[^a-zA-Z0-9-_\.]/g, '_');
-    const cachePath = path.join(CACHE_DIR, `${token}_${safePath}.png`);
+    const safeToken = path.basename(token).replace(/[^a-zA-Z0-9_-]/g, '');
+    const safePath = folderPath.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const resolvedCacheDir = path.resolve(CACHE_DIR);
+    const cachePath = path.resolve(resolvedCacheDir, `${safeToken}_${safePath}.png`);
+
+    if (!cachePath.startsWith(resolvedCacheDir + path.sep)) {
+      throw new Error('Invalid path expression');
+    }
 
     if (fs.existsSync(cachePath)) {
       return cachePath;

@@ -56,11 +56,16 @@ function writeLog(level: string, message: string, data?: any) {
 }
 
 function tailFile(filePath: string, maxLines: number): string {
-  if (!fs.existsSync(filePath)) return '';
+  const resolvedPath = path.resolve(filePath);
+  const resolvedLogDir = path.resolve(LOG_DIR);
+  if (!resolvedPath.startsWith(resolvedLogDir + path.sep) && resolvedPath !== path.resolve(LOG_FILE)) {
+    return '';
+  }
+  if (!fs.existsSync(resolvedPath)) return '';
   const CHUNK_SIZE = 64 * 1024;
-  const stat = fs.statSync(filePath);
+  const stat = fs.statSync(resolvedPath);
   if (stat.size === 0) return '';
-  const fd = fs.openSync(filePath, 'r');
+  const fd = fs.openSync(resolvedPath, 'r');
   let position = stat.size;
   let linesFound = 0;
   const buffers: Buffer[] = [];
@@ -113,7 +118,13 @@ async function listArchives(): Promise<string[]> {
 }
 
 async function readArchive(name: string): Promise<string> {
-  const filePath = path.join(LOG_DIR, name);
+  const baseName = path.basename(name);
+  if (baseName !== name || !name.startsWith('app-') || !name.endsWith('.log')) {
+    return '';
+  }
+  const resolvedDir = path.resolve(LOG_DIR);
+  const filePath = path.resolve(resolvedDir, baseName);
+  if (!filePath.startsWith(resolvedDir + path.sep)) return '';
   if (!fs.existsSync(filePath)) return '';
   // Archives can also be huge, so we only return the tail 5000 lines
   return tailFile(filePath, 5000);

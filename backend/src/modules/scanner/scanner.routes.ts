@@ -348,7 +348,12 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     mark('2_db_files');
 
     // 4. Dynamically list subdirectories and find their cover images
-    const fullPath = path.join(MEDIA_ROOT, folder);
+    const resolvedMediaRoot = path.resolve(MEDIA_ROOT);
+    const cleanFolder = path.normalize(folder || '').replace(/^(\.\.[\/\\])+/, '');
+    const fullPath = path.resolve(resolvedMediaRoot, cleanFolder);
+    if (!fullPath.startsWith(resolvedMediaRoot)) {
+      return reply.status(400).send({ error: 'Invalid folder path' });
+    }
     let directories: { name: string, cover_id: string | null, blurhash: string | null, cover_bounding_box?: any, cover_img_width?: number | null, cover_img_height?: number | null }[] = [];
     let hostError: string | null = null;
     const cacheKey = `folder_dirs_v2:${folder}`;
@@ -415,7 +420,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
               .map(item => item.name);
           } catch (e: any) {
             if (e.code !== 'ENOENT') {
-              console.error(`Failed to read directory: ${fullPath}`, e);
+              console.error('Failed to read directory:', fullPath, e);
               hostError = `Storage access error: ${e.message}`;
             }
           }
@@ -515,7 +520,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       }
     } catch (e: any) {
       if (e.code !== 'ENOENT') {
-        console.error(`Failed to resolve directories for: ${folder}`, e);
+        console.error('Failed to resolve directories for:', folder, e);
         hostError = `Storage access error: ${e.message}`;
       }
     }

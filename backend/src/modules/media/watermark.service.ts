@@ -23,6 +23,13 @@ export class WatermarkService {
   }
 
   static async addWatermarkToStream(imagePath: string): Promise<Buffer> {
+    const resolvedPath = path.resolve(imagePath);
+    const allowedCache = path.resolve(process.env.CACHE_ROOT || (fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw')));
+    const allowedMedia = path.resolve(process.env.MEDIA_ROOT || (fs.existsSync('/app/media') ? '/app/media' : path.resolve(process.cwd(), '../volumes/media_ro')));
+    if (!resolvedPath.startsWith(allowedCache) && !resolvedPath.startsWith(allowedMedia)) {
+      throw new Error('Access denied to image path');
+    }
+
     try {
       const settings = await this.getSettings();
       
@@ -70,7 +77,7 @@ export class WatermarkService {
         .toBuffer();
     } catch (error) {
       console.error('[Watermark] Failed to apply watermark', error);
-      return fs.promises.readFile(imagePath);
+      return fs.promises.readFile(resolvedPath);
     }
   }
 }
