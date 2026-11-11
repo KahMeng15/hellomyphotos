@@ -1,12 +1,12 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { type Transporter } from 'nodemailer';
 
-let transporter: nodemailer.Transporter | null = null;
+let transporter: Transporter | null = null;
 let lastHost = '';
 let lastPort = '';
 let lastUser = '';
 let lastPass = '';
 
-function getTransporter(): nodemailer.Transporter | null {
+function getTransporter(): Transporter | null {
   const host = process.env.SMTP_HOST;
   const port = parseInt(process.env.SMTP_PORT || '587', 10);
   const user = process.env.SMTP_USER;
