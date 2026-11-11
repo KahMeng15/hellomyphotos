@@ -51,6 +51,15 @@ app.register(cookie, {
   secret: process.env.COOKIE_SECRET || 'super_secret_cookie_key',
 });
 
+import { DEVICE_COOKIE_NAME, getClientDeviceId } from './utils/getDeviceId';
+
+// Assign or persist unique device identifier for telemetry and visitor analytics
+app.addHook('onRequest', async (request, reply) => {
+  getClientDeviceId(request, reply);
+});
+
+import { AnalyticsService } from './modules/analytics/analytics.service';
+
 // Global Rate Limiting to protect sensitive routes and resolve CodeQL missing-rate-limiting alerts
 app.register(rateLimit, {
   max: process.env.DISABLE_RATE_LIMIT === 'true'
@@ -58,9 +67,25 @@ app.register(rateLimit, {
     : parseInt(process.env.RATE_LIMIT_MAX || '1000', 10),
   timeWindow: '1 minute',
   allowList: ['127.0.0.1', '::1'],
+  errorResponseBuilder: (request, context) => {
+    AnalyticsService.logVisit({
+      actionType: 'blocked_rate_limit',
+      ip: request.ip,
+      userAgent: request.headers['user-agent'] as string | undefined,
+      referrer: request.headers.referer as string | undefined,
+      path: request.url,
+      metadata: { max: context.max, after: context.after }
+    });
+    return {
+      statusCode: 429,
+      error: 'Too Many Requests',
+      message: `Rate limit exceeded, retry in ${context.after}`
+    };
+  }
 });
 
 import { zipRoutes } from './modules/media/zip.routes';
+import { analyticsRoutes } from './modules/analytics/analytics.routes';
 
 // Register Routes
 app.register(authRoutes, { prefix: '/api/auth' });
@@ -72,6 +97,7 @@ app.register(sharesRoutes);
 app.register(adminRoutes);
 app.register(queueRoutes);
 app.register(timelineRoutes);
+app.register(analyticsRoutes);
 
 // Frontend log ingest (used by frontendLogger utility)
 app.post('/api/log', async (request, reply) => {

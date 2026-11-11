@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE, fetchFolderContent } from '$lib/api/media';
+  import { getAuthUser } from '$lib/api/auth';
   import Modal from '$lib/components/Modal.svelte';
   import { ChevronLeft, UserPlus, Edit2, Trash2, Shield, Folder, Check, Plus, Minus, ChevronRight, Lock, Unlock } from '@lucide/svelte';
 
   let users: any[] = $state([]);
+  let currentUser: any = $state(null);
   let loading = $state(true);
   let showModal = $state(false);
   let editingUser: any = $state(null);
@@ -141,7 +143,14 @@
     folderPaths = folderPaths.filter(p => p !== path);
   }
 
-  onMount(() => {
+  const adminCount = $derived(
+    users.filter(u => u.role === 'admin' || u.role === 'super_admin').length
+  );
+
+  onMount(async () => {
+    try {
+      currentUser = await getAuthUser();
+    } catch {}
     loadUsers();
   });
 
@@ -314,8 +323,18 @@
                   <button class="icon-btn edit" onclick={() => openEditModal(user)} title="Edit">
                     <Edit2 size={16} />
                   </button>
-                  {#if user.email !== 'admin@example.com'}
-                    <button class="icon-btn delete" onclick={() => showDeleteConfirm(user.id)} title="Delete">
+                  {@const isSelf = !!(currentUser?.id && user.id === currentUser.id)}
+                  {@const isOnlyAdmin = (user.role === 'admin' || user.role === 'super_admin') && adminCount <= 1}
+                  {#if isSelf}
+                    <button class="icon-btn delete disabled" disabled title="You cannot delete your own logged-in account">
+                      <Trash2 size={16} />
+                    </button>
+                  {:else if isOnlyAdmin}
+                    <button class="icon-btn delete disabled" disabled title="Cannot delete the only remaining administrator account">
+                      <Trash2 size={16} />
+                    </button>
+                  {:else}
+                    <button class="icon-btn delete" onclick={() => showDeleteConfirm(user.id)} title="Delete user">
                       <Trash2 size={16} />
                     </button>
                   {/if}
@@ -586,6 +605,12 @@
 
   .icon-btn.edit:hover { color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
   .icon-btn.delete:hover { color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+  .icon-btn.disabled, .icon-btn.disabled:hover {
+    opacity: 0.25;
+    cursor: not-allowed;
+    color: #71717a;
+    background: rgba(255, 255, 255, 0.02);
+  }
 
   .btn {
     display: inline-flex;

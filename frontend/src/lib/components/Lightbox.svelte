@@ -11,6 +11,7 @@
   import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut, Clock } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { formatDate, getRawDate } from '$lib/utils/date';
+  import { tracker } from '$lib/utils/analyticsTracker';
 
   let { 
     media, 
@@ -64,6 +65,7 @@
   }
   
   function close() {
+    tracker.endPhotoDwell();
     if (onclose) onclose();
   }
 
@@ -74,9 +76,13 @@
 
   $effect(() => {
     if (media.id) {
+      tracker.startPhotoDwell(media.id);
       rawExif = null;
       showAdvanced = false;
     }
+    return () => {
+      tracker.endPhotoDwell();
+    };
   });
 
   async function loadAdvancedExif() {
@@ -165,6 +171,9 @@
 
   function toggleInfo() {
     showInfo = !showInfo;
+    if (showInfo) {
+      tracker.recordFeature('information');
+    }
   }
 
   $effect(() => {
@@ -278,6 +287,7 @@
   }
 
   function toggleZoomIcon() {
+    tracker.recordFeature('zoom');
     if (pzInstance) {
       const el = document.querySelector('.media-element') as HTMLElement;
       if (el) {
@@ -299,6 +309,7 @@
   }
 
   function handleZoomSlider(e: Event) {
+    tracker.recordFeature('zoom');
     const targetZoom = parseFloat((e.target as HTMLInputElement).value);
     if (pzInstance) {
       const centerX = window.innerWidth / 2;
@@ -387,7 +398,7 @@
     <div class="main-area" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
       <div class="top-bar" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'}>
         {#if allowDownload}
-          <a href={downloadUrl} download={media.file_name} class="icon-btn" title="Download">
+          <a href={downloadUrl} download={media.file_name} class="icon-btn" title="Download" onclick={() => tracker.recordFeature('download')}>
             <Download size={20} strokeWidth={2} />
           </a>
         {/if}
@@ -604,7 +615,7 @@
           {/if}
         
           <div class="info-section">
-            <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; margin-bottom: 8px;" onclick={() => { showAdvanced = !showAdvanced; if (showAdvanced) loadAdvancedExif(); }}>
+            <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; margin-bottom: 8px;" onclick={() => { showAdvanced = !showAdvanced; tracker.recordFeature('advanced_exif'); if (showAdvanced) loadAdvancedExif(); }}>
               <h4 style="margin: 0;">ADVANCED EXIF</h4>
               <span style="font-size: 0.75rem; color: #888;">{showAdvanced ? 'Hide' : 'Show'}</span>
             </div>

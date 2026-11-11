@@ -87,6 +87,7 @@ async function runTests() {
 
     assert(fs.existsSync(out1080), `1080p preview generated at ${out1080}`);
     assert(fs.existsSync(out480), `480p thumbnail generated at ${out480}`);
+    if (!result) throw new Error('Result should not be null');
     assert(typeof result.blurhash === 'string' && result.blurhash.length > 0, `Blurhash generated: ${result.blurhash}`);
     assert(result.has1080p === true, 'has_1080p flag set to true');
     assert(result.has480p === true, 'has_480p flag set to true');

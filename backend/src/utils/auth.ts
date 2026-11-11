@@ -114,6 +114,7 @@ export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyR
     AnalyticsService.logVisit({
       mediaId,
       shareToken,
+      deviceId: (request as any).deviceId || (request.cookies as any)?.['hmp_device_id'] || null,
       actionType,
       ip: request.ip,
       userAgent: request.headers['user-agent'] as string | undefined,
@@ -176,6 +177,7 @@ export async function verifyFolderAccess(request: FastifyRequest, reply: Fastify
   const logBlocked = (actionType: string) => {
     AnalyticsService.logVisit({
       shareToken,
+      deviceId: (request as any).deviceId || (request.cookies as any)?.['hmp_device_id'] || null,
       actionType,
       ip: request.ip,
       userAgent: request.headers['user-agent'] as string | undefined,

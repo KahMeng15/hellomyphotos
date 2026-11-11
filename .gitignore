@@ -8,22 +8,30 @@ build/
 .svelte-kit/
 coverage/
 
-# Docker persistent volumes
-volumes/pg_data/
-volumes/redis_data/
-volumes/cache_rw/
-volumes/media_ro/
-volumes/ml_cache/
+# Docker persistent volumes, cache, data & backups
+volumes/*
+!volumes/pg_init/
+!volumes/pg_init/**
+
+# Backup archives & database dumps
+*.sql.gz
+*.dump
+*.tar.gz
+*.bak
+cookies*.txt
 
 # Log files
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 *.log
+logs/
+backend/logs/
 
 # OS & Editor files
 **/.DS_Store
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
 *.suo
@@ -35,6 +43,3 @@ yarn-error.log*
 .agents/*
 docker-compose.prod.yml
 logs_backend prod/
-
-volumes/*.db
-volumes/*.sqlite

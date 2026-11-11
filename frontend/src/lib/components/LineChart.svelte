@@ -24,8 +24,14 @@
     const pts = rows.map((r, i) => `${x(i)},${y(r.v)}`).join(' ');
     const area = `${PAD},${CHART_H - PAD} ${pts} ${CHART_W - PAD},${CHART_H - PAD}`;
     const step = Math.ceil(n / 6);
+    const formatLabel = (d: string) => {
+      if (!d) return '';
+      if (d.includes(' ')) return d.split(' ')[1] || d;
+      if (d.length === 10) return d.slice(5);
+      return d;
+    };
     const labels = rows
-      .map((r, i) => ({ i, label: r.day.slice(5) }))
+      .map((r, i) => ({ i, label: formatLabel(r.day) }))
       .filter((_, i) => i % step === 0 || i === n - 1)
       .map(({ i, label }) => ({ x: x(i), label }));
     const pointsData = rows.map((r, i) => ({ x: x(i), y: y(r.v), val: r.v, day: r.day }));
@@ -52,7 +58,7 @@
     <polyline points={series.points} fill="none" stroke={stroke} stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
     {#each series.pointsData as p}
       <circle cx={p.x} cy={p.y} r="12" fill={stroke} class="point">
-        <title>{p.day}: {p.val}</title>
+        <title>{p.day}: {formatTotal ? formatTotal(p.val) : p.val.toLocaleString()}</title>
       </circle>
     {/each}
   </svg>

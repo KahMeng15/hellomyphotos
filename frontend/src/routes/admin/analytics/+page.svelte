@@ -6,6 +6,7 @@
   import HoverThumb from '$lib/components/HoverThumb.svelte';
   import LineChart from '$lib/components/LineChart.svelte';
   import PeakHoursHeatmap from '$lib/components/PeakHoursHeatmap.svelte';
+  import TechnicalAnalytics from '$lib/components/TechnicalAnalytics.svelte';
   import {
     ChevronLeft,
     BarChart3,
@@ -31,7 +32,14 @@
     Repeat,
     ArrowLeftRight,
     Settings2,
-    Shield
+    Shield,
+    Lock,
+    UserX,
+    FileQuestion,
+    TrendingUp,
+    Layers,
+    ArrowDownToLine,
+    Zap
   } from '@lucide/svelte';
 
   let data = $state<any>(null);
@@ -127,13 +135,86 @@
   const visitorDetails = $derived((data?.timeline || []).map((d: any) => ({ label: d.day, value: d.count.toLocaleString() })));
   const uniqueDetails = $derived((data?.topIPs || []).map((i: any) => ({ label: i.ip, value: i.visits.toLocaleString() })));
   const bandwidthDetails = $derived((data?.bandwidthByDay || []).map((d: any) => ({ label: d.day, value: formatBytes(d.bytes) })));
+  const cacheSavedDetails = $derived((data?.cacheSavedByDay || []).map((d: any) => ({ label: d.day, value: `${formatBytes(d.bytes)} (${(d.hits ?? 0).toLocaleString()} hits)` })));
   const downloadsDetails = $derived((data?.downloadsByDay || []).map((d: any) => ({ label: d.day, value: d.count.toLocaleString() })));
   const cacheDetails = $derived((data?.cacheBreakdown || []).map((c: any) => ({ label: c.name, value: formatBytes(c.bytes) })));
   const dbDetails = $derived((data?.dbTableSizes || []).map((d: any) => ({ label: d.name, value: formatBytes(d.bytes) })));
 
-  // --- Line/area chart data (visits & bandwidth) ---
-  const timelineRows = $derived((data?.timeline || []).map((d: any) => ({ day: d.day, v: d.count })));
-  const bandwidthRows = $derived((data?.bandwidthByDay || []).map((d: any) => ({ day: d.day, v: d.bytes })));
+  // --- Line/area chart data with multi-metric & granularity support ---
+  type MetricKey = 'visits' | 'views' | 'unique' | 'bandwidth' | 'bandwidthSaved' | 'downloads' | 'all';
+  type Granularity = 'hour' | 'day' | 'month' | 'lifetime';
+
+  let selectedMetric = $state<MetricKey>('visits');
+  let chartRange = $state<Granularity>('day');
+
+  function scrollToChart(metric: MetricKey) {
+    selectedMetric = metric;
+    const el = document.getElementById('analytics-timelines');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  const rangeHint = $derived.by(() => {
+    if (chartRange === 'hour') return 'Last 48 Hours';
+    if (chartRange === 'day') return 'Last 30 Days';
+    if (chartRange === 'month') return 'Last 24 Months';
+    return 'Lifetime (All Time)';
+  });
+
+  function extractSeries(metricGroup: any, range: Granularity, valKey: 'count' | 'bytes' = 'count') {
+    if (!metricGroup) return [];
+    const list = metricGroup[range] || [];
+    return list.map((r: any) => ({ day: r.day, v: r[valKey] ?? r.count ?? r.bytes ?? 0 }));
+  }
+
+  const visitsRows = $derived.by(() => {
+    if (!data) return [];
+    if (data.timelines?.visits) return extractSeries(data.timelines.visits, chartRange, 'count');
+    if (data.timelines) {
+      if (chartRange === 'hour') return (data.timelines.hourly || []).map((r: any) => ({ day: r.day, v: r.count }));
+      if (chartRange === 'day') return (data.timelines.daily || []).map((r: any) => ({ day: r.day, v: r.count }));
+      if (chartRange === 'month') return (data.timelines.monthly || []).map((r: any) => ({ day: r.day, v: r.count }));
+      if (chartRange === 'lifetime') return (data.timelines.lifetime || []).map((r: any) => ({ day: r.day, v: r.count }));
+    }
+    return (data.timeline || []).map((d: any) => ({ day: d.day, v: d.count }));
+  });
+
+  const viewsRows = $derived.by(() => {
+    if (!data) return [];
+    if (data.timelines?.mediaViews) return extractSeries(data.timelines.mediaViews, chartRange, 'count');
+    return (data.viewsByDay || []).map((d: any) => ({ day: d.day, v: d.count }));
+  });
+
+  const uniqueRows = $derived.by(() => {
+    if (!data) return [];
+    if (data.timelines?.uniqueVisitors) return extractSeries(data.timelines.uniqueVisitors, chartRange, 'count');
+    return [];
+  });
+
+  const bandwidthRows = $derived.by(() => {
+    if (!data) return [];
+    if (data.timelines?.bandwidth) return extractSeries(data.timelines.bandwidth, chartRange, 'bytes');
+    if (data.bandwidthTimelines) {
+      if (chartRange === 'hour') return (data.bandwidthTimelines.hourly || []).map((r: any) => ({ day: r.day, v: r.bytes }));
+      if (chartRange === 'day') return (data.bandwidthTimelines.daily || []).map((r: any) => ({ day: r.day, v: r.bytes }));
+      if (chartRange === 'month') return (data.bandwidthTimelines.monthly || []).map((r: any) => ({ day: r.day, v: r.bytes }));
+      if (chartRange === 'lifetime') return (data.bandwidthTimelines.lifetime || []).map((r: any) => ({ day: r.day, v: r.bytes }));
+    }
+    return (data.bandwidthByDay || []).map((d: any) => ({ day: d.day, v: d.bytes }));
+  });
+
+  const bandwidthSavedRows = $derived.by(() => {
+    if (!data) return [];
+    if (data.timelines?.bandwidthSaved) return extractSeries(data.timelines.bandwidthSaved, chartRange, 'bytes');
+    return (data.cacheSavedByDay || []).map((d: any) => ({ day: d.day, v: d.bytes }));
+  });
+
+  const downloadsRows = $derived.by(() => {
+    if (!data) return [];
+    if (data.timelines?.downloads) return extractSeries(data.timelines.downloads, chartRange, 'count');
+    return (data.downloadsByDay || []).map((d: any) => ({ day: d.day, v: d.count }));
+  });
 
   const deviceIcons: Record<string, any> = {
     mobile: Smartphone,
@@ -187,23 +268,164 @@
     <div class="stats-grid">
       <KpiCard icon={ImageIcon} color="bg-blue" title="Total Photos" value={data.stats.photos.count.toLocaleString()} subtitle={`Using ${formatBytes(data.stats.photos.size)}`} details={photoDetails} />
       <KpiCard icon={Video} color="bg-purple" title="Total Videos" value={data.stats.videos.count.toLocaleString()} subtitle={`Using ${formatBytes(data.stats.videos.size)}`} details={videoDetails} />
-      <KpiCard icon={Eye} color="bg-emerald" title="Total Media Views" value={data.stats.visits.toLocaleString()} subtitle={scope === 'shares' ? 'Shared-link access only' : 'Across all users & public shares'} details={viewsDetails} />
+      <KpiCard icon={Eye} color="bg-emerald" title="Total Media Views" value={data.stats.visits.toLocaleString()} subtitle={scope === 'shares' ? 'Shared-link access only' : 'Across all users & public shares'} details={viewsDetails} onclick={() => scrollToChart('views')} />
     </div>
 
     <!-- Visitor & Storage KPI Stats -->
     <div class="stats-grid">
-      <KpiCard icon={Users} color="bg-cyan" title="Total Visitors" value={data.stats.visitors.total.toLocaleString()} subtitle="Page loads & media access events" details={visitorDetails} />
-      <KpiCard icon={Globe} color="bg-orange" title="Unique Visitors" value={data.stats.visitors.unique.toLocaleString()} subtitle="Distinct IP addresses" details={uniqueDetails} />
-      <KpiCard icon={Download} color="bg-red" title="Bandwidth Served" value={formatBytes(data.stats.bandwidth)} subtitle="Total bytes served to clients" details={bandwidthDetails} />
-      <KpiCard icon={Download} color="bg-orange" title="Total Downloads" value={data.stats.downloads.toLocaleString()} subtitle="File & folder (zip) downloads" details={downloadsDetails} />
+      <KpiCard icon={Users} color="bg-cyan" title="Total Visitors" value={data.stats.visitors.total.toLocaleString()} subtitle="Page loads & media access events" details={visitorDetails} onclick={() => scrollToChart('visits')} />
+      <KpiCard icon={Globe} color="bg-orange" title="Unique Visitors" value={data.stats.visitors.unique.toLocaleString()} subtitle="Distinct devices & browsers" details={uniqueDetails} onclick={() => scrollToChart('unique')} />
+      <KpiCard icon={Download} color="bg-red" title="Bandwidth Served" value={formatBytes(data.stats.bandwidth)} subtitle="Total bytes served to clients" details={bandwidthDetails} onclick={() => scrollToChart('bandwidth')} />
+      <KpiCard icon={Zap} color="bg-emerald" title="Bandwidth Saved (Cache)" value={formatBytes(data.stats.cacheSaved?.bytes || 0)} subtitle={`${data.stats.cacheSaved?.hitRatio ?? 0}% browser cache hit ratio`} details={cacheSavedDetails} onclick={() => scrollToChart('bandwidthSaved')} />
+      <KpiCard icon={Download} color="bg-orange" title="Total Downloads" value={data.stats.downloads.toLocaleString()} subtitle="File & folder (zip) downloads" details={downloadsDetails} onclick={() => scrollToChart('downloads')} />
       <KpiCard icon={HardDrive} color="bg-amber" title="Cache Size" value={formatBytes(data.stats.cache.size)} subtitle="Thumbnails, previews & transcodes" details={cacheDetails} />
       <KpiCard icon={Database} color="bg-slate" title="Database Size" value={formatBytes(data.stats.db.size)} subtitle="PostgreSQL on-disk usage" details={dbDetails} />
     </div>
 
-    <!-- Access Timeline -->
-    <div class="card" style="margin-bottom: 1.5rem;">
-      <h3><Activity size={18} /> Access Timeline <span class="hint">Last 30 days</span></h3>
-      <LineChart data={timelineRows} stroke="#a855f7" fillId="areaFill" unit="visits total" />
+    <!-- Analytics Timelines & Trends -->
+    <div id="analytics-timelines" class="card" style="margin-bottom: 1.5rem; scroll-margin-top: 2rem;">
+      <div class="card-head-row">
+        <div class="timeline-title-wrap">
+          <h3><TrendingUp size={18} /> Analytics Timelines & Trends <span class="hint">{rangeHint}</span></h3>
+          <p class="timeline-sub">Dedicated timeline graphs for total visitors, media views, unique devices, bandwidth, and file downloads.</p>
+        </div>
+        <div class="segmented" role="group" aria-label="Time granularity">
+          <button class:active={chartRange === 'hour'} onclick={() => chartRange = 'hour'}>Hour</button>
+          <button class:active={chartRange === 'day'} onclick={() => chartRange = 'day'}>Day</button>
+          <button class:active={chartRange === 'month'} onclick={() => chartRange = 'month'}>Month</button>
+          <button class:active={chartRange === 'lifetime'} onclick={() => chartRange = 'lifetime'}>Lifetime</button>
+        </div>
+      </div>
+
+      <!-- Metric Switcher Tabs -->
+      <div class="metric-tabs" role="tablist" aria-label="Timeline metric switcher">
+        <button
+          class="metric-tab"
+          class:active={selectedMetric === 'visits'}
+          onclick={() => selectedMetric = 'visits'}
+          role="tab"
+          aria-selected={selectedMetric === 'visits'}
+        >
+          <Users size={15} /> Total Visitors
+        </button>
+        <button
+          class="metric-tab"
+          class:active={selectedMetric === 'views'}
+          onclick={() => selectedMetric = 'views'}
+          role="tab"
+          aria-selected={selectedMetric === 'views'}
+        >
+          <Eye size={15} /> Media Views
+        </button>
+        <button
+          class="metric-tab"
+          class:active={selectedMetric === 'unique'}
+          onclick={() => selectedMetric = 'unique'}
+          role="tab"
+          aria-selected={selectedMetric === 'unique'}
+        >
+          <Globe size={15} /> Unique Visitors
+        </button>
+        <button
+          class="metric-tab"
+          class:active={selectedMetric === 'bandwidth'}
+          onclick={() => selectedMetric = 'bandwidth'}
+          role="tab"
+          aria-selected={selectedMetric === 'bandwidth'}
+        >
+          <Download size={15} /> Bandwidth Served
+        </button>
+        <button
+          class="metric-tab"
+          class:active={selectedMetric === 'bandwidthSaved'}
+          onclick={() => selectedMetric = 'bandwidthSaved'}
+          role="tab"
+          aria-selected={selectedMetric === 'bandwidthSaved'}
+        >
+          <Zap size={15} /> Bandwidth Saved (Cache)
+        </button>
+        <button
+          class="metric-tab"
+          class:active={selectedMetric === 'downloads'}
+          onclick={() => selectedMetric = 'downloads'}
+          role="tab"
+          aria-selected={selectedMetric === 'downloads'}
+        >
+          <ArrowDownToLine size={15} /> Total Downloads
+        </button>
+        <button
+          class="metric-tab show-all-tab"
+          class:active={selectedMetric === 'all'}
+          onclick={() => selectedMetric = 'all'}
+          role="tab"
+          aria-selected={selectedMetric === 'all'}
+        >
+          <Layers size={15} /> Show All
+        </button>
+      </div>
+
+      <!-- Charts display -->
+      <div class="timeline-charts-container">
+        {#if selectedMetric === 'visits' || selectedMetric === 'all'}
+          <div class="chart-block" class:chart-block-stacked={selectedMetric === 'all'}>
+            <div class="chart-subhead">
+              <span class="chart-subhead-title"><Users size={16} class="text-purple" /> Access Visits</span>
+              <span class="muted">{rangeHint}</span>
+            </div>
+            <LineChart data={visitsRows} stroke="#a855f7" fillId="visitsFill" unit="visits total" />
+          </div>
+        {/if}
+
+        {#if selectedMetric === 'views' || selectedMetric === 'all'}
+          <div class="chart-block" class:chart-block-stacked={selectedMetric === 'all'}>
+            <div class="chart-subhead">
+              <span class="chart-subhead-title"><Eye size={16} class="text-emerald" /> Media Views</span>
+              <span class="muted">{rangeHint}</span>
+            </div>
+            <LineChart data={viewsRows} stroke="#10b981" fillId="viewsFill" unit="views total" />
+          </div>
+        {/if}
+
+        {#if selectedMetric === 'unique' || selectedMetric === 'all'}
+          <div class="chart-block" class:chart-block-stacked={selectedMetric === 'all'}>
+            <div class="chart-subhead">
+              <span class="chart-subhead-title"><Globe size={16} class="text-cyan" /> Unique Visitors (Devices)</span>
+              <span class="muted">{rangeHint}</span>
+            </div>
+            <LineChart data={uniqueRows} stroke="#06b6d4" fillId="uniqueFill" unit="unique devices" />
+          </div>
+        {/if}
+
+        {#if selectedMetric === 'bandwidth' || selectedMetric === 'all'}
+          <div class="chart-block" class:chart-block-stacked={selectedMetric === 'all'}>
+            <div class="chart-subhead">
+              <span class="chart-subhead-title"><Download size={16} class="text-amber" /> Bandwidth Served</span>
+              <span class="muted">{rangeHint}</span>
+            </div>
+            <LineChart data={bandwidthRows} stroke="#f59e0b" fillId="bwFill" unit="served" formatTotal={formatBytes} />
+          </div>
+        {/if}
+
+        {#if selectedMetric === 'bandwidthSaved' || selectedMetric === 'all'}
+          <div class="chart-block" class:chart-block-stacked={selectedMetric === 'all'}>
+            <div class="chart-subhead">
+              <span class="chart-subhead-title"><Zap size={16} class="text-emerald" /> Bandwidth Saved from Local Cache</span>
+              <span class="muted">{rangeHint}</span>
+            </div>
+            <LineChart data={bandwidthSavedRows} stroke="#10b981" fillId="bwSavedFill" unit="saved" formatTotal={formatBytes} />
+          </div>
+        {/if}
+
+        {#if selectedMetric === 'downloads' || selectedMetric === 'all'}
+          <div class="chart-block" class:chart-block-stacked={selectedMetric === 'all'}>
+            <div class="chart-subhead">
+              <span class="chart-subhead-title"><ArrowDownToLine size={16} class="text-rose" /> Total Downloads (Single + Folder ZIP)</span>
+              <span class="muted">{rangeHint}</span>
+            </div>
+            <LineChart data={downloadsRows} stroke="#f43f5e" fillId="downloadsFill" unit="downloads total" />
+          </div>
+        {/if}
+      </div>
     </div>
 
     <!-- Distribution charts -->
@@ -302,11 +524,13 @@
       </div>
     </div>
 
-    <!-- Bandwidth by day -->
-    <div class="card" style="margin-bottom: 1.5rem;">
-      <h3><Download size={18} /> Bandwidth by Day <span class="hint">Last 30 days</span></h3>
-      <LineChart data={bandwidthRows} stroke="#34d399" fillId="bwFill" unit="served" formatTotal={formatBytes} />
+
+    <!-- Technical & Performance Analytics -->
+    <div class="section-title">
+      <h3>Technical & Performance Analytics</h3>
+      <p class="section-desc">Client load speeds, visitor engagement dwell time, feature interactions, and device environment.</p>
     </div>
+    <TechnicalAnalytics technical={data.technical} />
 
     <div class="tables-grid">
       <!-- Top Shared Links -->
@@ -538,10 +762,12 @@
       </div>
 
       <div class="card">
-        <h3><ShieldAlert size={18} /> Blocked / Not-Found Access</h3>
+        <h3><ShieldAlert size={18} /> Blocked & Security Events</h3>
         <div class="blocked-total">
           <div class="val">{data.blockedAttempts.total.toLocaleString()}</div>
-          <div class="sub">attempts recorded (all-time)</div>
+          <div class="sub">
+            blocked requests (vs {data.blockedAttempts.successfulTotal?.toLocaleString() || 0} successful)
+          </div>
         </div>
         {#if data.blockedAttempts.recent.length > 0}
           <div class="blocked-bars">
@@ -553,8 +779,31 @@
           </div>
           <div class="muted">Last {data.blockedAttempts.recent.length} days</div>
         {:else}
-          <p class="muted">No blocked access attempts recorded.</p>
+          <p class="muted">No blocked access attempts recorded in the last 7 days.</p>
         {/if}
+
+        <div class="blocked-breakdown">
+          <div class="breakdown-row">
+            <span class="breakdown-label"><Shield size={14} style="color: #a855f7;" /> Turnstile Challenges</span>
+            <span class="breakdown-count">{data.blockedAttempts.breakdown?.turnstile?.toLocaleString() || 0}</span>
+          </div>
+          <div class="breakdown-row">
+            <span class="breakdown-label"><Clock size={14} style="color: #f59e0b;" /> Rate Limiting (429)</span>
+            <span class="breakdown-count">{data.blockedAttempts.breakdown?.rateLimit?.toLocaleString() || 0}</span>
+          </div>
+          <div class="breakdown-row">
+            <span class="breakdown-label"><Lock size={14} style="color: #ef4444;" /> Unauthorized / Expired</span>
+            <span class="breakdown-count">{data.blockedAttempts.breakdown?.unauthorized?.toLocaleString() || 0}</span>
+          </div>
+          <div class="breakdown-row">
+            <span class="breakdown-label"><UserX size={14} style="color: #f43f5e;" /> Login Lockout</span>
+            <span class="breakdown-count">{data.blockedAttempts.breakdown?.loginLockout?.toLocaleString() || 0}</span>
+          </div>
+          <div class="breakdown-row">
+            <span class="breakdown-label"><FileQuestion size={14} style="color: #94a3b8;" /> 404 Not Found</span>
+            <span class="breakdown-count">{data.blockedAttempts.breakdown?.notFound?.toLocaleString() || 0}</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -587,6 +836,94 @@
 </div>
 
 <style>
+  .card-head-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  .card-head-row h3 { margin: 0; }
+  .timeline-title-wrap { display: flex; flex-direction: column; gap: 0.25rem; }
+  .timeline-title-wrap h3 { margin: 0; }
+  .timeline-sub { font-size: 0.8rem; color: #71717a; margin: 0; }
+
+  .metric-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .metric-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #a1a1aa;
+    padding: 0.4rem 0.85rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .metric-tab:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #f4f4f5;
+  }
+  .metric-tab.active {
+    background: rgba(168, 85, 247, 0.2);
+    border-color: rgba(168, 85, 247, 0.5);
+    color: #f4f4f5;
+  }
+  .metric-tab.show-all-tab.active {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.5);
+  }
+  .timeline-charts-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .chart-block {
+    display: flex;
+    flex-direction: column;
+  }
+  .chart-block-stacked {
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .chart-block-stacked:first-child {
+    padding-top: 0;
+    border-top: none;
+  }
+  .chart-subhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .chart-subhead-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #e4e4e7;
+  }
+  :global(.text-purple) { color: #c084fc; }
+  :global(.text-emerald) { color: #34d399; }
+  :global(.text-cyan) { color: #22d3ee; }
+  :global(.text-amber) { color: #fbbf24; }
+  :global(.text-rose) { color: #fb7185; }
+  .section-title { margin: 2rem 0 1rem 0; }
+  .section-title h3 { margin: 0 0 0.25rem 0; font-size: 1.3rem; color: #f4f4f5; }
+  .section-desc { margin: 0; color: #a1a1aa; font-size: 0.85rem; }
+
   .admin-container { width: 100%; color: #f4f4f5; }
   .header { margin-bottom: 2rem; }
   h2 { font-size: 2rem; margin: 0 0 0.5rem 0; }
@@ -671,6 +1008,32 @@
   .blocked-bars { display: flex; align-items: flex-end; gap: 4px; height: 90px; margin-bottom: 0.35rem; }
   .blocked-col { flex: 1; display: flex; align-items: flex-end; justify-content: center; }
   .blocked-bar { width: 70%; background: linear-gradient(180deg, #f87171, #7f1d1d); border-radius: 3px 3px 0 0; min-height: 6px; }
+
+  .blocked-breakdown {
+    margin-top: 1rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid var(--glass-border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .breakdown-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+  }
+  .breakdown-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: rgba(255, 255, 255, 0.7);
+  }
+  .breakdown-count {
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.95);
+  }
 
   .spinner {
     border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #a855f7;

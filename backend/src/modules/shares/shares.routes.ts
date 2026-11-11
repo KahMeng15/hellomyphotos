@@ -81,6 +81,14 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
     
     if (!turnstileToken) {
+      AnalyticsService.logVisit({
+        actionType: 'blocked_turnstile',
+        shareToken: token,
+        ip: getClientIp(request),
+        userAgent: request.headers['user-agent'] as string | undefined,
+        path: request.url,
+        metadata: { reason: 'missing_token' }
+      });
       return reply.status(400).send({ error: 'Security verification missing' });
     }
 
@@ -99,6 +107,14 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       if (!r.ok) throw new Error(`siteverify ${r.status}`);
       const result = await r.json();
       if (!result.success) {
+        AnalyticsService.logVisit({
+          actionType: 'blocked_turnstile',
+          shareToken: token,
+          ip,
+          userAgent: request.headers['user-agent'] as string | undefined,
+          path: request.url,
+          metadata: { reason: 'verification_failed', errorCodes: result['error-codes'] }
+        });
         return reply.status(403).send({ error: 'Security verification failed' });
       }
       
@@ -457,6 +473,8 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     AnalyticsService.logVisit({
       mediaId: share.media_id || null,
       shareToken: token,
+      deviceId: (request as any).deviceId || (request.cookies as any)?.['hmp_device_id'] || null,
+      folderPath: targetPath || share.folder_path || null,
       actionType: 'view_shared_link',
       ip: getClientIp(request),
       userAgent: request.headers['user-agent'] as string | undefined,
@@ -690,6 +708,14 @@ export async function sharesRoutes(fastify: FastifyInstance) {
 
     if (process.env.TURNSTILE_SECRET) {
       if (!turnstileToken) {
+        AnalyticsService.logVisit({
+          actionType: 'blocked_turnstile',
+          shareToken: token,
+          ip: getClientIp(request),
+          userAgent: request.headers['user-agent'] as string | undefined,
+          path: request.url,
+          metadata: { context: 'request_access', reason: 'missing_token' }
+        });
         return reply.status(400).send({ error: 'Please complete the security check.' });
       }
 
@@ -707,9 +733,25 @@ export async function sharesRoutes(fastify: FastifyInstance) {
         if (!r.ok) throw new Error(`siteverify ${r.status}`);
         const result = await r.json();
         if (!result.success) {
+          AnalyticsService.logVisit({
+            actionType: 'blocked_turnstile',
+            shareToken: token,
+            ip,
+            userAgent: request.headers['user-agent'] as string | undefined,
+            path: request.url,
+            metadata: { context: 'request_access', reason: 'verification_failed', errorCodes: result['error-codes'] }
+          });
           return reply.status(403).send({ error: 'Security verification failed. Please try again.' });
         }
       } catch (err: any) {
+        AnalyticsService.logVisit({
+          actionType: 'blocked_turnstile',
+          shareToken: token,
+          ip,
+          userAgent: request.headers['user-agent'] as string | undefined,
+          path: request.url,
+          metadata: { context: 'request_access', reason: 'siteverify_error', message: err.message }
+        });
         return reply.status(403).send({ error: 'Security verification failed. Please try again.' });
       }
     }

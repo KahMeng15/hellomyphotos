@@ -108,7 +108,7 @@ const SCHEMA_STATEMENTS = [
     is_active BOOLEAN DEFAULT true,
     expires_at TIMESTAMP WITH TIME ZONE,
     password_hash TEXT,
-    created_by UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
 
@@ -138,6 +138,12 @@ const SCHEMA_STATEMENTS = [
   )`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='person_id') THEN ALTER TABLE shared_folders ADD COLUMN person_id UUID REFERENCES people(id) ON DELETE SET NULL; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='is_active') THEN ALTER TABLE shared_folders ADD COLUMN is_active BOOLEAN DEFAULT true; END IF; END $$;`,
+  `DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shared_folders_created_by_fkey' AND confdeltype = 'c') THEN
+      ALTER TABLE shared_folders DROP CONSTRAINT shared_folders_created_by_fkey;
+      ALTER TABLE shared_folders ADD CONSTRAINT shared_folders_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+    END IF;
+  END $$;`,
   `INSERT INTO people (id, name) SELECT DISTINCT person_id, '' FROM face_embeddings WHERE person_id IS NOT NULL ON CONFLICT (id) DO NOTHING`,
 
   // ---- Settings / logs (03-settings-logs.sql) ----
@@ -221,6 +227,24 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_share_access_requests_token ON share_access_requests(share_token)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_share_access_requests_folder ON share_access_requests(folder_path)`,
+
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS page_load_ms INTEGER`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS session_duration_s INTEGER`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS photo_view_ms INTEGER`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS sort_mode VARCHAR(30)`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS view_mode VARCHAR(30)`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS features_used TEXT[]`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS download_time_ms INTEGER`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS network_type VARCHAR(30)`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS screen_res VARCHAR(30)`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS scroll_depth_pct INTEGER`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS folders_visited TEXT[]`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS metadata JSONB`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS device_id VARCHAR(64)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_analytics_visits_device_id ON analytics_visits(device_id)`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS cache_bytes_saved BIGINT`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS cache_hits INTEGER`,
+  `ALTER TABLE analytics_visits ADD COLUMN IF NOT EXISTS cache_misses INTEGER`,
 ];
 
 // Statements not yet successfully applied. Succeeded ones are dropped so they

@@ -17,6 +17,7 @@ import { replaceState } from '$app/navigation';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { getTurnstileSitekey } from '$lib/api/turnstile';
   import { API_BASE } from '$lib/api/media';
+  import { tracker } from '$lib/utils/analyticsTracker';
   
   let { data }: { data: PageData } = $props();
   
@@ -123,9 +124,43 @@ import { replaceState } from '$app/navigation';
 
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
-  $effect(() => savePref('shareSortMode', sortMode));
-  $effect(() => savePref('shareViewMode', viewMode));
-  $effect(() => savePref('shareFolderViewMode', folderViewMode));
+  $effect(() => {
+    savePref('shareSortMode', sortMode);
+  });
+  $effect(() => {
+    savePref('shareViewMode', viewMode);
+  });
+  $effect(() => {
+    savePref('shareFolderViewMode', folderViewMode);
+  });
+  $effect(() => {
+    const current = data.folderPath || data.share?.folder_path || '';
+    if (current) tracker.recordFolder(current);
+  });
+
+  function selectSortMode(mode: SortMode) {
+    if (sortMode !== mode) {
+      sortMode = mode;
+      tracker.recordSortChange(mode);
+    }
+    showSortMenu = false;
+  }
+
+  function selectViewMode(mode: ViewMode) {
+    if (viewMode !== mode) {
+      viewMode = mode;
+      tracker.recordViewChange(mode);
+    }
+    showViewMenu = false;
+  }
+
+  function selectFolderViewMode(mode: FolderViewMode) {
+    if (folderViewMode !== mode) {
+      folderViewMode = mode;
+      tracker.recordFolderViewChange(mode);
+    }
+    showFolderViewMenu = false;
+  }
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
@@ -283,6 +318,13 @@ import { replaceState } from '$app/navigation';
     sortMode = loadPref<SortMode>('shareSortMode', data.defaultShareSortMode || 'newest');
     viewMode = loadPref<ViewMode>('shareViewMode', data.defaultShareViewMode || 'small-fit');
     folderViewMode = loadPref<FolderViewMode>('shareFolderViewMode', data.defaultShareFolderViewMode || 'small-grid');
+
+    tracker.init({
+      shareToken: data.token,
+      folderPath: data.folderPath || data.share?.folder_path || '',
+      sortMode,
+      viewMode
+    });
 
     pollInterval = setInterval(() => {
       if (data.error || !data.files) return;
@@ -631,10 +673,10 @@ import { replaceState } from '$app/navigation';
           </button>
           {#if showSortMenu}
             <div class="dropdown-menu">
-              <button class:active={sortMode === 'newest'} onclick={() => { sortMode = 'newest'; showSortMenu = false; }}>Newest to Oldest</button>
-              <button class:active={sortMode === 'oldest'} onclick={() => { sortMode = 'oldest'; showSortMenu = false; }}>Oldest to Newest</button>
-              <button class:active={sortMode === 'a-z'} onclick={() => { sortMode = 'a-z'; showSortMenu = false; }}>A to Z</button>
-              <button class:active={sortMode === 'z-a'} onclick={() => { sortMode = 'z-a'; showSortMenu = false; }}>Z to A</button>
+              <button class:active={sortMode === 'newest'} onclick={() => selectSortMode('newest')}>Newest to Oldest</button>
+              <button class:active={sortMode === 'oldest'} onclick={() => selectSortMode('oldest')}>Oldest to Newest</button>
+              <button class:active={sortMode === 'a-z'} onclick={() => selectSortMode('a-z')}>A to Z</button>
+              <button class:active={sortMode === 'z-a'} onclick={() => selectSortMode('z-a')}>Z to A</button>
             </div>
           {/if}
         </div>
@@ -646,10 +688,10 @@ import { replaceState } from '$app/navigation';
             </button>
             {#if showFolderViewMenu}
               <div class="dropdown-menu">
-                <button class:active={folderViewMode === 'small-grid'} onclick={() => { folderViewMode = 'small-grid'; showFolderViewMenu = false; }}>Small Grid</button>
-                <button class:active={folderViewMode === 'medium-grid'} onclick={() => { folderViewMode = 'medium-grid'; showFolderViewMenu = false; }}>Medium Grid</button>
-                <button class:active={folderViewMode === 'large-grid'} onclick={() => { folderViewMode = 'large-grid'; showFolderViewMenu = false; }}>Large Grid</button>
-                <button class:active={folderViewMode === 'list'} onclick={() => { folderViewMode = 'list'; showFolderViewMenu = false; }}>List</button>
+                <button class:active={folderViewMode === 'small-grid'} onclick={() => selectFolderViewMode('small-grid')}>Small Grid</button>
+                <button class:active={folderViewMode === 'medium-grid'} onclick={() => selectFolderViewMode('medium-grid')}>Medium Grid</button>
+                <button class:active={folderViewMode === 'large-grid'} onclick={() => selectFolderViewMode('large-grid')}>Large Grid</button>
+                <button class:active={folderViewMode === 'list'} onclick={() => selectFolderViewMode('list')}>List</button>
               </div>
             {/if}
           </div>
@@ -660,17 +702,17 @@ import { replaceState } from '$app/navigation';
             </button>
             {#if showViewMenu}
               <div class="dropdown-menu">
-                <button class:active={viewMode === 'small-fit'} onclick={() => { viewMode = 'small-fit'; showViewMenu = false; }}>Small Fit Size</button>
-                <button class:active={viewMode === 'large-fit'} onclick={() => { viewMode = 'large-fit'; showViewMenu = false; }}>Large Fit Size</button>
-                <button class:active={viewMode === 'small-square'} onclick={() => { viewMode = 'small-square'; showViewMenu = false; }}>Small Square Grid</button>
-                <button class:active={viewMode === 'large-square'} onclick={() => { viewMode = 'large-square'; showViewMenu = false; }}>Large Square Grid</button>
+                <button class:active={viewMode === 'small-fit'} onclick={() => selectViewMode('small-fit')}>Small Fit Size</button>
+                <button class:active={viewMode === 'large-fit'} onclick={() => selectViewMode('large-fit')}>Large Fit Size</button>
+                <button class:active={viewMode === 'small-square'} onclick={() => selectViewMode('small-square')}>Small Square Grid</button>
+                <button class:active={viewMode === 'large-square'} onclick={() => selectViewMode('large-square')}>Large Square Grid</button>
               </div>
             {/if}
           </div>
         {/if}
         
         <div class="actions">
-          {#if !personName && data.share.allow_download_folder}<a href={getFolderZipUrl(data.share.folder_path, data.token)} target="_blank" class="icon-btn" title="Download ZIP"><Download size={18} /></a>{/if}
+          {#if !personName && data.share.allow_download_folder}<a href={getFolderZipUrl(data.share.folder_path, data.token)} target="_blank" class="icon-btn" title="Download ZIP" onclick={() => tracker.recordFeature('download_folder')}><Download size={18} /></a>{/if}
         </div>
         
       </div>

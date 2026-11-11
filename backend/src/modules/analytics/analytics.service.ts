@@ -13,12 +13,28 @@ export function hashIp(ip: string): string {
 export interface VisitRecord {
   mediaId?: string | null;
   shareToken?: string | null;
+  deviceId?: string | null;
   actionType: string;
   ip: string;
   userAgent?: string | null;
   referrer?: string | null;
   path?: string | null;
   folderPath?: string | null;
+  pageLoadMs?: number | null;
+  sessionDurationS?: number | null;
+  photoViewMs?: number | null;
+  sortMode?: string | null;
+  viewMode?: string | null;
+  featuresUsed?: string[] | null;
+  downloadTimeMs?: number | null;
+  networkType?: string | null;
+  screenRes?: string | null;
+  scrollDepthPct?: number | null;
+  foldersVisited?: string[] | null;
+  cacheBytesSaved?: number | null;
+  cacheHits?: number | null;
+  cacheMisses?: number | null;
+  metadata?: any;
 }
 
 export class AnalyticsService {
@@ -40,6 +56,7 @@ export class AnalyticsService {
       const entry = {
         media_id: record.mediaId || null,
         share_token: record.shareToken || null,
+        device_id: record.deviceId ? String(record.deviceId).slice(0, 64) : null,
         action_type: record.actionType,
         ip: ip.slice(0, 45),
         ip_hash: hashIp(ip),
@@ -49,7 +66,22 @@ export class AnalyticsService {
         device_type: ua.deviceType,
         referrer: (record.referrer || '').slice(0, 500) || null,
         path: (record.path || '').slice(0, 500) || null,
-        folder_path: (record.folderPath || '').slice(0, 500) || null
+        folder_path: (record.folderPath || '').slice(0, 500) || null,
+        page_load_ms: typeof record.pageLoadMs === 'number' && Number.isFinite(record.pageLoadMs) ? Math.round(record.pageLoadMs) : null,
+        session_duration_s: typeof record.sessionDurationS === 'number' && Number.isFinite(record.sessionDurationS) ? Math.round(record.sessionDurationS) : null,
+        photo_view_ms: typeof record.photoViewMs === 'number' && Number.isFinite(record.photoViewMs) ? Math.round(record.photoViewMs) : null,
+        sort_mode: record.sortMode ? String(record.sortMode).slice(0, 30) : null,
+        view_mode: record.viewMode ? String(record.viewMode).slice(0, 30) : null,
+        features_used: Array.isArray(record.featuresUsed) && record.featuresUsed.length > 0 ? record.featuresUsed.map(f => String(f).slice(0, 50)) : null,
+        download_time_ms: typeof record.downloadTimeMs === 'number' && Number.isFinite(record.downloadTimeMs) ? Math.round(record.downloadTimeMs) : null,
+        network_type: record.networkType ? String(record.networkType).slice(0, 30) : null,
+        screen_res: record.screenRes ? String(record.screenRes).slice(0, 30) : null,
+        scroll_depth_pct: typeof record.scrollDepthPct === 'number' && Number.isFinite(record.scrollDepthPct) ? Math.min(100, Math.max(0, Math.round(record.scrollDepthPct))) : null,
+        folders_visited: Array.isArray(record.foldersVisited) && record.foldersVisited.length > 0 ? record.foldersVisited.map(f => String(f).slice(0, 300)) : null,
+        cache_bytes_saved: typeof record.cacheBytesSaved === 'number' && Number.isFinite(record.cacheBytesSaved) ? Math.max(0, Math.round(record.cacheBytesSaved)) : null,
+        cache_hits: typeof record.cacheHits === 'number' && Number.isFinite(record.cacheHits) ? Math.max(0, Math.round(record.cacheHits)) : null,
+        cache_misses: typeof record.cacheMisses === 'number' && Number.isFinite(record.cacheMisses) ? Math.max(0, Math.round(record.cacheMisses)) : null,
+        metadata: record.metadata ? (typeof record.metadata === 'string' ? record.metadata : JSON.stringify(record.metadata)) : null
       };
       await redis.rpush(VISITS_QUEUE_KEY, JSON.stringify(entry));
     } catch (error) {
@@ -96,7 +128,13 @@ export class AnalyticsService {
           .map(q => { try { return JSON.parse(q); } catch { return null; } })
           .filter(Boolean);
 
-        const columns = ['media_id', 'share_token', 'action_type', 'ip', 'ip_hash', 'user_agent', 'os', 'browser', 'device_type', 'referrer', 'path', 'folder_path'];
+        const columns = [
+          'media_id', 'share_token', 'device_id', 'action_type', 'ip', 'ip_hash', 'user_agent',
+          'os', 'browser', 'device_type', 'referrer', 'path', 'folder_path',
+          'page_load_ms', 'session_duration_s', 'photo_view_ms', 'sort_mode', 'view_mode',
+          'features_used', 'download_time_ms', 'network_type', 'screen_res', 'scroll_depth_pct',
+          'folders_visited', 'cache_bytes_saved', 'cache_hits', 'cache_misses', 'metadata'
+        ];
         const perRow = columns.length;
 
         // Chunk to stay well under Postgres' 65535 parameter limit

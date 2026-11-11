@@ -8,14 +8,29 @@
     value: string;
     subtitle: string;
     details?: { label: string; value: string; href?: string }[];
+    onclick?: () => void;
   }
 
-  let { icon: Icon, color, title, value, subtitle, details = [] }: Props = $props();
+  let { icon: Icon, color, title, value, subtitle, details = [], onclick }: Props = $props();
   let expanded = $state(false);
 </script>
 
 <div class="kpi-wrap">
-  <div class="stat-card">
+  <div
+    class="stat-card"
+    class:clickable={!!onclick}
+    onclick={(e) => {
+      if ((e.target as HTMLElement).closest('.kpi-expand')) return;
+      onclick?.();
+    }}
+    role={onclick ? "button" : undefined}
+    tabindex={onclick ? 0 : undefined}
+    onkeydown={(e) => {
+      if (onclick && (e.key === 'Enter' || e.key === ' ')) {
+        onclick();
+      }
+    }}
+  >
     <div class="icon-wrap {color}"><Icon size={24} /></div>
     <div class="stat-info">
       <h4>{title}</h4>
@@ -58,6 +73,15 @@
     align-items: center;
     gap: 1.25rem;
     box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+  .stat-card.clickable {
+    cursor: pointer;
+  }
+  .stat-card.clickable:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.18);
+    background: rgba(30, 30, 38, 0.75);
   }
   .icon-wrap { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .bg-blue { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }

@@ -6,6 +6,7 @@ import { redis } from '../../config/redis';
 import { logger } from '../../utils/logger';
 import { requireAuth } from '../../utils/auth';
 import { getClientIp } from '../../utils/getIp';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_please_change';
 const APP_DOMAIN = process.env.APP_DOMAIN || '';
@@ -33,6 +34,13 @@ export async function authRoutes(fastify: FastifyInstance) {
 
     if (process.env.TURNSTILE_SECRET) {
       if (!turnstileToken) {
+        AnalyticsService.logVisit({
+          actionType: 'blocked_turnstile',
+          ip,
+          userAgent: request.headers['user-agent'] as string | undefined,
+          path: request.url,
+          metadata: { context: 'login', reason: 'missing_token' }
+        });
         return reply.status(400).send({ error: 'Security verification missing. Please try again.' });
       }
       try {
@@ -48,10 +56,24 @@ export async function authRoutes(fastify: FastifyInstance) {
         if (!r.ok) throw new Error(`siteverify ${r.status}`);
         const result = await r.json();
         if (!result.success) {
+          AnalyticsService.logVisit({
+            actionType: 'blocked_turnstile',
+            ip,
+            userAgent: request.headers['user-agent'] as string | undefined,
+            path: request.url,
+            metadata: { context: 'login', reason: 'verification_failed', errorCodes: result['error-codes'] }
+          });
           logger.warn(`Turnstile verification failed for ${email}`);
           return reply.status(403).send({ error: 'Security verification failed' });
         }
-      } catch (err) {
+      } catch (err: any) {
+        AnalyticsService.logVisit({
+          actionType: 'blocked_turnstile',
+          ip,
+          userAgent: request.headers['user-agent'] as string | undefined,
+          path: request.url,
+          metadata: { context: 'login', reason: 'siteverify_error', message: err.message }
+        });
         logger.error('Turnstile verification error', err);
         return reply.status(403).send({ error: 'Security verification error' });
       }
@@ -82,6 +104,13 @@ export async function authRoutes(fastify: FastifyInstance) {
       blockedUntil = parsed.blockedUntil || 0;
 
       if (Date.now() < blockedUntil) {
+        AnalyticsService.logVisit({
+          actionType: 'blocked_login_lockout',
+          ip,
+          userAgent: request.headers['user-agent'] as string | undefined,
+          path: request.url,
+          metadata: { email, reason: 'locked_out' }
+        });
         const remainingMinutes = Math.ceil((blockedUntil - Date.now()) / 60000);
         return reply.status(429).send({ error: `Too many failed attempts. Please try again in ${remainingMinutes} minute(s).` });
       }
@@ -107,6 +136,21 @@ export async function authRoutes(fastify: FastifyInstance) {
           newPenalty = newPenalty * 2;
         }
         attempts = 0;
+        AnalyticsService.logVisit({
+          actionType: 'blocked_login_lockout',
+          ip,
+          userAgent: request.headers['user-agent'] as string | undefined,
+          path: request.url,
+          metadata: { email, reason: 'max_tries_exceeded', maxTries, penaltySeconds: newPenalty }
+        });
+      } else {
+        AnalyticsService.logVisit({
+          actionType: 'blocked_access',
+          ip,
+          userAgent: request.headers['user-agent'] as string | undefined,
+          path: request.url,
+          metadata: { context: 'login_bad_credentials', email, attempt: attempts }
+        });
       }
 
       logger.warn(`Failed login attempt for ${email}`, { ip: request.ip });

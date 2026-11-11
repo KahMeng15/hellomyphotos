@@ -80,6 +80,27 @@ services:
       timeout: 5s
       retries: 5
 
+  db-backup:
+    restart: unless-stopped
+    image: prodrigestivill/postgres-backup-local:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./volumes/backups:/backups
+    env_file: .env
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB:-hellomyphotos}
+      - POSTGRES_USER=${POSTGRES_USER:-hellomyphotos}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - SCHEDULE=@daily
+      - BACKUP_ON_START=TRUE
+      - BACKUP_KEEP_DAYS=30
+      - BACKUP_KEEP_WEEKS=0
+      - BACKUP_KEEP_MONTHS=0
+      - BACKUP_SUFFIX=.sql.gz
+
   redis:
     restart: unless-stopped
     image: redis:7-alpine

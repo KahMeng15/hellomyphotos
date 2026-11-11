@@ -16,6 +16,7 @@ import { query } from '../../config/db';
 import { ClusterService } from '../ml/cluster.service';
 import { logger } from '../../utils/logger';
 import { normalizeReferrer, SPAM_DOMAINS, SPAM_SUBSTRINGS } from '../../utils/referrer';
+import { AnalyticsService } from '../analytics/analytics.service';
 import path from 'path';
 import fs from 'fs';
 
@@ -186,13 +187,13 @@ export async function adminRoutes(fastify: FastifyInstance) {
     const { id } = request.params as any;
     const { email, name, role, password, folders } = request.body as any;
     
-    // Safety check: don't demote the last super_admin
-    if (role !== 'super_admin') {
+    // Safety check: don't demote the last admin
+    if (role !== 'admin' && role !== 'super_admin') {
       const userRes = await query('SELECT role FROM users WHERE id = $1', [id]);
-      if (userRes.rows.length > 0 && userRes.rows[0].role === 'super_admin') {
-        const adminCountRes = await query("SELECT COUNT(*) FROM users WHERE role = 'super_admin'");
-        if (parseInt(adminCountRes.rows[0].count) <= 1) {
-          return reply.status(400).send({ error: 'Cannot demote the last super admin.' });
+      if (userRes.rows.length > 0 && ['admin', 'super_admin'].includes(userRes.rows[0].role)) {
+        const adminCountRes = await query("SELECT COUNT(*) FROM users WHERE role IN ('admin', 'super_admin')");
+        if (parseInt(adminCountRes.rows[0].count, 10) <= 1) {
+          return reply.status(400).send({ error: 'Cannot demote the only remaining admin account.' });
         }
       }
     }
@@ -228,18 +229,29 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.delete('/api/admin/users/:id', async (request, reply) => {
     if (!(await verifyAdminPassword(request, reply))) return;
     const { id } = request.params as any;
+    const currentAdminId = (request.user as any)?.id;
+
+    // Safety check 1: Don't allow deleting your own account
+    if (currentAdminId && currentAdminId === id) {
+      return reply.status(400).send({ error: 'You cannot delete your own account.' });
+    }
     
-    // Safety check: Don't delete the last super_admin
+    // Safety check 2: Don't delete the last admin
     const userRes = await query('SELECT role FROM users WHERE id = $1', [id]);
     if (userRes.rows.length === 0) {
       return reply.status(404).send({ error: 'User not found' });
     }
     
-    if (userRes.rows[0].role === 'super_admin') {
-      const adminCountRes = await query("SELECT COUNT(*) FROM users WHERE role = 'super_admin'");
-      if (parseInt(adminCountRes.rows[0].count) <= 1) {
-        return reply.status(400).send({ error: 'Cannot delete the last super admin.' });
+    if (['admin', 'super_admin'].includes(userRes.rows[0].role)) {
+      const adminCountRes = await query("SELECT COUNT(*) FROM users WHERE role IN ('admin', 'super_admin')");
+      if (parseInt(adminCountRes.rows[0].count, 10) <= 1) {
+        return reply.status(400).send({ error: 'Cannot delete the only remaining admin account.' });
       }
+    }
+
+    // Safety check 3: Reassign any share links created by this user to the acting admin
+    if (currentAdminId) {
+      await query('UPDATE shared_folders SET created_by = $1 WHERE created_by = $2', [currentAdminId, id]);
     }
     
     await query('DELETE FROM users WHERE id = $1', [id]);
@@ -638,6 +650,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.get('/api/admin/analytics', async (request, reply) => {
     try {
+      await AnalyticsService.flushToPostgres();
       const photosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'image/%'`);
       const videosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'video/%'`);
 
@@ -696,15 +709,50 @@ export async function adminRoutes(fastify: FastifyInstance) {
         expiringShares,
         blockedStats,
         blockedRecent,
+        blockedByType,
+        successfulAccessStats,
         folderBreakdown,
         viewsByDay,
         dbTableSizes,
         downloadsTotal,
         downloadsByDay,
         topFileDownloads,
-        topFolderDownloads
+        topFolderDownloads,
+        timelineHourly,
+        timelineMonthly,
+        timelineLifetime,
+        bwHourly,
+        bwMonthly,
+        bwLifetime,
+        uniqueHourly,
+        uniqueDaily,
+        uniqueMonthly,
+        uniqueLifetime,
+        viewsHourly,
+        viewsMonthly,
+        viewsLifetime,
+        downloadsHourly,
+        downloadsMonthly,
+        downloadsLifetime,
+        pageLoadStats,
+        sessionStats,
+        dwellStats,
+        topDwellMedia,
+        downloadPerfStats,
+        sortStats,
+        viewStats,
+        featureStats,
+        foldersVisitedStats,
+        networkStats,
+        screenStats,
+        scrollStats,
+        cacheSavedStats,
+        cacheSavedByDay,
+        cacheSavedHourly,
+        cacheSavedMonthly,
+        cacheSavedLifetime
       ] = await Promise.all([
-        query(`SELECT COUNT(*) as total, COUNT(DISTINCT ip_hash) as unique_visitors FROM analytics_visits ${visitWhere}`, visitParams),
+        query(`SELECT COUNT(*) as total, COUNT(DISTINCT COALESCE(device_id, ip_hash)) as unique_visitors FROM analytics_visits ${visitWhere}`, visitParams),
         query(`SELECT COALESCE(NULLIF(os, ''), 'Unknown') as name, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY name ORDER BY count DESC`, visitParams),
         query(`SELECT COALESCE(NULLIF(browser, ''), 'Unknown') as name, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY name ORDER BY count DESC`, visitParams),
         query(`SELECT COALESCE(NULLIF(device_type, ''), 'unknown') as name, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY name ORDER BY count DESC`, visitParams),
@@ -718,23 +766,67 @@ export async function adminRoutes(fastify: FastifyInstance) {
         query(`SELECT m.id, m.file_name, m.folder_path, COALESCE(SUM(a.bytes_served), 0) as bytes, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id WHERE a.media_id IS NOT NULL ${mediaScope} GROUP BY m.id, m.file_name, m.folder_path ORDER BY bytes DESC LIMIT 500`),
         query(`SELECT COALESCE(s.folder_path, s.media_id::text, a.share_token) as label, a.share_token, COALESCE(SUM(a.bytes_served), 0) as bytes, COUNT(*) as views FROM media_analytics a LEFT JOIN shared_folders s ON a.share_token = s.share_token WHERE a.share_token IS NOT NULL GROUP BY label, a.share_token ORDER BY bytes DESC LIMIT 500`),
         query(`SELECT m.folder_path, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id WHERE a.media_id IS NOT NULL ${mediaScope} GROUP BY m.folder_path ORDER BY views DESC LIMIT 500`),
-        query(`SELECT COALESCE(s.folder_path, s.media_id::text, v.share_token) as label, v.share_token, COUNT(*) as visits, COUNT(DISTINCT v.ip_hash) as unique_visitors, (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = v.share_token) as media_views FROM analytics_visits v LEFT JOIN shared_folders s ON v.share_token = s.share_token WHERE v.share_token IS NOT NULL GROUP BY label, v.share_token ORDER BY unique_visitors DESC LIMIT 500`),
+        query(`SELECT COALESCE(s.folder_path, s.media_id::text, v.share_token) as label, v.share_token, COUNT(*) as visits, COUNT(DISTINCT COALESCE(v.device_id, v.ip_hash)) as unique_visitors, (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = v.share_token) as media_views FROM analytics_visits v LEFT JOIN shared_folders s ON v.share_token = s.share_token WHERE v.share_token IS NOT NULL GROUP BY label, v.share_token ORDER BY unique_visitors DESC LIMIT 500`),
         query(`SELECT s.share_token, s.folder_path, s.media_id, s.expires_at, s.is_active, u.email as creator_email FROM shared_folders s LEFT JOIN users u ON s.created_by = u.id WHERE s.is_active = true AND s.expires_at IS NOT NULL AND s.expires_at < NOW() + INTERVAL '7 days' ORDER BY s.expires_at ASC`),
-        query(`SELECT COUNT(*) as count FROM analytics_visits WHERE action_type IN ('blocked_access', 'not_found')`),
-        query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits WHERE action_type IN ('blocked_access', 'not_found') AND created_at > NOW() - INTERVAL '7 days' GROUP BY day ORDER BY day`),
+        query(`SELECT COUNT(*) as count FROM analytics_visits WHERE action_type IN ('blocked_access', 'not_found', 'blocked_turnstile', 'blocked_rate_limit', 'blocked_login_lockout')`),
+        query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits WHERE action_type IN ('blocked_access', 'not_found', 'blocked_turnstile', 'blocked_rate_limit', 'blocked_login_lockout') AND created_at > NOW() - INTERVAL '7 days' GROUP BY day ORDER BY day`),
+        query(`SELECT action_type as type, COUNT(*) as count FROM analytics_visits WHERE action_type IN ('blocked_access', 'not_found', 'blocked_turnstile', 'blocked_rate_limit', 'blocked_login_lockout') GROUP BY action_type`),
+        query(`SELECT COUNT(*) as count FROM analytics_visits WHERE action_type IN ('view_shared_link', 'page_load', 'preview', 'stream', 'download', 'download_folder')`),
         query(`SELECT folder_path, COUNT(*) FILTER (WHERE mime_type LIKE 'image/%') as photos, COUNT(*) FILTER (WHERE mime_type LIKE 'video/%') as videos FROM media_files GROUP BY folder_path ORDER BY (COUNT(*) FILTER (WHERE mime_type LIKE 'image/%') + COUNT(*) FILTER (WHERE mime_type LIKE 'video/%')) DESC LIMIT 500`),
         query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM media_analytics WHERE created_at > NOW() - INTERVAL '30 days' ${mediaScope} GROUP BY day ORDER BY day`),
         query(`SELECT c.relname as name, pg_total_relation_size(c.oid) as bytes FROM pg_class c WHERE c.relkind IN ('r', 'm') AND c.relnamespace = 'public'::regnamespace ORDER BY bytes DESC LIMIT 20`),
         query(`SELECT COUNT(*) as count FROM analytics_visits ${visitWhere}${visitWhere ? ' AND' : ' WHERE'} action_type IN ('download', 'download_folder')`, visitParams),
         query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits ${downloadsByDayWhere} GROUP BY day ORDER BY day`, visitParams),
         query(`SELECT m.id, m.file_name, m.folder_path, COUNT(*) as downloads FROM analytics_visits a JOIN media_files m ON a.media_id = m.id ${downloadsFileWhere} GROUP BY m.id, m.file_name, m.folder_path ORDER BY downloads DESC LIMIT 500`, visitParams),
-        query(`SELECT folder_path, COUNT(*) as downloads FROM analytics_visits ${downloadsFolderWhere} GROUP BY folder_path ORDER BY downloads DESC LIMIT 500`, visitParams)
+        query(`SELECT folder_path, COUNT(*) as downloads FROM analytics_visits ${downloadsFolderWhere} GROUP BY folder_path ORDER BY downloads DESC LIMIT 500`, visitParams),
+        query(`SELECT to_char(date_trunc('hour', created_at), 'YYYY-MM-DD HH24:00') as point, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('hour', created_at), 'YYYY-MM-DD HH24:00') as point, COALESCE(SUM(bytes_served), 0) as bytes FROM media_analytics WHERE created_at > NOW() - INTERVAL '48 hours' ${mediaScope} GROUP BY point ORDER BY point`),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COALESCE(SUM(bytes_served), 0) as bytes FROM media_analytics WHERE created_at > NOW() - INTERVAL '24 months' ${mediaScope} GROUP BY point ORDER BY point`),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COALESCE(SUM(bytes_served), 0) as bytes FROM media_analytics WHERE 1=1 ${mediaScope} GROUP BY point ORDER BY point`),
+        query(`SELECT to_char(date_trunc('hour', created_at), 'YYYY-MM-DD HH24:00') as point, COUNT(DISTINCT COALESCE(device_id, ip_hash)) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as point, COUNT(DISTINCT COALESCE(device_id, ip_hash)) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} created_at > NOW() - INTERVAL '30 days' GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COUNT(DISTINCT COALESCE(device_id, ip_hash)) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COUNT(DISTINCT COALESCE(device_id, ip_hash)) as count FROM analytics_visits ${visitWhere} GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('hour', created_at), 'YYYY-MM-DD HH24:00') as point, COUNT(*) as count FROM media_analytics WHERE created_at > NOW() - INTERVAL '48 hours' ${mediaScope} GROUP BY point ORDER BY point`),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COUNT(*) as count FROM media_analytics WHERE created_at > NOW() - INTERVAL '24 months' ${mediaScope} GROUP BY point ORDER BY point`),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COUNT(*) as count FROM media_analytics WHERE 1=1 ${mediaScope} GROUP BY point ORDER BY point`),
+        query(`SELECT to_char(date_trunc('hour', created_at), 'YYYY-MM-DD HH24:00') as point, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} action_type IN ('download', 'download_folder') AND created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} action_type IN ('download', 'download_folder') AND created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} action_type IN ('download', 'download_folder') GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT COUNT(*) as samples, ROUND(AVG(page_load_ms)) as avg_load_ms, MIN(page_load_ms) as min_load_ms, MAX(page_load_ms) as max_load_ms, ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY page_load_ms)) as p95_load_ms, COUNT(*) FILTER (WHERE page_load_ms < 200) as under_200ms, COUNT(*) FILTER (WHERE page_load_ms >= 200 AND page_load_ms < 500) as ms200_to_500, COUNT(*) FILTER (WHERE page_load_ms >= 500 AND page_load_ms < 1000) as ms500_to_1s, COUNT(*) FILTER (WHERE page_load_ms >= 1000 AND page_load_ms < 2000) as s1_to_2s, COUNT(*) FILTER (WHERE page_load_ms >= 2000 AND page_load_ms < 5000) as s2_to_5s, COUNT(*) FILTER (WHERE page_load_ms >= 5000) as over_5s FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} page_load_ms IS NOT NULL AND page_load_ms > 0`, visitParams),
+        query(`SELECT ROUND(AVG(s.session_duration_s)) as avg_session_s, MAX(s.session_duration_s) as max_session_s, COUNT(*) FILTER (WHERE s.session_duration_s < 30) as under_30s, COUNT(*) FILTER (WHERE s.session_duration_s >= 30 AND s.session_duration_s < 180) as s30_to_3m, COUNT(*) FILTER (WHERE s.session_duration_s >= 180 AND s.session_duration_s < 600) as m3_to_10m, COUNT(*) FILTER (WHERE s.session_duration_s >= 600 AND s.session_duration_s < 900) as m10_to_15m, COUNT(*) FILTER (WHERE s.session_duration_s >= 900 AND s.session_duration_s < 1800) as m15_to_30m, COUNT(*) FILTER (WHERE s.session_duration_s >= 1800 AND s.session_duration_s < 3600) as m30_to_1h, COUNT(*) FILTER (WHERE s.session_duration_s >= 3600) as over_1h FROM (SELECT MAX(session_duration_s) as session_duration_s FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} session_duration_s IS NOT NULL AND session_duration_s > 0 GROUP BY COALESCE(device_id, ip_hash), date_trunc('hour', created_at)) s`, visitParams),
+        query(`SELECT ROUND(AVG(photo_view_ms)) as avg_dwell_ms, MAX(photo_view_ms) as max_dwell_ms, COUNT(*) FILTER (WHERE photo_view_ms < 1000) as under_1s, COUNT(*) FILTER (WHERE photo_view_ms >= 1000 AND photo_view_ms < 3000) as s1_to_3s, COUNT(*) FILTER (WHERE photo_view_ms >= 3000 AND photo_view_ms < 5000) as s3_to_5s, COUNT(*) FILTER (WHERE photo_view_ms >= 5000 AND photo_view_ms < 10000) as s5_to_10s, COUNT(*) FILTER (WHERE photo_view_ms >= 10000 AND photo_view_ms < 30000) as s10_to_30s, COUNT(*) FILTER (WHERE photo_view_ms >= 30000) as over_30s FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} photo_view_ms IS NOT NULL AND photo_view_ms > 0`, visitParams),
+        query(`SELECT m.id, m.file_name, m.folder_path, ROUND(AVG(a.photo_view_ms)) as avg_dwell_ms, SUM(a.photo_view_ms) as total_dwell_ms, COUNT(*) as views FROM analytics_visits a JOIN media_files m ON a.media_id = m.id ${visitWhere ? visitWhere + ' AND' : 'WHERE'} a.photo_view_ms IS NOT NULL AND a.photo_view_ms > 0 GROUP BY m.id, m.file_name, m.folder_path ORDER BY total_dwell_ms DESC LIMIT 20`, visitParams),
+        query(`SELECT COUNT(*) as samples, ROUND(AVG(download_time_ms)) as avg_download_ms, MIN(download_time_ms) as min_download_ms, MAX(download_time_ms) as max_download_ms FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} download_time_ms IS NOT NULL AND download_time_ms > 0`, visitParams),
+        query(`SELECT sort_mode as name, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} action_type IN ('page_load', 'sort_change') AND sort_mode IS NOT NULL GROUP BY sort_mode ORDER BY count DESC`, visitParams),
+        query(`SELECT view_mode as name, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} action_type IN ('page_load', 'view_mode_change') AND view_mode IS NOT NULL GROUP BY view_mode ORDER BY count DESC`, visitParams),
+        query(`SELECT f as name, COUNT(*) as count FROM analytics_visits a, unnest(a.features_used) as f ${visitWhere ? visitWhere + ' AND' : 'WHERE'} a.features_used IS NOT NULL AND a.action_type = 'feature_interaction' GROUP BY f ORDER BY count DESC`, visitParams),
+        query(`SELECT f as folder, COUNT(*) as count FROM analytics_visits a, unnest(a.folders_visited) as f ${visitWhere ? visitWhere + ' AND' : 'WHERE'} a.folders_visited IS NOT NULL AND a.action_type = 'folder_visit' GROUP BY f ORDER BY count DESC LIMIT 30`, visitParams),
+        query(`SELECT network_type as name, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} network_type IS NOT NULL GROUP BY network_type ORDER BY count DESC`, visitParams),
+        query(`SELECT screen_res as name, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} screen_res IS NOT NULL GROUP BY screen_res ORDER BY count DESC LIMIT 15`, visitParams),
+        query(`SELECT ROUND(AVG(scroll_depth_pct)) as avg_scroll_pct, COUNT(*) FILTER (WHERE scroll_depth_pct <= 25) as pct_0_to_25, COUNT(*) FILTER (WHERE scroll_depth_pct > 25 AND scroll_depth_pct <= 50) as pct_25_to_50, COUNT(*) FILTER (WHERE scroll_depth_pct > 50 AND scroll_depth_pct <= 75) as pct_50_to_75, COUNT(*) FILTER (WHERE scroll_depth_pct > 75 AND scroll_depth_pct < 100) as pct_75_to_99, COUNT(*) FILTER (WHERE scroll_depth_pct >= 100) as pct_100 FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} scroll_depth_pct IS NOT NULL AND scroll_depth_pct > 0`, visitParams),
+        query(`SELECT COALESCE(SUM(cache_bytes_saved), 0) as bytes_saved, COALESCE(SUM(cache_hits), 0) as hits, COALESCE(SUM(cache_misses), 0) as misses FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} (cache_bytes_saved IS NOT NULL OR cache_hits IS NOT NULL)`, visitParams),
+        query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COALESCE(SUM(cache_bytes_saved), 0) as bytes, COALESCE(SUM(cache_hits), 0) as hits, COALESCE(SUM(cache_misses), 0) as misses FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} (cache_bytes_saved IS NOT NULL OR cache_hits IS NOT NULL) AND created_at > NOW() - INTERVAL '30 days' GROUP BY day ORDER BY day`, visitParams),
+        query(`SELECT to_char(date_trunc('hour', created_at), 'YYYY-MM-DD HH24:00') as point, COALESCE(SUM(cache_bytes_saved), 0) as bytes FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} cache_bytes_saved > 0 AND created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COALESCE(SUM(cache_bytes_saved), 0) as bytes FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} cache_bytes_saved > 0 AND created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`, visitParams),
+        query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COALESCE(SUM(cache_bytes_saved), 0) as bytes FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} cache_bytes_saved > 0 GROUP BY point ORDER BY point`, visitParams)
       ]);
 
       const cacheSize = await getDirSize(CACHE_ROOT);
       const cacheBreakdown = await getCacheBreakdown(CACHE_ROOT);
 
-      const toInt = (v: any) => parseInt(v, 10);
+      const toInt = (v: any) => {
+        if (v === null || v === undefined) return 0;
+        const n = parseInt(v, 10);
+        return Number.isNaN(n) ? 0 : n;
+      };
+
+      const cacheHitsTotal = toInt(cacheSavedStats.rows[0]?.hits);
+      const cacheMissesTotal = toInt(cacheSavedStats.rows[0]?.misses);
+      const cacheReqTotal = cacheHitsTotal + cacheMissesTotal;
+      const cacheHitRatio = cacheReqTotal > 0 ? Math.round((cacheHitsTotal / cacheReqTotal) * 100) : 0;
 
       // Normalize referrers into source buckets (Direct, domain, ...) and drop spam
       const selfHost = (() => {
@@ -800,6 +892,12 @@ export async function adminRoutes(fastify: FastifyInstance) {
             unique: toInt(visitorStats.rows[0].unique_visitors)
           },
           bandwidth: toInt(bandwidthTotal.rows[0].bytes),
+          cacheSaved: {
+            bytes: toInt(cacheSavedStats.rows[0]?.bytes_saved),
+            hits: cacheHitsTotal,
+            misses: cacheMissesTotal,
+            hitRatio: cacheHitRatio
+          },
           downloads: toInt(downloadsTotal.rows[0].count),
           cache: { size: cacheSize },
           db: { size: toInt(dbSizeRes.rows[0].size) }
@@ -814,6 +912,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         topReferrers,
         peakHours: peakHours.rows.map(r => ({ hour: toInt(r.hour), count: toInt(r.count) })),
         bandwidthByDay: bandwidthByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
+        cacheSavedByDay: cacheSavedByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes), hits: toInt(r.hits), misses: toInt(r.misses) })),
         topBandwidthMedia: topBandwidthMedia.rows.map(r => ({ id: r.id, file_name: r.file_name, folder_path: r.folder_path, bytes: toInt(r.bytes), views: toInt(r.views) })),
         topBandwidthShares: topBandwidthShares.rows.map(r => ({ label: r.label, share_token: r.share_token, bytes: toInt(r.bytes), views: toInt(r.views) })),
         popularFolders: popularFolders.rows.map(r => ({ folder_path: r.folder_path, views: toInt(r.views) })),
@@ -821,7 +920,15 @@ export async function adminRoutes(fastify: FastifyInstance) {
         expiringShares: expiringShares.rows,
         blockedAttempts: {
           total: toInt(blockedStats.rows[0].count),
-          recent: blockedRecent.rows.map(r => ({ day: r.day, count: toInt(r.count) }))
+          recent: blockedRecent.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+          breakdown: {
+            turnstile: toInt(blockedByType.rows.find(r => r.type === 'blocked_turnstile')?.count),
+            rateLimit: toInt(blockedByType.rows.find(r => r.type === 'blocked_rate_limit')?.count),
+            unauthorized: toInt(blockedByType.rows.find(r => r.type === 'blocked_access')?.count),
+            loginLockout: toInt(blockedByType.rows.find(r => r.type === 'blocked_login_lockout')?.count),
+            notFound: toInt(blockedByType.rows.find(r => r.type === 'not_found')?.count)
+          },
+          successfulTotal: toInt(successfulAccessStats.rows[0].count)
         },
         folderBreakdown: folderBreakdown.rows.map(r => ({ folder_path: r.folder_path, photos: toInt(r.photos), videos: toInt(r.videos) })),
         viewsByDay: viewsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
@@ -829,7 +936,134 @@ export async function adminRoutes(fastify: FastifyInstance) {
         dbTableSizes: dbTableSizes.rows.map(r => ({ name: r.name, bytes: toInt(r.bytes) })),
         downloadsByDay: downloadsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
         topFileDownloads: topFileDownloads.rows.map(r => ({ id: r.id, file_name: r.file_name, folder_path: r.folder_path, downloads: toInt(r.downloads) })),
-        topFolderDownloads: topFolderDownloads.rows.map(r => ({ folder_path: r.folder_path, downloads: toInt(r.downloads) }))
+        topFolderDownloads: topFolderDownloads.rows.map(r => ({ folder_path: r.folder_path, downloads: toInt(r.downloads) })),
+        timelines: {
+          visits: {
+            hourly: timelineHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            daily: timeline.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+            monthly: timelineMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            lifetime: timelineLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+          },
+          uniqueVisitors: {
+            hourly: uniqueHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            daily: uniqueDaily.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            monthly: uniqueMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            lifetime: uniqueLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+          },
+          mediaViews: {
+            hourly: viewsHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            daily: viewsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+            monthly: viewsMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            lifetime: viewsLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+          },
+          bandwidth: {
+            hourly: bwHourly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+            daily: bandwidthByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
+            monthly: bwMonthly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+            lifetime: bwLifetime.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) }))
+          },
+          bandwidthSaved: {
+            hourly: cacheSavedHourly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+            daily: cacheSavedByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
+            monthly: cacheSavedMonthly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+            lifetime: cacheSavedLifetime.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) }))
+          },
+          downloads: {
+            hourly: downloadsHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            daily: downloadsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+            monthly: downloadsMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            lifetime: downloadsLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+          },
+          hourly: timelineHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+          daily: timeline.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+          monthly: timelineMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+          lifetime: timelineLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+        },
+        bandwidthTimelines: {
+          hourly: bwHourly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+          daily: bandwidthByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
+          monthly: bwMonthly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+          lifetime: bwLifetime.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) }))
+        },
+        technical: {
+          pageLoad: {
+            avgMs: toInt(pageLoadStats.rows[0]?.avg_load_ms),
+            minMs: toInt(pageLoadStats.rows[0]?.min_load_ms),
+            maxMs: toInt(pageLoadStats.rows[0]?.max_load_ms),
+            p95Ms: toInt(pageLoadStats.rows[0]?.p95_load_ms),
+            samples: toInt(pageLoadStats.rows[0]?.samples),
+            distribution: [
+              { name: '< 200ms', count: toInt(pageLoadStats.rows[0]?.under_200ms) },
+              { name: '200ms - 500ms', count: toInt(pageLoadStats.rows[0]?.ms200_to_500) },
+              { name: '500ms - 1s', count: toInt(pageLoadStats.rows[0]?.ms500_to_1s) },
+              { name: '1s - 2s', count: toInt(pageLoadStats.rows[0]?.s1_to_2s) },
+              { name: '2s - 5s', count: toInt(pageLoadStats.rows[0]?.s2_to_5s) },
+              { name: '> 5s', count: toInt(pageLoadStats.rows[0]?.over_5s) }
+            ]
+          },
+          sessionTime: {
+            avgSeconds: toInt(sessionStats.rows[0]?.avg_session_s),
+            maxSeconds: toInt(sessionStats.rows[0]?.max_session_s),
+            distribution: [
+              { name: '< 30s', count: toInt(sessionStats.rows[0]?.under_30s) },
+              { name: '30s - 3m', count: toInt(sessionStats.rows[0]?.s30_to_3m) },
+              { name: '3m - 10m', count: toInt(sessionStats.rows[0]?.m3_to_10m) },
+              { name: '10m - 15m', count: toInt(sessionStats.rows[0]?.m10_to_15m) },
+              { name: '15m - 30m', count: toInt(sessionStats.rows[0]?.m15_to_30m) },
+              { name: '30m - 1h', count: toInt(sessionStats.rows[0]?.m30_to_1h) },
+              { name: '> 1h', count: toInt(sessionStats.rows[0]?.over_1h) }
+            ]
+          },
+          photoDwell: {
+            avgMs: toInt(dwellStats.rows[0]?.avg_dwell_ms),
+            maxMs: toInt(dwellStats.rows[0]?.max_dwell_ms),
+            distribution: [
+              { name: '< 1s', count: toInt(dwellStats.rows[0]?.under_1s) },
+              { name: '1s - 3s', count: toInt(dwellStats.rows[0]?.s1_to_3s) },
+              { name: '3s - 5s', count: toInt(dwellStats.rows[0]?.s3_to_5s) },
+              { name: '5s - 10s', count: toInt(dwellStats.rows[0]?.s5_to_10s) },
+              { name: '10s - 30s', count: toInt(dwellStats.rows[0]?.s10_to_30s) },
+              { name: '> 30s', count: toInt(dwellStats.rows[0]?.over_30s) }
+            ],
+            topMedia: topDwellMedia.rows.map(r => ({
+              id: r.id,
+              file_name: r.file_name,
+              folder_path: r.folder_path,
+              avg_dwell_s: Number((toInt(r.avg_dwell_ms) / 1000).toFixed(1)),
+              total_dwell_s: Math.round(toInt(r.total_dwell_ms) / 1000),
+              views: toInt(r.views)
+            }))
+          },
+          downloads: {
+            avgDownloadMs: toInt(downloadPerfStats.rows[0]?.avg_download_ms),
+            minDownloadMs: toInt(downloadPerfStats.rows[0]?.min_download_ms),
+            maxDownloadMs: toInt(downloadPerfStats.rows[0]?.max_download_ms),
+            samples: toInt(downloadPerfStats.rows[0]?.samples)
+          },
+          sortModes: sortStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          viewModes: viewStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          featuresUsed: featureStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          foldersVisited: foldersVisitedStats.rows.map(r => ({ folder: r.folder, count: toInt(r.count) })),
+          networkBreakdown: networkStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          screenResolutions: screenStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          avgScrollDepth: toInt(scrollStats.rows[0]?.avg_scroll_pct),
+          scrollDepth: {
+            avgPct: toInt(scrollStats.rows[0]?.avg_scroll_pct),
+            distribution: [
+              { name: '0% - 25%', count: toInt(scrollStats.rows[0]?.pct_0_to_25) },
+              { name: '25% - 50%', count: toInt(scrollStats.rows[0]?.pct_25_to_50) },
+              { name: '50% - 75%', count: toInt(scrollStats.rows[0]?.pct_50_to_75) },
+              { name: '75% - 99%', count: toInt(scrollStats.rows[0]?.pct_75_to_99) },
+              { name: '100% (Reached Bottom)', count: toInt(scrollStats.rows[0]?.pct_100) }
+            ]
+          },
+          cacheEfficiency: {
+            bytesSaved: toInt(cacheSavedStats.rows[0]?.bytes_saved),
+            hits: cacheHitsTotal,
+            misses: cacheMissesTotal,
+            hitRatio: cacheHitRatio
+          }
+        }
       });
     } catch (e: any) {
       request.log.error(e);
@@ -842,6 +1076,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
   // caller narrow to shared-link traffic, or to one specific shared link.
   fastify.get('/api/admin/analytics/folder', async (request, reply) => {
     try {
+      await AnalyticsService.flushToPostgres();
       const { path: folderPath = '', includeDescendants = '0', scope = 'all', shareToken = '' } = request.query as any;
       const descend = includeDescendants === '1';
       const shareOnly = scope === 'shares';
@@ -874,9 +1109,13 @@ export async function adminRoutes(fastify: FastifyInstance) {
         return shareToken ? `${col} = ${p(shareToken)}` : `${col} IS NOT NULL`;
       };
 
-      // Visitor scope: media visited inside the folder, plus folder (zip) downloads of the folder.
-      const visitorFolder = (p: (v: any) => string) =>
-        `((a.media_id IS NOT NULL AND EXISTS (SELECT 1 FROM media_files m WHERE m.id = a.media_id AND ${folderCond('m.folder_path', p)})) OR (a.action_type = 'download_folder' AND ${folderCond('a.folder_path', p)}))`;
+      // Visitor scope: visits to the folder or its subfolders, media visited inside, shares of this folder, or folder downloads.
+      const visitorFolder = (p: (v: any) => string) => `(
+        ${folderCond('a.folder_path', p)}
+        OR (a.folders_visited IS NOT NULL AND EXISTS (SELECT 1 FROM unnest(a.folders_visited) fv WHERE ${descend ? `(fv = ${p(folderPath)} OR fv LIKE ${p(folderPath + '/%')})` : `fv = ${p(folderPath)}`}))
+        OR (a.media_id IS NOT NULL AND EXISTS (SELECT 1 FROM media_files m WHERE m.id = a.media_id AND ${folderCond('m.folder_path', p)}))
+        OR (a.share_token IS NOT NULL AND EXISTS (SELECT 1 FROM shared_folders s WHERE s.share_token = a.share_token AND ${folderCond('s.folder_path', p)}))
+      )`;
       const botCond = (p: (v: any) => string) => (filterBots ? `a.device_type <> ${p('bot')}` : '');
       const spamCond = (p: (v: any) => string) => {
         if (!filterSpam) return '';
@@ -921,6 +1160,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
         shareConversion,
         blockedStats,
         blockedRecent,
+        blockedByType,
+        successfulAccessStats,
         folderBreakdown,
         viewsByDay,
         downloadsTotal,
@@ -929,13 +1170,46 @@ export async function adminRoutes(fastify: FastifyInstance) {
         topFolderDownloads,
         topShares,
         topMedia,
-        expiringShares
+        expiringShares,
+        timelineHourly,
+        timelineMonthly,
+        timelineLifetime,
+        bwHourly,
+        bwMonthly,
+        bwLifetime,
+        uniqueHourly,
+        uniqueDaily,
+        uniqueMonthly,
+        uniqueLifetime,
+        viewsHourly,
+        viewsMonthly,
+        viewsLifetime,
+        downloadsHourly,
+        downloadsMonthly,
+        downloadsLifetime,
+        pageLoadStats,
+        sessionStats,
+        dwellStats,
+        topDwellMedia,
+        downloadPerfStats,
+        sortStats,
+        viewStats,
+        featureStats,
+        foldersVisitedStats,
+        networkStats,
+        screenStats,
+        scrollStats,
+        cacheSavedStats,
+        cacheSavedByDay,
+        cacheSavedHourly,
+        cacheSavedMonthly,
+        cacheSavedLifetime
       ] = await Promise.all([
         run(p => `SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'image/%' AND ${folderCond('folder_path', p)}`),
         run(p => `SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'video/%' AND ${folderCond('folder_path', p)}`),
         run(p => `SELECT share_token, COALESCE(folder_path, share_token) as label FROM shared_folders WHERE is_active = true AND ${folderCond('folder_path', p)} ORDER BY created_at DESC`),
         run(p => `SELECT COUNT(*) as count FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)}`),
-        run(p => `SELECT COUNT(*) as total, COUNT(DISTINCT a.ip_hash) as unique_visitors FROM analytics_visits a ${visitorWhere(p)}`),
+        run(p => `SELECT COUNT(*) as total, COUNT(DISTINCT COALESCE(a.device_id, a.ip_hash)) as unique_visitors FROM analytics_visits a ${visitorWhere(p)}`),
         run(p => `SELECT COALESCE(NULLIF(a.os, ''), 'Unknown') as name, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} GROUP BY name ORDER BY count DESC`),
         run(p => `SELECT COALESCE(NULLIF(a.browser, ''), 'Unknown') as name, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} GROUP BY name ORDER BY count DESC`),
         run(p => `SELECT COALESCE(NULLIF(a.device_type, ''), 'unknown') as name, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} GROUP BY name ORDER BY count DESC`),
@@ -948,9 +1222,11 @@ export async function adminRoutes(fastify: FastifyInstance) {
         run(p => `SELECT m.id, m.file_name, m.folder_path, COALESCE(SUM(a.bytes_served), 0) as bytes, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} GROUP BY m.id, m.file_name, m.folder_path ORDER BY bytes DESC LIMIT 500`),
         run(p => `SELECT ${shareLabel} as label, a.share_token, COALESCE(SUM(a.bytes_served), 0) as bytes, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id LEFT JOIN shared_folders s ON a.share_token = s.share_token ${mediaWhere(p)} GROUP BY label, a.share_token ORDER BY bytes DESC LIMIT 500`),
         run(p => `SELECT m.folder_path, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} GROUP BY m.folder_path ORDER BY views DESC LIMIT 500`),
-        run(p => `SELECT COALESCE(s.folder_path, s.media_id::text, v.share_token) as label, v.share_token, COUNT(*) as visits, COUNT(DISTINCT v.ip_hash) as unique_visitors, (SELECT COUNT(*) FROM media_analytics ma JOIN media_files mm ON ma.media_id = mm.id WHERE ma.share_token = v.share_token AND ${folderCond('mm.folder_path', p)}) as media_views FROM analytics_visits v JOIN media_files mv ON v.media_id = mv.id LEFT JOIN shared_folders s ON v.share_token = s.share_token WHERE ${folderCond('mv.folder_path', p)} AND v.share_token IS NOT NULL${shareOnly && shareToken ? ` AND v.share_token = ${p(shareToken)}` : ''} GROUP BY label, v.share_token ORDER BY unique_visitors DESC LIMIT 500`),
-        run(p => `SELECT COUNT(*) as count FROM analytics_visits a WHERE ${visitorFolder(p)} AND a.action_type IN ('blocked_access', 'not_found')`),
-        run(p => `SELECT to_char(date_trunc('day', a.created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits a WHERE ${visitorFolder(p)} AND a.action_type IN ('blocked_access', 'not_found') AND a.created_at > NOW() - INTERVAL '7 days' GROUP BY day ORDER BY day`),
+        run(p => `SELECT COALESCE(s.folder_path, s.media_id::text, v.share_token) as label, v.share_token, COUNT(*) as visits, COUNT(DISTINCT COALESCE(v.device_id, v.ip_hash)) as unique_visitors, (SELECT COUNT(*) FROM media_analytics ma JOIN media_files mm ON ma.media_id = mm.id WHERE ma.share_token = v.share_token AND ${folderCond('mm.folder_path', p)}) as media_views FROM analytics_visits v LEFT JOIN shared_folders s ON v.share_token = s.share_token WHERE ${folderCond('s.folder_path', p)} AND v.share_token IS NOT NULL${shareOnly && shareToken ? ` AND v.share_token = ${p(shareToken)}` : ''} GROUP BY label, v.share_token ORDER BY unique_visitors DESC LIMIT 500`),
+        run(p => `SELECT COUNT(*) as count FROM analytics_visits a WHERE ${visitorFolder(p)} AND a.action_type IN ('blocked_access', 'not_found', 'blocked_turnstile', 'blocked_rate_limit', 'blocked_login_lockout')`),
+        run(p => `SELECT to_char(date_trunc('day', a.created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits a WHERE ${visitorFolder(p)} AND a.action_type IN ('blocked_access', 'not_found', 'blocked_turnstile', 'blocked_rate_limit', 'blocked_login_lockout') AND a.created_at > NOW() - INTERVAL '7 days' GROUP BY day ORDER BY day`),
+        run(p => `SELECT a.action_type as type, COUNT(*) as count FROM analytics_visits a WHERE ${visitorFolder(p)} AND a.action_type IN ('blocked_access', 'not_found', 'blocked_turnstile', 'blocked_rate_limit', 'blocked_login_lockout') GROUP BY a.action_type`),
+        run(p => `SELECT COUNT(*) as count FROM analytics_visits a WHERE ${visitorFolder(p)} AND a.action_type IN ('view_shared_link', 'page_load', 'preview', 'stream', 'download', 'download_folder')`),
         run(p => `SELECT folder_path, COUNT(*) FILTER (WHERE mime_type LIKE 'image/%') as photos, COUNT(*) FILTER (WHERE mime_type LIKE 'video/%') as videos FROM media_files WHERE ${folderCond('folder_path', p)} GROUP BY folder_path ORDER BY (COUNT(*) FILTER (WHERE mime_type LIKE 'image/%') + COUNT(*) FILTER (WHERE mime_type LIKE 'video/%')) DESC LIMIT 500`),
         run(p => `SELECT to_char(date_trunc('day', a.created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} AND a.created_at > NOW() - INTERVAL '30 days' GROUP BY day ORDER BY day`),
         run(p => `SELECT COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} AND a.action_type IN ('download', 'download_folder')`),
@@ -959,10 +1235,52 @@ export async function adminRoutes(fastify: FastifyInstance) {
         run(p => `SELECT a.folder_path, COUNT(*) as downloads FROM analytics_visits a WHERE a.action_type = 'download_folder' AND ${folderCond('a.folder_path', p)}${downloadShare(p)} GROUP BY a.folder_path ORDER BY downloads DESC LIMIT 500`),
         run(p => `SELECT COALESCE(s.folder_path, s.media_id::text) as folder_path, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id LEFT JOIN shared_folders s ON a.share_token = s.share_token ${mediaWhere(p)} ${sharesOnly(p)} GROUP BY COALESCE(s.folder_path, s.media_id::text) ORDER BY views DESC LIMIT 500`),
         run(p => `SELECT m.id, m.file_name, m.folder_path, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} ${sharesOnly(p)} GROUP BY m.id, m.file_name, m.folder_path ORDER BY views DESC LIMIT 500`),
-        run(p => `SELECT s.share_token, s.folder_path, s.media_id, s.expires_at, s.is_active, u.email as creator_email FROM shared_folders s LEFT JOIN users u ON s.created_by = u.id WHERE s.is_active = true AND s.expires_at IS NOT NULL AND s.expires_at < NOW() + INTERVAL '7 days' AND ${folderCond('s.folder_path', p)} ORDER BY s.expires_at ASC`)
+        run(p => `SELECT s.share_token, s.folder_path, s.media_id, s.expires_at, s.is_active, u.email as creator_email FROM shared_folders s LEFT JOIN users u ON s.created_by = u.id WHERE s.is_active = true AND s.expires_at IS NOT NULL AND s.expires_at < NOW() + INTERVAL '7 days' AND ${folderCond('s.folder_path', p)} ORDER BY s.expires_at ASC`),
+        run(p => `SELECT to_char(date_trunc('hour', a.created_at), 'YYYY-MM-DD HH24:00') as point, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} AND a.created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} AND a.created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('hour', a.created_at), 'YYYY-MM-DD HH24:00') as point, COALESCE(SUM(a.bytes_served), 0) as bytes FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} AND a.created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COALESCE(SUM(a.bytes_served), 0) as bytes FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} AND a.created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COALESCE(SUM(a.bytes_served), 0) as bytes FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('hour', a.created_at), 'YYYY-MM-DD HH24:00') as point, COUNT(DISTINCT COALESCE(a.device_id, a.ip_hash)) as count FROM analytics_visits a ${visitorWhere(p)} AND a.created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('day', a.created_at), 'YYYY-MM-DD') as point, COUNT(DISTINCT COALESCE(a.device_id, a.ip_hash)) as count FROM analytics_visits a ${visitorWhereDate(p, '30')} GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COUNT(DISTINCT COALESCE(a.device_id, a.ip_hash)) as count FROM analytics_visits a ${visitorWhere(p)} AND a.created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COUNT(DISTINCT COALESCE(a.device_id, a.ip_hash)) as count FROM analytics_visits a ${visitorWhere(p)} GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('hour', a.created_at), 'YYYY-MM-DD HH24:00') as point, COUNT(*) as count FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} AND a.created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COUNT(*) as count FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} AND a.created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COUNT(*) as count FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('hour', a.created_at), 'YYYY-MM-DD HH24:00') as point, COUNT(*) as count FROM analytics_visits a WHERE a.action_type IN ('download', 'download_folder') AND ${visitorFolder(p)} AND a.created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COUNT(*) as count FROM analytics_visits a WHERE a.action_type IN ('download', 'download_folder') AND ${visitorFolder(p)} AND a.created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COUNT(*) as count FROM analytics_visits a WHERE a.action_type IN ('download', 'download_folder') AND ${visitorFolder(p)} GROUP BY point ORDER BY point`),
+        run(p => `SELECT COUNT(*) as samples, ROUND(AVG(a.page_load_ms)) as avg_load_ms, MIN(a.page_load_ms) as min_load_ms, MAX(a.page_load_ms) as max_load_ms, ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY a.page_load_ms)) as p95_load_ms, COUNT(*) FILTER (WHERE a.page_load_ms < 200) as under_200ms, COUNT(*) FILTER (WHERE a.page_load_ms >= 200 AND a.page_load_ms < 500) as ms200_to_500, COUNT(*) FILTER (WHERE a.page_load_ms >= 500 AND a.page_load_ms < 1000) as ms500_to_1s, COUNT(*) FILTER (WHERE a.page_load_ms >= 1000 AND a.page_load_ms < 2000) as s1_to_2s, COUNT(*) FILTER (WHERE a.page_load_ms >= 2000 AND a.page_load_ms < 5000) as s2_to_5s, COUNT(*) FILTER (WHERE a.page_load_ms >= 5000) as over_5s FROM analytics_visits a ${visitorWhere(p)} AND a.page_load_ms IS NOT NULL AND a.page_load_ms > 0`),
+        run(p => `SELECT ROUND(AVG(s.session_duration_s)) as avg_session_s, MAX(s.session_duration_s) as max_session_s, COUNT(*) FILTER (WHERE s.session_duration_s < 30) as under_30s, COUNT(*) FILTER (WHERE s.session_duration_s >= 30 AND s.session_duration_s < 180) as s30_to_3m, COUNT(*) FILTER (WHERE s.session_duration_s >= 180 AND s.session_duration_s < 600) as m3_to_10m, COUNT(*) FILTER (WHERE s.session_duration_s >= 600 AND s.session_duration_s < 900) as m10_to_15m, COUNT(*) FILTER (WHERE s.session_duration_s >= 900 AND s.session_duration_s < 1800) as m15_to_30m, COUNT(*) FILTER (WHERE s.session_duration_s >= 1800 AND s.session_duration_s < 3600) as m30_to_1h, COUNT(*) FILTER (WHERE s.session_duration_s >= 3600) as over_1h FROM (SELECT MAX(a.session_duration_s) as session_duration_s FROM analytics_visits a ${visitorWhere(p)} AND a.session_duration_s IS NOT NULL AND a.session_duration_s > 0 GROUP BY COALESCE(a.device_id, a.ip_hash), date_trunc('hour', a.created_at)) s`),
+        run(p => `SELECT ROUND(AVG(a.photo_view_ms)) as avg_dwell_ms, MAX(a.photo_view_ms) as max_dwell_ms, COUNT(*) FILTER (WHERE a.photo_view_ms < 1000) as under_1s, COUNT(*) FILTER (WHERE a.photo_view_ms >= 1000 AND a.photo_view_ms < 3000) as s1_to_3s, COUNT(*) FILTER (WHERE a.photo_view_ms >= 3000 AND a.photo_view_ms < 5000) as s3_to_5s, COUNT(*) FILTER (WHERE a.photo_view_ms >= 5000 AND a.photo_view_ms < 10000) as s5_to_10s, COUNT(*) FILTER (WHERE a.photo_view_ms >= 10000 AND a.photo_view_ms < 30000) as s10_to_30s, COUNT(*) FILTER (WHERE a.photo_view_ms >= 30000) as over_30s FROM analytics_visits a ${visitorWhere(p)} AND a.photo_view_ms IS NOT NULL AND a.photo_view_ms > 0`),
+        run(p => `SELECT m.id, m.file_name, m.folder_path, ROUND(AVG(a.photo_view_ms)) as avg_dwell_ms, SUM(a.photo_view_ms) as total_dwell_ms, COUNT(*) as views FROM analytics_visits a JOIN media_files m ON a.media_id = m.id ${visitorWhere(p)} AND a.photo_view_ms IS NOT NULL AND a.photo_view_ms > 0 GROUP BY m.id, m.file_name, m.folder_path ORDER BY total_dwell_ms DESC LIMIT 20`),
+        run(p => `SELECT COUNT(*) as samples, ROUND(AVG(a.download_time_ms)) as avg_download_ms, MIN(a.download_time_ms) as min_download_ms, MAX(a.download_time_ms) as max_download_ms FROM analytics_visits a ${visitorWhere(p)} AND a.download_time_ms IS NOT NULL AND a.download_time_ms > 0`),
+        run(p => `SELECT a.sort_mode as name, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} AND a.action_type IN ('page_load', 'sort_change') AND a.sort_mode IS NOT NULL GROUP BY a.sort_mode ORDER BY count DESC`),
+        run(p => `SELECT a.view_mode as name, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} AND a.action_type IN ('page_load', 'view_mode_change') AND a.view_mode IS NOT NULL GROUP BY a.view_mode ORDER BY count DESC`),
+        run(p => `SELECT f as name, COUNT(*) as count FROM analytics_visits a, unnest(a.features_used) as f ${visitorWhere(p)} AND a.features_used IS NOT NULL AND a.action_type = 'feature_interaction' GROUP BY f ORDER BY count DESC`),
+        run(p => `SELECT f as folder, COUNT(*) as count FROM analytics_visits a, unnest(a.folders_visited) as f ${visitorWhere(p)} AND a.folders_visited IS NOT NULL AND a.action_type = 'folder_visit' ${descend ? `AND (f = ${p(folderPath)} OR f LIKE ${p(folderPath + '/%')})` : `AND f = ${p(folderPath)}`} GROUP BY f ORDER BY count DESC LIMIT 30`),
+        run(p => `SELECT a.network_type as name, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} AND a.network_type IS NOT NULL GROUP BY a.network_type ORDER BY count DESC`),
+        run(p => `SELECT a.screen_res as name, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} AND a.screen_res IS NOT NULL GROUP BY a.screen_res ORDER BY count DESC LIMIT 15`),
+        run(p => `SELECT ROUND(AVG(a.scroll_depth_pct)) as avg_scroll_pct, COUNT(*) FILTER (WHERE a.scroll_depth_pct <= 25) as pct_0_to_25, COUNT(*) FILTER (WHERE a.scroll_depth_pct > 25 AND a.scroll_depth_pct <= 50) as pct_25_to_50, COUNT(*) FILTER (WHERE a.scroll_depth_pct > 50 AND a.scroll_depth_pct <= 75) as pct_50_to_75, COUNT(*) FILTER (WHERE a.scroll_depth_pct > 75 AND a.scroll_depth_pct < 100) as pct_75_to_99, COUNT(*) FILTER (WHERE a.scroll_depth_pct >= 100) as pct_100 FROM analytics_visits a ${visitorWhere(p)} AND a.scroll_depth_pct IS NOT NULL AND a.scroll_depth_pct > 0`),
+        run(p => `SELECT COALESCE(SUM(a.cache_bytes_saved), 0) as bytes_saved, COALESCE(SUM(a.cache_hits), 0) as hits, COALESCE(SUM(a.cache_misses), 0) as misses FROM analytics_visits a ${visitorWhere(p)} AND (a.cache_bytes_saved IS NOT NULL OR a.cache_hits IS NOT NULL)`),
+        run(p => `SELECT to_char(date_trunc('day', a.created_at), 'YYYY-MM-DD') as day, COALESCE(SUM(a.cache_bytes_saved), 0) as bytes, COALESCE(SUM(a.cache_hits), 0) as hits, COALESCE(SUM(a.cache_misses), 0) as misses FROM analytics_visits a ${visitorWhereDate(p, '30')} AND (a.cache_bytes_saved IS NOT NULL OR a.cache_hits IS NOT NULL) GROUP BY day ORDER BY day`),
+        run(p => `SELECT to_char(date_trunc('hour', a.created_at), 'YYYY-MM-DD HH24:00') as point, COALESCE(SUM(a.cache_bytes_saved), 0) as bytes FROM analytics_visits a ${visitorWhere(p)} AND a.cache_bytes_saved > 0 AND a.created_at > NOW() - INTERVAL '48 hours' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COALESCE(SUM(a.cache_bytes_saved), 0) as bytes FROM analytics_visits a ${visitorWhere(p)} AND a.cache_bytes_saved > 0 AND a.created_at > NOW() - INTERVAL '24 months' GROUP BY point ORDER BY point`),
+        run(p => `SELECT to_char(date_trunc('month', a.created_at), 'YYYY-MM') as point, COALESCE(SUM(a.cache_bytes_saved), 0) as bytes FROM analytics_visits a ${visitorWhere(p)} AND a.cache_bytes_saved > 0 GROUP BY point ORDER BY point`)
       ]);
 
-      const toInt = (v: any) => parseInt(v, 10);
+      const toInt = (v: any) => {
+        if (v === null || v === undefined) return 0;
+        const n = parseInt(v, 10);
+        return Number.isNaN(n) ? 0 : n;
+      };
+
+      const cacheHitsTotal = toInt(cacheSavedStats.rows[0]?.hits);
+      const cacheMissesTotal = toInt(cacheSavedStats.rows[0]?.misses);
+      const cacheReqTotal = cacheHitsTotal + cacheMissesTotal;
+      const cacheHitRatio = cacheReqTotal > 0 ? Math.round((cacheHitsTotal / cacheReqTotal) * 100) : 0;
 
       // Normalize referrers into source buckets (Direct, domain, ...) and drop spam
       const refMap = new Map<string, number>();
@@ -989,6 +1307,12 @@ export async function adminRoutes(fastify: FastifyInstance) {
           visits: toInt(visitsStats.rows[0].count),
           visitors: { total: toInt(visitorStats.rows[0].total), unique: toInt(visitorStats.rows[0].unique_visitors) },
           bandwidth: toInt(bandwidthTotal.rows[0].bytes),
+          cacheSaved: {
+            bytes: toInt(cacheSavedStats.rows[0]?.bytes_saved),
+            hits: cacheHitsTotal,
+            misses: cacheMissesTotal,
+            hitRatio: cacheHitRatio
+          },
           downloads: toInt(downloadsTotal.rows[0].count)
         },
         topShares: topShares.rows.map(r => ({ folder_path: r.folder_path, views: toInt(r.views) })),
@@ -1001,20 +1325,156 @@ export async function adminRoutes(fastify: FastifyInstance) {
         topReferrers,
         peakHours: peakHours.rows.map(r => ({ hour: toInt(r.hour), count: toInt(r.count) })),
         bandwidthByDay: bandwidthByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
+        cacheSavedByDay: cacheSavedByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes), hits: toInt(r.hits), misses: toInt(r.misses) })),
         topBandwidthMedia: topBandwidthMedia.rows.map(r => ({ id: r.id, file_name: r.file_name, folder_path: r.folder_path, bytes: toInt(r.bytes), views: toInt(r.views) })),
         topBandwidthShares: topBandwidthShares.rows.map(r => ({ label: r.label, share_token: r.share_token, bytes: toInt(r.bytes), views: toInt(r.views) })),
         popularFolders: popularFolders.rows.map(r => ({ folder_path: r.folder_path, views: toInt(r.views) })),
         shareConversion: shareConversion.rows.map(r => ({ label: r.label, share_token: r.share_token, visits: toInt(r.visits), unique_visitors: toInt(r.unique_visitors), media_views: toInt(r.media_views) })),
         blockedAttempts: {
           total: toInt(blockedStats.rows[0].count),
-          recent: blockedRecent.rows.map(r => ({ day: r.day, count: toInt(r.count) }))
+          recent: blockedRecent.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+          breakdown: {
+            turnstile: toInt(blockedByType.rows.find(r => r.type === 'blocked_turnstile')?.count),
+            rateLimit: toInt(blockedByType.rows.find(r => r.type === 'blocked_rate_limit')?.count),
+            unauthorized: toInt(blockedByType.rows.find(r => r.type === 'blocked_access')?.count),
+            loginLockout: toInt(blockedByType.rows.find(r => r.type === 'blocked_login_lockout')?.count),
+            notFound: toInt(blockedByType.rows.find(r => r.type === 'not_found')?.count)
+          },
+          successfulTotal: toInt(successfulAccessStats.rows[0].count)
         },
         folderBreakdown: folderBreakdown.rows.map(r => ({ folder_path: r.folder_path, photos: toInt(r.photos), videos: toInt(r.videos) })),
         viewsByDay: viewsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
         downloadsByDay: downloadsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
         topFileDownloads: topFileDownloads.rows.map(r => ({ id: r.id, file_name: r.file_name, folder_path: r.folder_path, downloads: toInt(r.downloads) })),
         topFolderDownloads: topFolderDownloads.rows.map(r => ({ folder_path: r.folder_path, downloads: toInt(r.downloads) })),
-        expiringShares: expiringShares.rows
+        expiringShares: expiringShares.rows,
+        timelines: {
+          visits: {
+            hourly: timelineHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            daily: timeline.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+            monthly: timelineMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            lifetime: timelineLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+          },
+          uniqueVisitors: {
+            hourly: uniqueHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            daily: uniqueDaily.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            monthly: uniqueMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            lifetime: uniqueLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+          },
+          mediaViews: {
+            hourly: viewsHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            daily: viewsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+            monthly: viewsMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            lifetime: viewsLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+          },
+          bandwidth: {
+            hourly: bwHourly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+            daily: bandwidthByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
+            monthly: bwMonthly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+            lifetime: bwLifetime.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) }))
+          },
+          bandwidthSaved: {
+            hourly: cacheSavedHourly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+            daily: cacheSavedByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
+            monthly: cacheSavedMonthly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+            lifetime: cacheSavedLifetime.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) }))
+          },
+          downloads: {
+            hourly: downloadsHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            daily: downloadsByDay.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+            monthly: downloadsMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+            lifetime: downloadsLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+          },
+          hourly: timelineHourly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+          daily: timeline.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
+          monthly: timelineMonthly.rows.map(r => ({ day: r.point, count: toInt(r.count) })),
+          lifetime: timelineLifetime.rows.map(r => ({ day: r.point, count: toInt(r.count) }))
+        },
+        bandwidthTimelines: {
+          hourly: bwHourly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+          daily: bandwidthByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
+          monthly: bwMonthly.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) })),
+          lifetime: bwLifetime.rows.map(r => ({ day: r.point, bytes: toInt(r.bytes) }))
+        },
+        technical: {
+          pageLoad: {
+            avgMs: toInt(pageLoadStats.rows[0]?.avg_load_ms),
+            minMs: toInt(pageLoadStats.rows[0]?.min_load_ms),
+            maxMs: toInt(pageLoadStats.rows[0]?.max_load_ms),
+            p95Ms: toInt(pageLoadStats.rows[0]?.p95_load_ms),
+            samples: toInt(pageLoadStats.rows[0]?.samples),
+            distribution: [
+              { name: '< 200ms', count: toInt(pageLoadStats.rows[0]?.under_200ms) },
+              { name: '200ms - 500ms', count: toInt(pageLoadStats.rows[0]?.ms200_to_500) },
+              { name: '500ms - 1s', count: toInt(pageLoadStats.rows[0]?.ms500_to_1s) },
+              { name: '1s - 2s', count: toInt(pageLoadStats.rows[0]?.s1_to_2s) },
+              { name: '2s - 5s', count: toInt(pageLoadStats.rows[0]?.s2_to_5s) },
+              { name: '> 5s', count: toInt(pageLoadStats.rows[0]?.over_5s) }
+            ]
+          },
+          sessionTime: {
+            avgSeconds: toInt(sessionStats.rows[0]?.avg_session_s),
+            maxSeconds: toInt(sessionStats.rows[0]?.max_session_s),
+            distribution: [
+              { name: '< 30s', count: toInt(sessionStats.rows[0]?.under_30s) },
+              { name: '30s - 3m', count: toInt(sessionStats.rows[0]?.s30_to_3m) },
+              { name: '3m - 10m', count: toInt(sessionStats.rows[0]?.m3_to_10m) },
+              { name: '10m - 15m', count: toInt(sessionStats.rows[0]?.m10_to_15m) },
+              { name: '15m - 30m', count: toInt(sessionStats.rows[0]?.m15_to_30m) },
+              { name: '30m - 1h', count: toInt(sessionStats.rows[0]?.m30_to_1h) },
+              { name: '> 1h', count: toInt(sessionStats.rows[0]?.over_1h) }
+            ]
+          },
+          photoDwell: {
+            avgMs: toInt(dwellStats.rows[0]?.avg_dwell_ms),
+            maxMs: toInt(dwellStats.rows[0]?.max_dwell_ms),
+            distribution: [
+              { name: '< 1s', count: toInt(dwellStats.rows[0]?.under_1s) },
+              { name: '1s - 3s', count: toInt(dwellStats.rows[0]?.s1_to_3s) },
+              { name: '3s - 5s', count: toInt(dwellStats.rows[0]?.s3_to_5s) },
+              { name: '5s - 10s', count: toInt(dwellStats.rows[0]?.s5_to_10s) },
+              { name: '10s - 30s', count: toInt(dwellStats.rows[0]?.s10_to_30s) },
+              { name: '> 30s', count: toInt(dwellStats.rows[0]?.over_30s) }
+            ],
+            topMedia: topDwellMedia.rows.map(r => ({
+              id: r.id,
+              file_name: r.file_name,
+              folder_path: r.folder_path,
+              avg_dwell_s: Number((toInt(r.avg_dwell_ms) / 1000).toFixed(1)),
+              total_dwell_s: Math.round(toInt(r.total_dwell_ms) / 1000),
+              views: toInt(r.views)
+            }))
+          },
+          downloads: {
+            avgDownloadMs: toInt(downloadPerfStats.rows[0]?.avg_download_ms),
+            minDownloadMs: toInt(downloadPerfStats.rows[0]?.min_download_ms),
+            maxDownloadMs: toInt(downloadPerfStats.rows[0]?.max_download_ms),
+            samples: toInt(downloadPerfStats.rows[0]?.samples)
+          },
+          sortModes: sortStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          viewModes: viewStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          featuresUsed: featureStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          foldersVisited: foldersVisitedStats.rows.map(r => ({ folder: r.folder, count: toInt(r.count) })),
+          networkBreakdown: networkStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          screenResolutions: screenStats.rows.map(r => ({ name: r.name, count: toInt(r.count) })),
+          avgScrollDepth: toInt(scrollStats.rows[0]?.avg_scroll_pct),
+          scrollDepth: {
+            avgPct: toInt(scrollStats.rows[0]?.avg_scroll_pct),
+            distribution: [
+              { name: '0% - 25%', count: toInt(scrollStats.rows[0]?.pct_0_to_25) },
+              { name: '25% - 50%', count: toInt(scrollStats.rows[0]?.pct_25_to_50) },
+              { name: '50% - 75%', count: toInt(scrollStats.rows[0]?.pct_50_to_75) },
+              { name: '75% - 99%', count: toInt(scrollStats.rows[0]?.pct_75_to_99) },
+              { name: '100% (Reached Bottom)', count: toInt(scrollStats.rows[0]?.pct_100) }
+            ]
+          },
+          cacheEfficiency: {
+            bytesSaved: toInt(cacheSavedStats.rows[0]?.bytes_saved),
+            hits: cacheHitsTotal,
+            misses: cacheMissesTotal,
+            hitRatio: cacheHitRatio
+          }
+        }
       });
     } catch (e: any) {
       request.log.error(e);
