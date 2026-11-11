@@ -745,7 +745,7 @@ import { replaceState } from '$app/navigation';
 {/key}
 
 {#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
-  <Lightbox folderCoverId={data.folderCoverId} media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={page.params.token} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
+  <Lightbox folderCoverId={data.folderCoverId} media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={page.params.token} baseFolderPath={data.baseFolderPath} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
 {/if}
 {/if}
 

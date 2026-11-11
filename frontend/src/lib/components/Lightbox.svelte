@@ -3,7 +3,7 @@
   import { env } from '$env/dynamic/public';
   import { fade, slide } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
-  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces, repairMedia, getMediaQueueStatus } from '$lib/api/media';
+  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces, repairMedia, getMediaQueueStatus, API_BASE } from '$lib/api/media';
   import { createShare } from '$lib/api/shares';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import BlurhashImage from './BlurhashImage.svelte';
@@ -84,7 +84,7 @@
     loadingExif = true;
     try {
       const qs = (isSharedView && token) ? `?shareToken=${token}` : "";
-      const res = await fetch(`/api/media/${media.id}/exif${qs}`);
+      const res = await fetch(`${API_BASE}/api/media/${media.id}/exif${qs}`);
       if (res.ok) {
         rawExif = await res.json();
       }
@@ -168,7 +168,7 @@
   }
 
   $effect(() => {
-    if (showInfo && media.id) {
+    if (!isSharedView && showInfo && media.id) {
       loadingFaces = true;
       fetchMediaFaces(media.id).then(res => {
         faces = res;
@@ -524,12 +524,19 @@
             </div>
           </div>
           {#if media.folder_path}
+          {@const sourceUrl = pathUrl(pathSegments)}
           <div class="info-section">
             <h4>SOURCE</h4>
             <div class="album-info">
-              <a href={pathUrl(pathSegments)} class="album-cover" onclick={close}>
-                <BlurhashImage hash={''} src={getThumbnailUrl(folderCoverId || media.folder_cover_id || media.id)} objectFit="cover" square={true} />
-              </a>
+              {#if sourceUrl}
+                <a href={sourceUrl} class="album-cover" onclick={close}>
+                  <BlurhashImage hash={''} src={getThumbnailUrl(folderCoverId || media.folder_cover_id || media.id, token)} objectFit="cover" square={true} />
+                </a>
+              {:else}
+                <div class="album-cover">
+                  <BlurhashImage hash={''} src={getThumbnailUrl(folderCoverId || media.folder_cover_id || media.id, token)} objectFit="cover" square={true} />
+                </div>
+              {/if}
               <div class="album-details">
                 {#if pathSegments.length > 1}
                   <div class="breadcrumb-path">
@@ -544,11 +551,16 @@
                     {/each}
                   </div>
                 {/if}
-                <a href={pathUrl(pathSegments)} class="album-name" onclick={close}>{pathSegments.at(-1)}</a>
+                {#if sourceUrl}
+                  <a href={sourceUrl} class="album-name" onclick={close}>{pathSegments.at(-1)}</a>
+                {:else}
+                  <span class="album-name" style="cursor: default;">{pathSegments.at(-1)}</span>
+                {/if}
               </div>
             </div>
           </div>
           {/if}
+          {#if !isSharedView}
           <div class="info-section">
             <h4>PEOPLE</h4>
             {#if loadingFaces}
@@ -589,6 +601,7 @@
               <p style="color: #888;">No faces detected.</p>
             {/if}
           </div>
+          {/if}
         
           <div class="info-section">
             <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; margin-bottom: 8px;" onclick={() => { showAdvanced = !showAdvanced; if (showAdvanced) loadAdvancedExif(); }}>
