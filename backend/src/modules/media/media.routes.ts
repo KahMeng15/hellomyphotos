@@ -350,7 +350,8 @@ export async function mediaRoutes(fastify: FastifyInstance) {
 
     try {
       const exifrModule = await import('exifr'); const exifr = exifrModule.default || exifrModule;
-      const rawData = await exifr.parse(fullPath, {
+      const fileBuf = await fs.promises.readFile(fullPath);
+      const rawData = await exifr.parse(fileBuf, {
         tiff: true,
         exif: true,
         translateKeys: true,

@@ -7,7 +7,8 @@ import { replaceState } from '$app/navigation';
   import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription } from '$lib/api/media';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
   import { getSortDate } from '$lib/utils/date';
-  import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
+  import { createShare, getActiveShares, revokeShare, submitAccessRequest, type ShareData } from '$lib/api/shares';
+  import { getNearestExpiryDuration } from '$lib/utils/shareUtils';
   import { invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
   import { onMount, onDestroy } from 'svelte';
@@ -46,6 +47,79 @@ import { replaceState } from '$app/navigation';
   let sortMode: SortMode = $state(data.defaultShareSortMode || 'oldest');
   let viewMode: ViewMode = $state(data.defaultShareViewMode || 'small-fit');
   let folderViewMode: FolderViewMode = $state(data.defaultShareFolderViewMode || 'small-grid');
+
+  let showRequestForm = $state(false);
+  let reqName = $state('');
+  let reqEmail = $state('');
+  let reqNote = $state('');
+  let reqSubmitting = $state(false);
+  let reqSuccess = $state(false);
+  let reqError = $state('');
+  let requestWidgetContainer = $state<HTMLElement | undefined>();
+  let requestTurnstileWidgetId: string | null = null;
+  let reqTurnstileToken = $state('');
+
+  function renderRequestTurnstile() {
+    if (typeof window === 'undefined') return;
+    if ((window as any).turnstile && requestWidgetContainer && !requestTurnstileWidgetId && sitekey) {
+      requestTurnstileWidgetId = (window as any).turnstile.render(requestWidgetContainer, {
+        sitekey,
+        theme: 'dark',
+        action: 'access-request',
+        callback: (token: string) => {
+          reqTurnstileToken = token;
+          reqError = '';
+        },
+        'expired-callback': () => {
+          reqTurnstileToken = '';
+        },
+        'error-callback': () => {
+          reqTurnstileToken = '';
+        }
+      });
+    }
+  }
+
+  $effect(() => {
+    if (showRequestForm && requestWidgetContainer && !requestTurnstileWidgetId && sitekey) {
+      setTimeout(renderRequestTurnstile, 50);
+    }
+  });
+
+  async function handleSubmitAccessRequest() {
+    if (sitekey && !reqTurnstileToken) {
+      reqError = 'Please complete the security check.';
+      return;
+    }
+
+    try {
+      reqSubmitting = true;
+      reqError = '';
+      await submitAccessRequest(data.token, {
+        name: reqName.trim() || undefined,
+        email: reqEmail.trim() || undefined,
+        note: reqNote.trim() || undefined,
+        'cf-turnstile-response': reqTurnstileToken || undefined
+      });
+      reqSuccess = true;
+    } catch (err: any) {
+      console.error(err);
+      reqError = err.message || 'Failed to submit access request';
+      if (requestTurnstileWidgetId && (window as any).turnstile) {
+        (window as any).turnstile.reset(requestTurnstileWidgetId);
+        reqTurnstileToken = '';
+      }
+    } finally {
+      reqSubmitting = false;
+    }
+  }
+
+  let expiryText = $derived.by(() => {
+    if (!data.share?.expires_at) return null;
+    const dur = getNearestExpiryDuration(data.share.expires_at);
+    if (!dur || dur === 'Expired') return null;
+    return dur.toLowerCase();
+  });
 
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
@@ -195,6 +269,7 @@ import { replaceState } from '$app/navigation';
         });
         (window as any).turnstile.execute(turnstileWidgetId);
       }
+      renderRequestTurnstile();
     };
   }
 
@@ -230,6 +305,9 @@ import { replaceState } from '$app/navigation';
     if (turnstileWidgetId && (window as any).turnstile) {
       (window as any).turnstile.remove(turnstileWidgetId);
     }
+    if (requestTurnstileWidgetId && (window as any).turnstile) {
+      (window as any).turnstile.remove(requestTurnstileWidgetId);
+    }
     if (pollInterval) clearInterval(pollInterval);
     if (typeof document !== 'undefined') {
       const mainContent = document.querySelector('.main-content');
@@ -256,7 +334,10 @@ import { replaceState } from '$app/navigation';
     if (fallbackCoverId === data.personCoverMediaId) return data.personCoverBoundingBox;
     if (fallbackCoverId === data.folderCoverId) return data.folderCoverBoundingBox;
     const file = data.files.find((f: any) => f.id === fallbackCoverId);
-    return file?.bounding_box || null;
+    if (file) return file.bounding_box || null;
+    const dir = data.directories?.find((d: any) => d.cover_id === fallbackCoverId);
+    if (dir) return dir.cover_bounding_box || null;
+    return null;
   });
 
   let effectiveCoverImgWidth = $derived.by(() => {
@@ -264,9 +345,11 @@ import { replaceState } from '$app/navigation';
     if (fallbackCoverId === data.folderCoverId) return data.folderCoverImgWidth;
     const file = data.files.find((f: any) => f.id === fallbackCoverId);
     if (file) {
-      const w = file.exif_json?.width || file.exif_json?.ImageWidth || file.exif_json?.ExifImageWidth;
+      const w = file.img_width || file.exif_json?.width || file.exif_json?.ImageWidth || file.exif_json?.ExifImageWidth;
       return w ? Number(w) : null;
     }
+    const dir = data.directories?.find((d: any) => d.cover_id === fallbackCoverId);
+    if (dir) return dir.cover_img_width || null;
     return null;
   });
 
@@ -275,9 +358,11 @@ import { replaceState } from '$app/navigation';
     if (fallbackCoverId === data.folderCoverId) return data.folderCoverImgHeight;
     const file = data.files.find((f: any) => f.id === fallbackCoverId);
     if (file) {
-      const h = file.exif_json?.height || file.exif_json?.ImageHeight || file.exif_json?.ExifImageHeight;
+      const h = file.img_height || file.exif_json?.height || file.exif_json?.ImageHeight || file.exif_json?.ExifImageHeight;
       return h ? Number(h) : null;
     }
+    const dir = data.directories?.find((d: any) => d.cover_id === fallbackCoverId);
+    if (dir) return dir.cover_img_height || null;
     return null;
   });
 
@@ -304,6 +389,7 @@ import { replaceState } from '$app/navigation';
   // Title calculation: Album / Folder / Person name or single photo name
   let metaTitle = $derived.by(() => {
     if (data.turnstileRequired) return 'Security Check';
+    if (data.expired) return data.isDisabled ? 'Share Disabled' : 'Share Expired';
     if (data.error) return 'Shared Gallery';
     if (singleSelectedMedia) return singleSelectedMedia.file_name;
     if (personName) return personName;
@@ -380,7 +466,7 @@ import { replaceState } from '$app/navigation';
     <meta name="twitter:image" content={metaImageUrl} />
   {/if}
 
-  {#if data.turnstileRequired}
+  {#if data.turnstileRequired || data.expired}
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
   {/if}
 </svelte:head>
@@ -391,6 +477,69 @@ import { replaceState } from '$app/navigation';
     {#if turnstileError}
       <p style="color: #ff5555; margin-top: 1rem;">{turnstileError}</p>
     {/if}
+  </div>
+{:else if data.expired}
+  <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; min-height: 100vh; padding: 2rem;">
+    <div style="max-width: 520px; width: 100%; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 32px 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); text-align: left;">
+      <h2 style="font-size: 2rem; font-weight: 600; margin-bottom: 12px; color: #fff; text-align: left;">
+        {data.isDisabled ? 'Share Link Disabled' : 'The link is expired'}
+      </h2>
+      <p style="color: #a1a1aa; font-size: 1rem; margin-bottom: 24px; line-height: 1.5; text-align: left;">
+        {data.isDisabled 
+          ? 'This share link is temporarily disabled. You can request the administrator to reactivate it.' 
+          : 'This share link has reached its expiration date and is no longer accessible.'}
+      </p>
+
+      <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 8px; padding: 16px; margin-bottom: 24px; text-align: left;">
+        <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; margin-bottom: 4px;">Folder Name</div>
+        <div style="color: #f4f4f5; font-weight: 500; font-size: 1.1rem; margin-bottom: 12px;">{data.folderName || 'Shared Album'}</div>
+        <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; margin-bottom: 4px;">Folder Path</div>
+        <div style="font-family: monospace; color: #a1a1aa; font-size: 0.875rem; word-break: break-all;">{data.folderPath || '/'}</div>
+      </div>
+
+      {#if reqSuccess}
+        <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 16px; color: #34d399; font-size: 0.95rem;">
+          Your access request has been sent.
+        </div>
+      {:else if showRequestForm}
+        <form onsubmit={(e) => { e.preventDefault(); handleSubmitAccessRequest(); }} style="display: flex; flex-direction: column; gap: 14px; text-align: left;">
+          {#if reqError}
+            <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 10px; color: #f87171; font-size: 0.875rem;">
+              {reqError}
+            </div>
+          {/if}
+          <div>
+            <label for="req-name" style="display: block; font-size: 0.8rem; color: #a1a1aa; margin-bottom: 6px;">Your Name (Optional)</label>
+            <input id="req-name" type="text" bind:value={reqName} placeholder="Jane Doe" style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); border-radius: 6px; color: white;" />
+          </div>
+          <div>
+            <label for="req-email" style="display: block; font-size: 0.8rem; color: #a1a1aa; margin-bottom: 6px;">Your Email (Optional)</label>
+            <input id="req-email" type="email" bind:value={reqEmail} placeholder="jane@example.com" style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); border-radius: 6px; color: white;" />
+          </div>
+          <div>
+            <label for="req-note" style="display: block; font-size: 0.8rem; color: #a1a1aa; margin-bottom: 6px;">Note / Reason (Optional)</label>
+            <textarea id="req-note" bind:value={reqNote} placeholder="Please grant me access to these photos..." rows={3} style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); border-radius: 6px; color: white; resize: vertical; font-family: inherit;"></textarea>
+          </div>
+          {#if sitekey}
+            <div style="margin: 4px 0;">
+              <div bind:this={requestWidgetContainer} style="min-height: 65px;"></div>
+            </div>
+          {/if}
+          <div style="display: flex; gap: 10px; margin-top: 8px;">
+            <button type="button" class="btn" onclick={() => showRequestForm = false} style="flex: 1; background: transparent; border: 1px solid var(--glass-border); color: #ccc;">
+              Cancel
+            </button>
+            <button type="submit" class="btn" disabled={reqSubmitting || (sitekey ? !reqTurnstileToken : false)} style="flex: 2; background: var(--text-color); color: var(--bg-color);">
+              {reqSubmitting ? 'Sending Request...' : 'Send Request'}
+            </button>
+          </div>
+        </form>
+      {:else}
+        <button class="btn" onclick={() => showRequestForm = true} style="width: 100%; padding: 12px 20px; font-size: 1rem; background: var(--text-color); color: var(--bg-color); font-weight: 500;">
+          Request Access
+        </button>
+      {/if}
+    </div>
   </div>
 {:else if data.error}
   <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; min-height: 100vh; padding: 2rem;">
@@ -534,6 +683,9 @@ import { replaceState } from '$app/navigation';
           {/if}
         {:else}
           <span style="white-space: nowrap;">{data.files.length} {data.files.length === 1 ? 'item' : 'items'}</span>
+        {/if}
+        {#if expiryText}
+          <span style="white-space: nowrap;">• Share expires in {expiryText}</span>
         {/if}
       </span>
     </div>

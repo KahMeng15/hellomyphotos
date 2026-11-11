@@ -84,7 +84,8 @@ export class MetadataService {
 
       if (isImage) {
         try {
-          const rawData = await exifr.parse(fullPath, {
+          const fileBuf = await fs.promises.readFile(fullPath);
+          const rawData = await exifr.parse(fileBuf, {
             tiff: true,
             exif: true,
             gps: true,

@@ -11,6 +11,20 @@ export interface ShareData {
   created_by_name?: string;
   can_manage?: boolean;
   folder_path?: string;
+  is_active?: boolean;
+}
+
+export interface AccessRequest {
+  id: string;
+  share_token: string;
+  folder_path: string;
+  name?: string | null;
+  email?: string | null;
+  note?: string | null;
+  status: 'pending' | 'resolved' | string;
+  created_at: string;
+  is_active?: boolean;
+  expires_at?: string | null;
 }
 
 export async function createShare(folderPath: string, mediaId: string | null, allowDownloadImages: boolean, allowDownloadFolder: boolean, watermarkEnabled: boolean, expiresAt: string | null): Promise<string> {
@@ -37,19 +51,68 @@ export async function createPersonShare(personId: string, allowDownloadImages: b
 
 export async function getActiveShares(folderPath: string): Promise<ShareData[]> {
   const res = await fetch(`${API_BASE}/api/shares/folder/${encodeURIComponent(folderPath)}`);
-  if (!res.ok) throw new Error('Failed to fetch active shares');
+  if (!res.ok) throw new Error('Failed to fetch shares');
   const data = await res.json();
   return data.shares;
 }
 
 export async function getActivePersonShares(personId: string): Promise<ShareData[]> {
   const res = await fetch(`${API_BASE}/api/shares/person/${personId}`);
-  if (!res.ok) throw new Error('Failed to fetch active person shares');
+  if (!res.ok) throw new Error('Failed to fetch person shares');
   const data = await res.json();
   return data.shares;
+}
+
+export interface UpdateSharePayload {
+  isActive?: boolean;
+  expiresAt?: string | null;
+  allowDownloadImages?: boolean;
+  allowDownloadFolder?: boolean;
+  watermarkEnabled?: boolean;
+}
+
+export async function updateShare(token: string, updates: UpdateSharePayload): Promise<ShareData> {
+  const res = await fetch(`${API_BASE}/api/shares/${token}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates)
+  });
+  if (!res.ok) throw new Error('Failed to update share');
+  const data = await res.json();
+  return data.share;
 }
 
 export async function revokeShare(token: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/shares/${token}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to revoke share');
+}
+
+export async function submitAccessRequest(token: string, payload: { name?: string; email?: string; note?: string; 'cf-turnstile-response'?: string }): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/shares/${token}/request-access`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to submit access request');
+  }
+}
+
+export async function getAccessRequests(folderPath: string): Promise<AccessRequest[]> {
+  const res = await fetch(`${API_BASE}/api/shares/folder-requests/${encodeURIComponent(folderPath)}`);
+  if (!res.ok) throw new Error('Failed to fetch access requests');
+  const data = await res.json();
+  return data.requests;
+}
+
+export async function respondAccessRequest(requestId: string, payload: { action: 'extend' | 'reactivate' | 'new_link'; expiresAt?: string | null; notifyUser: boolean }): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/shares/requests/${requestId}/respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error('Failed to respond to access request');
+  const data = await res.json();
+  return data.shareToken;
 }

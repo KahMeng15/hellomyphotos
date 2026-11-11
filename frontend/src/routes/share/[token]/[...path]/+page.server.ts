@@ -42,11 +42,28 @@ export const load: PageServerLoad = async ({ params, fetch, url, request }) => {
       }
       throw new Error('Share not found');
     }
+    if (data.expired) {
+      return {
+        expired: true,
+        isDisabled: data.isDisabled,
+        isExpired: data.isExpired,
+        folderName: data.folderName,
+        folderPath: data.folderPath,
+        token,
+        files: [],
+        directories: [],
+        pageUrl: url.href,
+        origin: url.origin
+      };
+    }
     return {
       share: data.share,
       files: data.files,
       directories: data.directories || [],
       folderCoverId: data.folderCoverId,
+      folderCoverBoundingBox: data.folderCoverBoundingBox || null,
+      folderCoverImgWidth: data.folderCoverImgWidth || null,
+      folderCoverImgHeight: data.folderCoverImgHeight || null,
       folderDescription: data.folderDescription || '',
       baseFolderPath: data.baseFolderPath || '',
       folderPath: data.folderPath || folderPath,

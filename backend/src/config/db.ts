@@ -10,6 +10,11 @@ export const pool = new Pool({
   database: process.env.DB_NAME || 'hellomyphotos',
 });
 
+// Prevent unhandled error events from crashing the process when idle connections drop or Postgres restarts
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle PostgreSQL client:', err.message);
+});
+
 let schemaPromise: Promise<void> | null = null;
 
 // DDL statements run one-by-one (NOT in a single transaction). Each statement is
@@ -202,6 +207,20 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_analytics_visits_share ON analytics_visits(share_token)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_analytics_visits_ip_hash ON analytics_visits(ip_hash)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_analytics_visits_action ON analytics_visits(action_type)`,
+
+  `CREATE TABLE IF NOT EXISTS share_access_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    share_token VARCHAR(32),
+    folder_path TEXT,
+    name VARCHAR(255),
+    email VARCHAR(255),
+    note TEXT,
+    status VARCHAR(50) DEFAULT 'pending',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  )`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_share_access_requests_token ON share_access_requests(share_token)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_share_access_requests_folder ON share_access_requests(folder_path)`,
 ];
 
 // Statements not yet successfully applied. Succeeded ones are dropped so they

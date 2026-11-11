@@ -15,6 +15,7 @@ const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 
 import { requireAuth, hasFolderAccess } from '../../utils/auth';
 import { getClientIp } from '../../utils/getIp';
+import { sendPlainTextEmail } from '../../utils/mailer';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
@@ -135,11 +136,28 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     
     const result = await query(`
       SELECT * FROM shared_folders 
-      WHERE share_token = $1 AND (expires_at IS NULL OR expires_at > NOW()) AND is_active = true
+      WHERE share_token = $1
     `, [token]);
     
     if (result.rows.length === 0) {
-      return reply.status(404).send({ error: 'Share not found or expired' });
+      return reply.status(404).send({ error: 'Share not found' });
+    }
+
+    const share = result.rows[0];
+    const isExpired = Boolean(share.expires_at && new Date(share.expires_at) <= new Date());
+    const isDisabled = share.is_active === false;
+
+    if (isDisabled || isExpired) {
+      const folderPath = share.folder_path || '';
+      const folderName = folderPath ? (folderPath.split('/').pop() || folderPath) : (share.person_id ? 'Person Gallery' : 'Shared Album');
+      return reply.send({
+        expired: true,
+        isDisabled,
+        isExpired,
+        folderName,
+        folderPath,
+        shareToken: token,
+      });
     }
 
     const userAgent = (request.headers['user-agent'] || '').toLowerCase();
@@ -151,8 +169,6 @@ export async function sharesRoutes(fastify: FastifyInstance) {
         return reply.status(403).send({ error: 'turnstile_required' });
       }
     }
-    
-    const share = result.rows[0];
     
     // Normalize subPath: tolerate share URLs that include the share's own base folder
     // path (e.g. old/absolute-path links) by stripping the base prefix.
@@ -317,9 +333,12 @@ export async function sharesRoutes(fastify: FastifyInstance) {
           const subPath = share.folder_path ? `${share.folder_path}/${name}` : name;
           
           const customCoverRes = await query(`
-            SELECT m.id, m.blurhash 
+            SELECT m.id, m.blurhash,
+              COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+              COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+              (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
             FROM folder_settings fs
-            JOIN media_files m ON m.id = fs.cover_media_id
+            JOIN media_files m ON m.id = COALESCE(fs.cover_media_id, fs.auto_cover_media_id)
             WHERE fs.folder_path = $1
           `, [subPath]);
 
@@ -327,28 +346,39 @@ export async function sharesRoutes(fastify: FastifyInstance) {
             return {
               name,
               cover_id: customCoverRes.rows[0].id,
-              blurhash: customCoverRes.rows[0].blurhash
+              blurhash: customCoverRes.rows[0].blurhash,
+              cover_bounding_box: customCoverRes.rows[0].bounding_box || null,
+              cover_img_width: customCoverRes.rows[0].img_width || null,
+              cover_img_height: customCoverRes.rows[0].img_height || null
             };
           }
 
           const coverResult = await query(`
             SELECT m.id, m.blurhash,
-              (SELECT COUNT(*) FROM face_embeddings f WHERE f.media_id = m.id) as face_count,
-              CASE 
-                WHEN CAST(m.exif_json->>'ImageWidth' AS INTEGER) > CAST(m.exif_json->>'ImageHeight' AS INTEGER) THEN 1 
-                WHEN CAST(m.exif_json->>'ExifImageWidth' AS INTEGER) > CAST(m.exif_json->>'ExifImageHeight' AS INTEGER) THEN 1 
-                ELSE 0 
-              END as is_landscape
+              COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+              COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+              (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
             FROM media_files m 
-            WHERE m.folder_path LIKE $1
-            ORDER BY is_landscape DESC, face_count DESC, m.id ASC
+            WHERE m.folder_path = $1 OR m.folder_path LIKE $1 || '/%'
+            ORDER BY (m.blurhash IS NOT NULL) DESC, m.id ASC
             LIMIT 1
-          `, [`${subPath}%`]);
+          `, [subPath]);
           
+          if (coverResult.rows.length > 0) {
+            query(`
+              INSERT INTO folder_settings (folder_path, auto_cover_media_id)
+              VALUES ($1, $2)
+              ON CONFLICT (folder_path) DO UPDATE SET auto_cover_media_id = EXCLUDED.auto_cover_media_id
+            `, [subPath, coverResult.rows[0].id]).catch(() => {});
+          }
+
           return {
             name,
             cover_id: coverResult.rows[0]?.id || null,
-            blurhash: coverResult.rows[0]?.blurhash || null
+            blurhash: coverResult.rows[0]?.blurhash || null,
+            cover_bounding_box: coverResult.rows[0]?.bounding_box || null,
+            cover_img_width: coverResult.rows[0]?.img_width || null,
+            cover_img_height: coverResult.rows[0]?.img_height || null
           };
         }));
         
@@ -359,33 +389,67 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
 
     let folderCoverId = null;
+    let folderCoverBoundingBox: any = null;
+    let folderCoverImgWidth: number | null = null;
+    let folderCoverImgHeight: number | null = null;
     let folderDescription = '';
     
-    if (share.folder_path !== null && share.folder_path !== undefined) {
-      const currentFolderSettingsRes = await query(`SELECT cover_media_id, description FROM folder_settings WHERE folder_path = $1`, [share.folder_path]);
+    if (targetPath !== null && targetPath !== undefined) {
+      const currentFolderSettingsRes = await query(`
+        SELECT cover_media_id, auto_cover_media_id, description 
+        FROM folder_settings WHERE folder_path = $1
+      `, [targetPath]);
       if (currentFolderSettingsRes.rows.length > 0) {
-        folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id || null;
+        folderCoverId = currentFolderSettingsRes.rows[0].cover_media_id || currentFolderSettingsRes.rows[0].auto_cover_media_id || null;
         folderDescription = currentFolderSettingsRes.rows[0].description || '';
       }
     }
 
-    if (!folderCoverId) {
-      const fallbackResult = await query(`
-        SELECT m.id,
-          (SELECT COUNT(*) FROM face_embeddings f WHERE f.media_id = m.id) as face_count,
-          CASE 
-            WHEN CAST(m.exif_json->>'ImageWidth' AS INTEGER) > CAST(m.exif_json->>'ImageHeight' AS INTEGER) THEN 1 
-            WHEN CAST(m.exif_json->>'ExifImageWidth' AS INTEGER) > CAST(m.exif_json->>'ExifImageHeight' AS INTEGER) THEN 1 
-            ELSE 0 
-          END as is_landscape
-        FROM media_files m 
-        WHERE m.folder_path = $1
-        ORDER BY is_landscape DESC, face_count DESC, m.id ASC
-        LIMIT 1
-      `, [share.folder_path]);
-      
-      if (fallbackResult.rows.length > 0) {
-        folderCoverId = fallbackResult.rows[0].id;
+    if (!folderCoverId && targetPath) {
+      try {
+        const fallbackResult = await query(`
+          SELECT m.id, m.blurhash,
+            COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+            COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+            (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
+          FROM media_files m 
+          WHERE m.folder_path = $1 OR m.folder_path LIKE $1 || '/%'
+          ORDER BY (m.blurhash IS NOT NULL) DESC, m.id ASC
+          LIMIT 1
+        `, [targetPath]);
+        
+        if (fallbackResult.rows.length > 0) {
+          folderCoverId = fallbackResult.rows[0].id;
+          folderCoverBoundingBox = fallbackResult.rows[0].bounding_box;
+          folderCoverImgWidth = fallbackResult.rows[0].img_width;
+          folderCoverImgHeight = fallbackResult.rows[0].img_height;
+
+          await query(`
+            INSERT INTO folder_settings (folder_path, auto_cover_media_id)
+            VALUES ($1, $2)
+            ON CONFLICT (folder_path) DO UPDATE SET auto_cover_media_id = EXCLUDED.auto_cover_media_id
+          `, [targetPath, folderCoverId]).catch(() => {});
+        }
+      } catch (err: any) {
+        console.error('Failed to find cover for share folder', err);
+      }
+    }
+
+    if (folderCoverId && (!folderCoverBoundingBox || !folderCoverImgWidth)) {
+      const bbRes = await query(`
+        SELECT (
+          SELECT bounding_box FROM face_embeddings
+          WHERE media_id = $1
+          ORDER BY created_at DESC LIMIT 1
+        ) AS bounding_box,
+        COALESCE(img_width, (exif_json->>'width')::int) AS img_width,
+        COALESCE(img_height, (exif_json->>'height')::int) AS img_height
+        FROM media_files WHERE id = $1
+      `, [folderCoverId]);
+      if (bbRes.rows.length > 0) {
+        if (!folderCoverBoundingBox) folderCoverBoundingBox = bbRes.rows[0].bounding_box;
+        if (!folderCoverImgWidth) folderCoverImgWidth = bbRes.rows[0].img_width;
+        if (!folderCoverImgHeight) folderCoverImgHeight = bbRes.rows[0].img_height;
       }
     }
 
@@ -414,7 +478,21 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       if (r.key === 'default_share_folder_view_mode') shareDefaults.defaultShareFolderViewMode = r.value;
     }
 
-    return reply.send({ share, files: filesResult.rows, directories, folderCoverId, folderDescription, folderPath: targetPath, baseFolderPath, defaultShareViewMode: shareDefaults.defaultShareViewMode, defaultShareSortMode: shareDefaults.defaultShareSortMode, defaultShareFolderViewMode: shareDefaults.defaultShareFolderViewMode });
+    return reply.send({
+      share,
+      files: filesResult.rows,
+      directories,
+      folderCoverId,
+      folderCoverBoundingBox,
+      folderCoverImgWidth,
+      folderCoverImgHeight,
+      folderDescription,
+      folderPath: targetPath,
+      baseFolderPath,
+      defaultShareViewMode: shareDefaults.defaultShareViewMode,
+      defaultShareSortMode: shareDefaults.defaultShareSortMode,
+      defaultShareFolderViewMode: shareDefaults.defaultShareFolderViewMode
+    });
   }
 
   fastify.get<{ Params: { token: string } }>('/api/shares/:token', handleShareGet);
@@ -440,6 +518,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
 
     const result = await query(`
       SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.expires_at, s.created_at,
+             s.is_active,
              u.name as created_by_name, s.created_by, s.folder_path
       FROM shared_folders s
       LEFT JOIN users u ON s.created_by = u.id
@@ -471,6 +550,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
 
     const result = await query(`
       SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.expires_at, s.created_at,
+             s.is_active,
              u.name as created_by_name, s.created_by, s.person_id
       FROM shared_folders s
       LEFT JOIN users u ON s.created_by = u.id
@@ -514,6 +594,302 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     await query(`DELETE FROM shared_folders WHERE share_token = $1`, [token]);
     
     return reply.send({ success: true });
+  });
+
+  fastify.patch<{ Params: { token: string } }>('/api/shares/:token', { preHandler: requireAuth }, async (request, reply) => {
+    const { token } = request.params;
+    const { 
+      isActive, 
+      expiresAt, 
+      allowDownloadImages, 
+      allowDownloadFolder, 
+      watermarkEnabled 
+    } = request.body as { 
+      isActive?: boolean; 
+      expiresAt?: string | null;
+      allowDownloadImages?: boolean;
+      allowDownloadFolder?: boolean;
+      watermarkEnabled?: boolean;
+    };
+
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot modify shares' });
+    }
+
+    const shareResult = await query(`SELECT folder_path, created_by, is_active, expires_at FROM shared_folders WHERE share_token = $1`, [token]);
+    if (shareResult.rows.length === 0) {
+      return reply.status(404).send({ error: 'Share not found' });
+    }
+
+    const share = shareResult.rows[0];
+    if (share.folder_path && !hasFolderAccess(request.user!, share.folder_path)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+
+    const isAdmin = request.user?.role === 'admin' || request.user?.role === 'super_admin';
+    if (!isAdmin && share.created_by !== request.user!.id) {
+      return reply.status(403).send({ error: 'Forbidden: You can only modify your own share links' });
+    }
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (typeof isActive === 'boolean') {
+      updates.push(`is_active = $${idx++}`);
+      values.push(isActive);
+    }
+
+    if (expiresAt !== undefined) {
+      updates.push(`expires_at = $${idx++}`);
+      values.push(expiresAt);
+    }
+
+    if (typeof allowDownloadImages === 'boolean') {
+      updates.push(`allow_download_images = $${idx++}`);
+      values.push(allowDownloadImages);
+    }
+
+    if (typeof allowDownloadFolder === 'boolean') {
+      updates.push(`allow_download_folder = $${idx++}`);
+      values.push(allowDownloadFolder);
+    }
+
+    if (typeof watermarkEnabled === 'boolean') {
+      updates.push(`watermark_enabled = $${idx++}`);
+      values.push(watermarkEnabled);
+    }
+
+    if (updates.length === 0) {
+      return reply.send({ success: true, share });
+    }
+
+    values.push(token);
+    const updateRes = await query(`
+      UPDATE shared_folders 
+      SET ${updates.join(', ')} 
+      WHERE share_token = $${idx}
+      RETURNING *
+    `, values);
+
+    return reply.send({ success: true, share: updateRes.rows[0] });
+  });
+
+  // Public endpoint: submit an access request for an expired or disabled link
+  fastify.post<{ Params: { token: string } }>('/api/shares/:token/request-access', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 minute'
+      }
+    }
+  }, async (request, reply) => {
+    const { token } = request.params;
+    const { name, email, note } = (request.body || {}) as { name?: string; email?: string; note?: string };
+    const turnstileToken = (request.body as any)?.['cf-turnstile-response'] || (request.body as any)?.turnstileToken;
+
+    if (process.env.TURNSTILE_SECRET) {
+      if (!turnstileToken) {
+        return reply.status(400).send({ error: 'Please complete the security check.' });
+      }
+
+      const ip = getClientIp(request);
+      try {
+        const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            secret: process.env.TURNSTILE_SECRET,
+            response: turnstileToken,
+            remoteip: ip,
+          }),
+        });
+        if (!r.ok) throw new Error(`siteverify ${r.status}`);
+        const result = await r.json();
+        if (!result.success) {
+          return reply.status(403).send({ error: 'Security verification failed. Please try again.' });
+        }
+      } catch (err: any) {
+        return reply.status(403).send({ error: 'Security verification failed. Please try again.' });
+      }
+    }
+
+    const shareResult = await query(`SELECT folder_path, created_by FROM shared_folders WHERE share_token = $1`, [token]);
+    if (shareResult.rows.length === 0) {
+      return reply.status(404).send({ error: 'Share link not found' });
+    }
+
+    const share = shareResult.rows[0];
+    const folderPath = share.folder_path || '';
+    const folderName = folderPath ? (folderPath.split('/').pop() || folderPath) : 'Shared Album';
+
+    await query(`
+      INSERT INTO share_access_requests (share_token, folder_path, name, email, note, status)
+      VALUES ($1, $2, $3, $4, $5, 'pending')
+    `, [token, folderPath, name?.trim() || null, email?.trim() || null, note?.trim() || null]);
+
+    // Send email notification to admin / creator
+    const APP_DOMAIN = process.env.PUBLIC_APP_DOMAIN || process.env.APP_DOMAIN || 'http://localhost:8000';
+    const recipients = new Set<string>();
+
+    if (process.env.ADMIN_EMAIL) {
+      recipients.add(process.env.ADMIN_EMAIL.trim());
+    }
+
+    if (share.created_by) {
+      const creatorRes = await query(`SELECT email FROM users WHERE id = $1`, [share.created_by]);
+      if (creatorRes.rows.length > 0 && creatorRes.rows[0].email) {
+        recipients.add(creatorRes.rows[0].email.trim());
+      }
+    }
+
+    const adminsRes = await query(`SELECT email FROM users WHERE role IN ('admin', 'super_admin')`);
+    for (const row of adminsRes.rows) {
+      if (row.email) recipients.add(row.email.trim());
+    }
+
+    const requesterName = name?.trim();
+    const subject = requesterName
+      ? `Access Request from ${requesterName} for folder: ${folderName}`
+      : `Access Request for folder: ${folderName}`;
+
+    const plainText = [
+      `${requesterName || 'Someone'} has requested access to the shared folder "${folderName}".`,
+      ``,
+      `Folder Path: ${folderPath || '/'}`,
+      `Share Link: ${APP_DOMAIN}/share/${token}`,
+      ``,
+      `Requester Details:`,
+      `- Name: ${name?.trim() || 'Not provided'}`,
+      `- Email: ${email?.trim() || 'Not provided'}`,
+      `- Note: ${note?.trim() || 'No note provided'}`,
+      ``,
+      `You can review and manage access requests here:`,
+      `${APP_DOMAIN}/folder/${encodeURIComponent(folderPath)}`
+    ].join('\n');
+
+    for (const to of recipients) {
+      sendPlainTextEmail({
+        to,
+        subject,
+        text: plainText,
+      }).catch(err => console.error('[Shares] Failed to send access request email:', err));
+    }
+
+    return reply.send({ success: true, message: 'Access request submitted successfully' });
+  });
+
+  // Authenticated endpoint: view all access requests for a folder
+  fastify.get<{ Params: { '*': string } }>('/api/shares/folder-requests/*', { preHandler: requireAuth }, async (request, reply) => {
+    const folderPath = decodeURIComponent(request.params['*'] || '');
+
+    if (!hasFolderAccess(request.user!, folderPath)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+
+    const parts = folderPath.split('/').filter(p => p);
+    const pathsToCheck = [''];
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      pathsToCheck.push(current);
+    }
+
+    const result = await query(`
+      SELECT r.id, r.share_token, r.folder_path, r.name, r.email, r.note, r.status, r.created_at,
+             s.is_active, s.expires_at
+      FROM share_access_requests r
+      LEFT JOIN shared_folders s ON r.share_token = s.share_token
+      WHERE r.folder_path = ANY($1::text[])
+      ORDER BY r.created_at DESC
+    `, [pathsToCheck]);
+
+    return reply.send({ requests: result.rows });
+  });
+
+  // Authenticated endpoint: respond to an access request
+  fastify.post<{ Params: { id: string } }>('/api/shares/requests/:id/respond', { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params;
+    const { action, expiresAt, notifyUser } = request.body as {
+      action: 'extend' | 'reactivate' | 'new_link';
+      expiresAt?: string | null;
+      notifyUser?: boolean;
+    };
+
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot respond to requests' });
+    }
+
+    const reqResult = await query(`
+      SELECT r.*, s.created_by, s.folder_path as share_folder_path
+      FROM share_access_requests r
+      LEFT JOIN shared_folders s ON r.share_token = s.share_token
+      WHERE r.id = $1
+    `, [id]);
+
+    if (reqResult.rows.length === 0) {
+      return reply.status(404).send({ error: 'Access request not found' });
+    }
+
+    const reqRow = reqResult.rows[0];
+    const targetFolderPath = reqRow.folder_path || reqRow.share_folder_path || '';
+
+    if (targetFolderPath && !hasFolderAccess(request.user!, targetFolderPath)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+
+    let finalToken = reqRow.share_token;
+
+    if (action === 'extend') {
+      await query(`
+        UPDATE shared_folders 
+        SET expires_at = $1, is_active = true 
+        WHERE share_token = $2
+      `, [expiresAt || null, reqRow.share_token]);
+    } else if (action === 'reactivate') {
+      await query(`
+        UPDATE shared_folders 
+        SET is_active = true 
+        WHERE share_token = $1
+      `, [reqRow.share_token]);
+    } else if (action === 'new_link') {
+      finalToken = crypto.randomBytes(6).toString('base64url');
+      await query(`
+        INSERT INTO shared_folders (folder_path, share_token, expires_at, created_by, is_active)
+        VALUES ($1, $2, $3, $4, true)
+      `, [targetFolderPath, finalToken, expiresAt || null, request.user!.id]);
+    }
+
+    await query(`
+      UPDATE share_access_requests 
+      SET status = 'resolved', updated_at = NOW() 
+      WHERE id = $1
+    `, [id]);
+
+    const APP_DOMAIN = process.env.PUBLIC_APP_DOMAIN || process.env.APP_DOMAIN || 'http://localhost:8000';
+    const folderName = targetFolderPath ? (targetFolderPath.split('/').pop() || targetFolderPath) : 'Shared Folder';
+    const linkUrl = `${APP_DOMAIN}/share/${finalToken}`;
+
+    if (notifyUser && reqRow.email) {
+      const emailText = [
+        `Hello ${reqRow.name ? reqRow.name.trim() : 'there'},`,
+        ``,
+        `Your request for access to the folder "${folderName}" has been approved.`,
+        ``,
+        `You can access the shared folder using the link below:`,
+        linkUrl,
+        ``,
+        `Thank you!`
+      ].join('\n');
+
+      sendPlainTextEmail({
+        to: reqRow.email.trim(),
+        subject: reqRow.name?.trim() ? `Access Approved for ${reqRow.name.trim()}: ${folderName}` : `Access Approved: ${folderName}`,
+        text: emailText,
+      }).catch(err => console.error('[Shares] Failed to send approval email to user:', err));
+    }
+
+    return reply.send({ success: true, shareToken: finalToken });
   });
 
   fastify.get<{ Params: { token: string }, Querystring: { path?: string } }>('/api/shares/:token/og', async (request, reply) => {

@@ -7,7 +7,8 @@ import { replaceState } from '$app/navigation';
   import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, regenerateImages, regenerateVideos } from '$lib/api/media';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
   import { getSortDate } from '$lib/utils/date';
-  import { createShare, getActiveShares, revokeShare, type ShareData } from '$lib/api/shares';
+  import { createShare, getActiveShares, revokeShare, updateShare, getAccessRequests, respondAccessRequest, type ShareData, type AccessRequest } from '$lib/api/shares';
+  import { formatShareDate, isShareExpired, getNearestExpiryDuration } from '$lib/utils/shareUtils';
   import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
@@ -16,7 +17,7 @@ import { replaceState } from '$app/navigation';
   import Modal from '$lib/components/Modal.svelte';
   import { currentUser } from '$lib/stores/auth';
   import { updatePreferences } from '$lib/api/auth';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3 } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
@@ -28,9 +29,50 @@ import { replaceState } from '$app/navigation';
   // Share Modal State
   let shareAllowDownloadImages = $state(true);
   let shareAllowDownloadFolder = $state(true);
+  let shareExpiryMode: 'duration' | 'date' | 'never' = $state('duration');
   let shareExpiryValue = $state(7);
   let shareExpiryUnit = $state('days');
-  let activeShares: ShareData[] = $state([]);
+  let shareExpiryDateTime = $state('');
+
+  let shareActiveTab: 'links' | 'requests' = $state('links');
+  let shareLinksSubTab: 'active' | 'expired' = $state('active');
+
+  let allShares: ShareData[] = $state([]);
+  let activeSharesList = $derived(allShares.filter(s => !isShareExpired(s.expires_at)));
+  let expiredSharesList = $derived(allShares.filter(s => isShareExpired(s.expires_at)));
+
+  let accessRequests: AccessRequest[] = $state([]);
+  let pendingRequestsCount = $derived(accessRequests.filter(r => r.status === 'pending').length);
+
+  // Extending expired share state
+  let extendingToken = $state<string | null>(null);
+  let extendExpiryMode: 'duration' | 'date' = $state('duration');
+  let extendExpiryValue = $state(7);
+  let extendExpiryUnit = $state('days');
+  let extendExpiryDateTime = $state('');
+  let isExtending = $state(false);
+
+  // Editing share state
+  let editingShareToken = $state<string | null>(null);
+  let editExpiryMode: 'duration' | 'date' | 'never' = $state('duration');
+  let editExpiryValue = $state(7);
+  let editExpiryUnit = $state('days');
+  let editExpiryDateTime = $state('');
+  let editAllowDownloadImages = $state(true);
+  let editAllowDownloadFolder = $state(true);
+  let editIsActive = $state(true);
+  let isSavingShareEdit = $state(false);
+
+  // Access request response state
+  let respondingRequestId = $state<string | null>(null);
+  let requestAction: 'extend' | 'new_link' = $state('extend');
+  let requestNotifyUser = $state(true);
+  let requestExpiryMode: 'duration' | 'date' | 'never' = $state('duration');
+  let requestExpiryValue = $state(7);
+  let requestExpiryUnit = $state('days');
+  let requestExpiryDateTime = $state('');
+  let isRespondingRequest = $state(false);
+
   let isCreatingShare = $state(false);
   let newlyCreatedShareToken = $state<string | null>(null);
   let copiedToken = $state<string | null>(null);
@@ -61,14 +103,23 @@ import { replaceState } from '$app/navigation';
 
   $effect(() => {
     if (showShareModal) {
-      loadActiveShares();
+      loadAllSharesAndRequests();
       newlyCreatedShareToken = null;
+      extendingToken = null;
+      editingShareToken = null;
+      respondingRequestId = null;
     }
   });
 
-  async function loadActiveShares() {
+  async function loadAllSharesAndRequests() {
     try {
-      activeShares = await getActiveShares(data.folderPath || '');
+      const folder = data.folderPath || '';
+      const [shares, requests] = await Promise.all([
+        getActiveShares(folder),
+        getAccessRequests(folder).catch(() => [])
+      ]);
+      allShares = shares;
+      accessRequests = requests;
     } catch (e) {
       console.error(e);
     }
@@ -78,7 +129,7 @@ import { replaceState } from '$app/navigation';
     try {
       isCreatingShare = true;
       let expiresAt: string | null = null;
-      if (shareExpiryUnit !== 'never' && shareExpiryValue > 0) {
+      if (shareExpiryMode === 'duration' && shareExpiryValue > 0) {
         const date = new Date();
         if (shareExpiryUnit === 'hours') {
           date.setHours(date.getHours() + shareExpiryValue);
@@ -90,17 +141,183 @@ import { replaceState } from '$app/navigation';
           date.setFullYear(date.getFullYear() + shareExpiryValue);
         }
         expiresAt = date.toISOString();
+      } else if (shareExpiryMode === 'date' && shareExpiryDateTime) {
+        expiresAt = new Date(shareExpiryDateTime).toISOString();
       }
       
       const token = await createShare(data.folderPath || '', null, shareAllowDownloadImages, shareAllowDownloadFolder, false, expiresAt);
       toast.success('Share link created successfully!');
       newlyCreatedShareToken = token;
-      await loadActiveShares();
+      await loadAllSharesAndRequests();
     } catch (e) {
       console.error(e);
       toast.error('Failed to create share');
     } finally {
       isCreatingShare = false;
+    }
+  }
+
+  async function handleToggleShareActive(share: ShareData) {
+    try {
+      const currentActive = share.is_active ?? true;
+      const newActive = !currentActive;
+      await updateShare(share.share_token, { isActive: newActive });
+      toast.success(newActive ? 'Share link enabled' : 'Share link disabled (temporary)');
+      await loadAllSharesAndRequests();
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to update share link');
+    }
+  }
+
+  async function handleExtendShare(token: string) {
+    try {
+      isExtending = true;
+      let newExpiresAt: string | null = null;
+      if (extendExpiryMode === 'duration' && extendExpiryValue > 0) {
+        const date = new Date();
+        if (extendExpiryUnit === 'hours') {
+          date.setHours(date.getHours() + extendExpiryValue);
+        } else if (extendExpiryUnit === 'days') {
+          date.setDate(date.getDate() + extendExpiryValue);
+        } else if (extendExpiryUnit === 'months') {
+          date.setMonth(date.getMonth() + extendExpiryValue);
+        } else if (extendExpiryUnit === 'years') {
+          date.setFullYear(date.getFullYear() + extendExpiryValue);
+        }
+        newExpiresAt = date.toISOString();
+      } else if (extendExpiryMode === 'date' && extendExpiryDateTime) {
+        newExpiresAt = new Date(extendExpiryDateTime).toISOString();
+      }
+
+      if (!newExpiresAt) {
+        toast.error('Please specify a valid expiration time');
+        return;
+      }
+
+      await updateShare(token, { expiresAt: newExpiresAt, isActive: true });
+      toast.success('Share link validity extended!');
+      extendingToken = null;
+      await loadAllSharesAndRequests();
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to extend validity');
+    } finally {
+      isExtending = false;
+    }
+  }
+
+  function toDateTimeLocal(d: Date) {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function startEditingShare(share: ShareData) {
+    if (editingShareToken === share.share_token) {
+      editingShareToken = null;
+      return;
+    }
+    editingShareToken = share.share_token;
+    extendingToken = null;
+    editAllowDownloadImages = share.allow_download_images ?? true;
+    editAllowDownloadFolder = share.allow_download_folder ?? true;
+    editIsActive = share.is_active !== false;
+
+    if (!share.expires_at) {
+      editExpiryMode = 'never';
+      editExpiryValue = 7;
+      editExpiryUnit = 'days';
+      editExpiryDateTime = '';
+    } else {
+      const expDate = new Date(share.expires_at);
+      if (expDate <= new Date()) {
+        editExpiryMode = 'duration';
+        editExpiryValue = 7;
+        editExpiryUnit = 'days';
+        const future = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+        editExpiryDateTime = toDateTimeLocal(future);
+      } else {
+        editExpiryMode = 'date';
+        editExpiryDateTime = toDateTimeLocal(expDate);
+        editExpiryValue = 7;
+        editExpiryUnit = 'days';
+      }
+    }
+  }
+
+  async function handleSaveShareEdit(token: string) {
+    try {
+      isSavingShareEdit = true;
+      let finalExpiresAt: string | null = null;
+      if (editExpiryMode === 'duration' && editExpiryValue > 0) {
+        const d = new Date();
+        if (editExpiryUnit === 'hours') d.setHours(d.getHours() + editExpiryValue);
+        else if (editExpiryUnit === 'days') d.setDate(d.getDate() + editExpiryValue);
+        else if (editExpiryUnit === 'months') d.setMonth(d.getMonth() + editExpiryValue);
+        else if (editExpiryUnit === 'years') d.setFullYear(d.getFullYear() + editExpiryValue);
+        finalExpiresAt = d.toISOString();
+      } else if (editExpiryMode === 'date' && editExpiryDateTime) {
+        finalExpiresAt = new Date(editExpiryDateTime).toISOString();
+      } else if (editExpiryMode === 'never') {
+        finalExpiresAt = null;
+      }
+
+      await updateShare(token, {
+        expiresAt: finalExpiresAt,
+        allowDownloadImages: editAllowDownloadImages,
+        allowDownloadFolder: editAllowDownloadFolder,
+        isActive: editIsActive
+      });
+
+      toast.success('Share link parameters updated!');
+      editingShareToken = null;
+      await loadAllSharesAndRequests();
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || 'Failed to update share parameters');
+    } finally {
+      isSavingShareEdit = false;
+    }
+  }
+
+  async function handleRespondRequest(req: AccessRequest) {
+    try {
+      isRespondingRequest = true;
+      let expiresAt: string | null = null;
+      if (requestExpiryMode === 'duration' && requestExpiryValue > 0) {
+        const date = new Date();
+        if (requestExpiryUnit === 'hours') {
+          date.setHours(date.getHours() + requestExpiryValue);
+        } else if (requestExpiryUnit === 'days') {
+          date.setDate(date.getDate() + requestExpiryValue);
+        } else if (requestExpiryUnit === 'months') {
+          date.setMonth(date.getMonth() + requestExpiryValue);
+        } else if (requestExpiryUnit === 'years') {
+          date.setFullYear(date.getFullYear() + requestExpiryValue);
+        }
+        expiresAt = date.toISOString();
+      } else if (requestExpiryMode === 'date' && requestExpiryDateTime) {
+        expiresAt = new Date(requestExpiryDateTime).toISOString();
+      } else if (requestExpiryMode === 'never') {
+        expiresAt = null;
+      }
+
+      await respondAccessRequest(req.id, {
+        action: requestAction === 'extend' ? 'extend' : 'new_link',
+        expiresAt,
+        notifyUser: requestNotifyUser && Boolean(req.email)
+      });
+
+      toast.success(requestNotifyUser && req.email 
+        ? 'Access granted and requester notified via email!' 
+        : 'Access granted successfully!');
+      respondingRequestId = null;
+      await loadAllSharesAndRequests();
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to grant access');
+    } finally {
+      isRespondingRequest = false;
     }
   }
 
@@ -112,7 +329,7 @@ import { replaceState } from '$app/navigation';
   async function confirmRevokeShare() {
     try {
       await revokeShare(revokeTargetToken);
-      await loadActiveShares();
+      await loadAllSharesAndRequests();
     } catch (e) {
       console.error(e);
       showAppAlert('Error', 'Failed to revoke share');
@@ -817,112 +1034,640 @@ import { replaceState } from '$app/navigation';
 </Modal>
 
 <Modal bind:show={showShareModal} id="share-settings" title="Share Settings">
-  {#if newlyCreatedShareToken}
-    <div style="background: rgba(0,255,100,0.1); border: 1px solid rgba(0,255,100,0.3); padding: 16px; border-radius: 8px; margin-bottom: 24px;">
-      <p style="color: #4ade80; margin-bottom: 8px; font-weight: 500;">Share link created successfully!</p>
-      <div style="display: flex; gap: 8px;">
-        <input type="text" readonly value="{env.PUBLIC_APP_DOMAIN || window.location.origin}/share/{newlyCreatedShareToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
-        <button class="icon-btn" style="display: flex; align-items: center; justify-content: center;" onclick={() => copyShareLink(newlyCreatedShareToken!)}>
-          {#if copiedToken === newlyCreatedShareToken}
-            <Check size={18} color="#10b981" />
-          {:else}
-            <Copy size={18} color="#a1a1aa" />
+  <div style="max-height: 80vh; overflow-y: auto; padding-right: 4px;">
+    <!-- Top-level Navigation: Share Links vs Access Requests -->
+    <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--glass-border); padding-bottom: 12px; margin-bottom: 20px;">
+      <button 
+        class="btn" 
+        style="flex: 1; padding: 8px 12px; font-size: 0.875rem; background: {shareActiveTab === 'links' ? 'var(--text-color)' : 'rgba(255,255,255,0.06)'}; color: {shareActiveTab === 'links' ? 'var(--bg-color)' : 'white'}; border: 1px solid var(--glass-border);"
+        onclick={() => shareActiveTab = 'links'}>
+        Share Links
+      </button>
+      <button 
+        class="btn" 
+        style="flex: 1; padding: 8px 12px; font-size: 0.875rem; background: {shareActiveTab === 'requests' ? 'var(--text-color)' : 'rgba(255,255,255,0.06)'}; color: {shareActiveTab === 'requests' ? 'var(--bg-color)' : 'white'}; border: 1px solid var(--glass-border); display: flex; align-items: center; justify-content: center; gap: 6px;"
+        onclick={() => shareActiveTab = 'requests'}>
+        <span>Access Requests</span>
+        {#if pendingRequestsCount > 0}
+          <span style="background: #ef4444; color: white; border-radius: 9999px; font-size: 0.7rem; font-weight: 600; padding: 1px 6px;">
+            {pendingRequestsCount}
+          </span>
+        {/if}
+      </button>
+    </div>
+
+    {#if shareActiveTab === 'links'}
+      {#if newlyCreatedShareToken}
+        <div style="background: rgba(0,255,100,0.1); border: 1px solid rgba(0,255,100,0.3); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+          <p style="color: #4ade80; margin-bottom: 8px; font-weight: 500;">Share link created successfully!</p>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" readonly value="{env.PUBLIC_APP_DOMAIN || window.location.origin}/share/{newlyCreatedShareToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
+            <button class="icon-btn" style="display: flex; align-items: center; justify-content: center;" onclick={() => copyShareLink(newlyCreatedShareToken!)}>
+              {#if copiedToken === newlyCreatedShareToken}
+                <Check size={18} color="#10b981" />
+              {:else}
+                <Copy size={18} color="#a1a1aa" />
+              {/if}
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Create New Link Section -->
+      <div style="margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border);">
+        <h4 style="margin-bottom: 12px; font-weight: 500;">Create New Share Link</h4>
+        
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Expiration</label>
+          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <button 
+              type="button" 
+              class="btn" 
+              style="flex: 1; padding: 6px 10px; font-size: 0.8rem; background: {shareExpiryMode === 'duration' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+              onclick={() => shareExpiryMode = 'duration'}>
+              Duration
+            </button>
+            <button 
+              type="button" 
+              class="btn" 
+              style="flex: 1; padding: 6px 10px; font-size: 0.8rem; background: {shareExpiryMode === 'date' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+              onclick={() => shareExpiryMode = 'date'}>
+              Specific Date & Time
+            </button>
+            <button 
+              type="button" 
+              class="btn" 
+              style="flex: 1; padding: 6px 10px; font-size: 0.8rem; background: {shareExpiryMode === 'never' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+              onclick={() => shareExpiryMode = 'never'}>
+              Never Expires
+            </button>
+          </div>
+
+          {#if shareExpiryMode === 'duration'}
+            <div style="display: flex; gap: 8px;">
+              <input type="number" bind:value={shareExpiryValue} min="1" style="width: 80px; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;" />
+              <select bind:value={shareExpiryUnit} style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;">
+                <option value="hours">Hours</option>
+                <option value="days">Days</option>
+                <option value="months">Months</option>
+                <option value="years">Years</option>
+              </select>
+            </div>
+          {:else if shareExpiryMode === 'date'}
+            <div>
+              <input type="datetime-local" bind:value={shareExpiryDateTime} style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;" />
+            </div>
           {/if}
+        </div>
+        
+        <div class="form-group" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
+          <input type="checkbox" id="allowDlsImg" bind:checked={shareAllowDownloadImages} style="width: 18px; height: 18px;" />
+          <label for="allowDlsImg" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading individual images</label>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+          <input type="checkbox" id="allowDlsFolder" bind:checked={shareAllowDownloadFolder} style="width: 18px; height: 18px;" />
+          <label for="allowDlsFolder" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading the entire folder (ZIP)</label>
+        </div>
+        
+        <button class="btn" style="width: 100%; background: var(--text-color); color: var(--bg-color);" onclick={handleCreateShare} disabled={isCreatingShare}>
+          {isCreatingShare ? 'Generating Link...' : 'Generate Share Link'}
         </button>
       </div>
-    </div>
-  {/if}
 
-  <div style="margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--glass-border);">
-    <h4 style="margin-bottom: 16px; font-weight: 500;">Create New Share Link</h4>
-    
-    <div class="form-group" style="margin-bottom: 16px;">
-      <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Expiration</label>
-      <div style="display: flex; gap: 8px;">
-        {#if shareExpiryUnit !== 'never'}
-          <input type="number" bind:value={shareExpiryValue} min="1" style="width: 80px; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;" />
-        {/if}
-        <select bind:value={shareExpiryUnit} style="flex: 1; padding: 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit;">
-          <option value="hours">Hours</option>
-          <option value="days">Days</option>
-          <option value="months">Months</option>
-          <option value="years">Years</option>
-          <option value="never">Never Expires</option>
-        </select>
-      </div>
-    </div>
-    
-    <div class="form-group" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
-      <input type="checkbox" id="allowDlsImg" bind:checked={shareAllowDownloadImages} style="width: 18px; height: 18px;" />
-      <label for="allowDlsImg" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading individual images</label>
-    </div>
-
-    <div class="form-group" style="margin-bottom: 24px; display: flex; align-items: center; gap: 12px;">
-      <input type="checkbox" id="allowDlsFolder" bind:checked={shareAllowDownloadFolder} style="width: 18px; height: 18px;" />
-      <label for="allowDlsFolder" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading the entire folder (ZIP)</label>
-    </div>
-    
-    <button class="btn" style="width: 100%; background: var(--text-color); color: var(--bg-color);" onclick={handleCreateShare} disabled={isCreatingShare}>
-      {isCreatingShare ? 'Generating Link...' : 'Generate Share Link'}
-    </button>
-  </div>
-
-  <div>
-    <h4 style="margin-bottom: 16px; font-weight: 500;">Active Share Links</h4>
-    {#if activeShares.length === 0}
-      <p style="color: #666; font-size: 0.875rem;">No active links for this folder.</p>
-    {:else}
-      <div style="display: flex; flex-direction: column; gap: 12px; max-height: 200px; overflow-y: auto;">
-        {#each activeShares as share}
-          <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
-            <div>
-              <div style="font-family: monospace; color: #e4e4e7; margin-bottom: 4px;">...{share.share_token.substring(0, 8)}</div>
-              <div style="font-size: 0.75rem; color: #888; display: flex; gap: 12px; flex-wrap: wrap;">
-                <span style="display: flex; align-items: center; gap: 4px;">
-                  <Clock size={12} />
-                  {share.expires_at ? new Date(share.expires_at).toLocaleDateString() : 'Never'}
-                </span>
-                <span style="display: flex; align-items: center; gap: 4px;">
-                  <User size={12} />
-                  {share.created_by_name || 'Unknown'}
-                </span>
-                <span>
-                  {#if share.allow_download_images && share.allow_download_folder}
-                    Full DLs
-                  {:else if share.allow_download_images}
-                    Images DL Only
-                  {:else if share.allow_download_folder}
-                    Folder DL Only
-                  {:else}
-                    View Only
-                  {/if}
-                </span>
-              </div>
-              {#if share.folder_path !== data.folderPath}
-                <div style="margin-top: 6px;">
-                  <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(59,130,246,0.2); color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; border: 1px solid rgba(59,130,246,0.3);">
-                    <Folder size={10} />
-                    Inherited from: {share.folder_path || 'Root'}
-                  </span>
-                </div>
-              {/if}
-            </div>
-            <div style="display: flex; gap: 8px;">
-              {#if share.can_manage !== false}
-                <button class="icon-btn" title="Copy Link" onclick={() => copyShareLink(share.share_token)}>
-                  {#if copiedToken === share.share_token}
-                    <Check size={16} color="#10b981" />
-                  {:else}
-                    <Copy size={16} color="#a1a1aa" />
-                  {/if}
-                </button>
-                <button class="icon-btn" title="Revoke Link" onclick={() => handleRevokeShare(share.share_token)}>
-                  <Trash2 size={16} color="#a1a1aa" />
-                </button>
-              {/if}
-            </div>
+      <!-- Links List Section (Active vs Expired) -->
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h4 style="font-weight: 500;">Share Links</h4>
+          <div style="display: flex; gap: 6px;">
+            <button 
+              type="button"
+              class="btn" 
+              style="padding: 4px 10px; font-size: 0.75rem; background: {shareLinksSubTab === 'active' ? 'rgba(255,255,255,0.2)' : 'transparent'}; border: 1px solid var(--glass-border); color: white;"
+              onclick={() => shareLinksSubTab = 'active'}>
+              Active ({activeSharesList.length})
+            </button>
+            <button 
+              type="button"
+              class="btn" 
+              style="padding: 4px 10px; font-size: 0.75rem; background: {shareLinksSubTab === 'expired' ? 'rgba(255,255,255,0.2)' : 'transparent'}; border: 1px solid var(--glass-border); color: white;"
+              onclick={() => shareLinksSubTab = 'expired'}>
+              Expired ({expiredSharesList.length})
+            </button>
           </div>
-        {/each}
+        </div>
+
+        {#if shareLinksSubTab === 'active'}
+          {#if activeSharesList.length === 0}
+            <p style="color: #666; font-size: 0.875rem;">No active links for this folder.</p>
+          {:else}
+            <div style="display: flex; flex-direction: column; gap: 12px; max-height: 280px; overflow-y: auto;">
+              {#each activeSharesList as share}
+                <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                    <div style="flex: 1; min-width: 0;">
+                      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                        <span style="font-family: monospace; color: #e4e4e7; font-weight: 500;">...{share.share_token.substring(0, 8)}</span>
+                        {#if share.is_active === false}
+                          <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
+                            Disabled
+                          </span>
+                        {:else}
+                          <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
+                            Active
+                          </span>
+                        {/if}
+                      </div>
+
+                      <div style="font-size: 0.8rem; color: #e4e4e7; margin-bottom: 2px;">
+                        {#if share.expires_at}
+                          <span style="color: #60a5fa; font-weight: 500;">Expiring in {getNearestExpiryDuration(share.expires_at)}</span>
+                        {:else}
+                          <span style="color: #a1a1aa;">Never expires</span>
+                        {/if}
+                      </div>
+
+                      <div style="font-size: 0.72rem; color: #888; display: flex; gap: 10px; flex-wrap: wrap;">
+                        {#if share.expires_at}
+                          <span style="display: flex; align-items: center; gap: 4px;">
+                            <Clock size={11} />
+                            {formatShareDate(share.expires_at)}
+                          </span>
+                        {/if}
+                        <span style="display: flex; align-items: center; gap: 4px;">
+                          <User size={11} />
+                          {share.created_by_name || 'Unknown'}
+                        </span>
+                        <span>
+                          {#if share.allow_download_images && share.allow_download_folder}
+                            Full DLs
+                          {:else if share.allow_download_images}
+                            Images DL Only
+                          {:else if share.allow_download_folder}
+                            Folder DL Only
+                          {:else}
+                            View Only
+                          {/if}
+                        </span>
+                      </div>
+
+                      {#if share.folder_path !== data.folderPath}
+                        <div style="margin-top: 6px;">
+                          <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(59,130,246,0.2); color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; border: 1px solid rgba(59,130,246,0.3);">
+                            <Folder size={10} />
+                            Inherited from: {share.folder_path || 'Root'}
+                          </span>
+                        </div>
+                      {/if}
+                    </div>
+
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                      {#if share.can_manage !== false}
+                        <button 
+                          class="icon-btn" 
+                          title="Edit Parameters" 
+                          onclick={() => startEditingShare(share)}
+                          style="color: {editingShareToken === share.share_token ? '#60a5fa' : '#a1a1aa'};">
+                          <Pencil size={15} />
+                        </button>
+                        <button 
+                          class="icon-btn" 
+                          title={share.is_active === false ? "Enable Link" : "Disable Link (Temporary)"} 
+                          onclick={() => handleToggleShareActive(share)}>
+                          <Power size={15} color={share.is_active === false ? '#9ca3af' : '#10b981'} />
+                        </button>
+                        <button class="icon-btn" title="Copy Link" onclick={() => copyShareLink(share.share_token)}>
+                          {#if copiedToken === share.share_token}
+                            <Check size={15} color="#10b981" />
+                          {:else}
+                            <Copy size={15} color="#a1a1aa" />
+                          {/if}
+                        </button>
+                        <button class="icon-btn" title="Revoke Link" onclick={() => handleRevokeShare(share.share_token)}>
+                          <Trash2 size={15} color="#a1a1aa" />
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+
+                  {#if editingShareToken === share.share_token}
+                    <div style="margin-top: 10px; padding: 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); border-radius: 6px;">
+                      <div style="font-size: 0.82rem; color: #fff; margin-bottom: 8px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
+                        <Pencil size={13} color="#60a5fa" />
+                        <span>Edit Share Parameters</span>
+                      </div>
+
+                      <!-- Expiration Section -->
+                      <div style="margin-bottom: 12px;">
+                        <label style="display: block; margin-bottom: 6px; font-size: 0.75rem; color: #aaa;">Expiration</label>
+                        <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                          <button 
+                            type="button" 
+                            class="btn" 
+                            style="flex: 1; padding: 4px 6px; font-size: 0.75rem; background: {editExpiryMode === 'duration' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                            onclick={() => editExpiryMode = 'duration'}>
+                            Duration
+                          </button>
+                          <button 
+                            type="button" 
+                            class="btn" 
+                            style="flex: 1; padding: 4px 6px; font-size: 0.75rem; background: {editExpiryMode === 'date' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                            onclick={() => editExpiryMode = 'date'}>
+                            Date & Time
+                          </button>
+                          <button 
+                            type="button" 
+                            class="btn" 
+                            style="flex: 1; padding: 4px 6px; font-size: 0.75rem; background: {editExpiryMode === 'never' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                            onclick={() => editExpiryMode = 'never'}>
+                            Never
+                          </button>
+                        </div>
+
+                        {#if editExpiryMode === 'duration'}
+                          <div style="display: flex; gap: 6px;">
+                            <input type="number" bind:value={editExpiryValue} min="1" style="width: 70px; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.8rem;" />
+                            <select bind:value={editExpiryUnit} style="flex: 1; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.8rem;">
+                              <option value="hours">Hours</option>
+                              <option value="days">Days</option>
+                              <option value="months">Months</option>
+                              <option value="years">Years</option>
+                            </select>
+                          </div>
+                        {:else if editExpiryMode === 'date'}
+                          <div>
+                            <input type="datetime-local" bind:value={editExpiryDateTime} style="width: 100%; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.8rem;" />
+                          </div>
+                        {/if}
+                      </div>
+
+                      <!-- Options Section -->
+                      <div style="margin-bottom: 12px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                        <label style="display: block; margin-bottom: 6px; font-size: 0.75rem; color: #aaa;">Options</label>
+                        
+                        <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editDlImg-{share.share_token}" bind:checked={editAllowDownloadImages} style="width: 15px; height: 15px;" />
+                          <label for="editDlImg-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow downloading individual images</label>
+                        </div>
+
+                        <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editDlFolder-{share.share_token}" bind:checked={editAllowDownloadFolder} style="width: 15px; height: 15px;" />
+                          <label for="editDlFolder-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow downloading entire folder (ZIP)</label>
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editActive-{share.share_token}" bind:checked={editIsActive} style="width: 15px; height: 15px;" />
+                          <label for="editActive-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Link is active (enabled)</label>
+                        </div>
+                      </div>
+
+                      <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                        <button class="btn" style="padding: 4px 8px; font-size: 0.75rem; background: transparent; border: 1px solid var(--glass-border); color: #888;" onclick={() => editingShareToken = null}>
+                          Cancel
+                        </button>
+                        <button class="btn" style="padding: 4px 10px; font-size: 0.75rem; background: var(--text-color); color: var(--bg-color);" disabled={isSavingShareEdit} onclick={() => handleSaveShareEdit(share.share_token)}>
+                          {isSavingShareEdit ? 'Saving...' : 'Save Changes'}
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        {:else}
+          <!-- Expired Links Subtab -->
+          {#if expiredSharesList.length === 0}
+            <p style="color: #666; font-size: 0.875rem;">No expired links for this folder.</p>
+          {:else}
+            <div style="display: flex; flex-direction: column; gap: 12px; max-height: 280px; overflow-y: auto;">
+              {#each expiredSharesList as share}
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(239, 68, 68, 0.2); padding: 12px; border-radius: 6px;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                    <div>
+                      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                        <span style="font-family: monospace; color: #a1a1aa; font-weight: 500;">...{share.share_token.substring(0, 8)}</span>
+                        <span style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
+                          Expired
+                        </span>
+                      </div>
+                      <div style="font-size: 0.75rem; color: #888; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <span style="display: flex; align-items: center; gap: 4px; color: #f87171;">
+                          <Clock size={11} />
+                          Expired on {formatShareDate(share.expires_at)}
+                        </span>
+                        <span style="display: flex; align-items: center; gap: 4px;">
+                          <User size={11} />
+                          {share.created_by_name || 'Unknown'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                      {#if share.can_manage !== false}
+                        <button 
+                          class="icon-btn" 
+                          title="Edit Parameters" 
+                          onclick={() => startEditingShare(share)}
+                          style="color: {editingShareToken === share.share_token ? '#60a5fa' : '#a1a1aa'};">
+                          <Pencil size={15} />
+                        </button>
+                        <button 
+                          class="btn" 
+                          style="padding: 4px 8px; font-size: 0.75rem; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; display: flex; align-items: center; gap: 4px;"
+                          title="Extend Validity" 
+                          onclick={() => { extendingToken = extendingToken === share.share_token ? null : share.share_token; editingShareToken = null; }}>
+                          <Clock size={12} />
+                          <span>Extend</span>
+                        </button>
+                        <button class="icon-btn" title="Copy Link" onclick={() => copyShareLink(share.share_token)}>
+                          {#if copiedToken === share.share_token}
+                            <Check size={15} color="#10b981" />
+                          {:else}
+                            <Copy size={15} color="#a1a1aa" />
+                          {/if}
+                        </button>
+                        <button class="icon-btn" title="Revoke Link" onclick={() => handleRevokeShare(share.share_token)}>
+                          <Trash2 size={15} color="#a1a1aa" />
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+
+                  {#if editingShareToken === share.share_token}
+                    <div style="margin-top: 10px; padding: 12px; background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); border-radius: 6px;">
+                      <div style="font-size: 0.82rem; color: #fff; margin-bottom: 8px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
+                        <Pencil size={13} color="#60a5fa" />
+                        <span>Edit Share Parameters</span>
+                      </div>
+
+                      <!-- Expiration Section -->
+                      <div style="margin-bottom: 12px;">
+                        <label style="display: block; margin-bottom: 6px; font-size: 0.75rem; color: #aaa;">Expiration</label>
+                        <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                          <button 
+                            type="button" 
+                            class="btn" 
+                            style="flex: 1; padding: 4px 6px; font-size: 0.75rem; background: {editExpiryMode === 'duration' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                            onclick={() => editExpiryMode = 'duration'}>
+                            Duration
+                          </button>
+                          <button 
+                            type="button" 
+                            class="btn" 
+                            style="flex: 1; padding: 4px 6px; font-size: 0.75rem; background: {editExpiryMode === 'date' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                            onclick={() => editExpiryMode = 'date'}>
+                            Date & Time
+                          </button>
+                          <button 
+                            type="button" 
+                            class="btn" 
+                            style="flex: 1; padding: 4px 6px; font-size: 0.75rem; background: {editExpiryMode === 'never' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                            onclick={() => editExpiryMode = 'never'}>
+                            Never
+                          </button>
+                        </div>
+
+                        {#if editExpiryMode === 'duration'}
+                          <div style="display: flex; gap: 6px;">
+                            <input type="number" bind:value={editExpiryValue} min="1" style="width: 70px; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.8rem;" />
+                            <select bind:value={editExpiryUnit} style="flex: 1; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.8rem;">
+                              <option value="hours">Hours</option>
+                              <option value="days">Days</option>
+                              <option value="months">Months</option>
+                              <option value="years">Years</option>
+                            </select>
+                          </div>
+                        {:else if editExpiryMode === 'date'}
+                          <div>
+                            <input type="datetime-local" bind:value={editExpiryDateTime} style="width: 100%; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.8rem;" />
+                          </div>
+                        {/if}
+                      </div>
+
+                      <!-- Options Section -->
+                      <div style="margin-bottom: 12px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                        <label style="display: block; margin-bottom: 6px; font-size: 0.75rem; color: #aaa;">Options</label>
+                        
+                        <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editExpDlImg-{share.share_token}" bind:checked={editAllowDownloadImages} style="width: 15px; height: 15px;" />
+                          <label for="editExpDlImg-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow downloading individual images</label>
+                        </div>
+
+                        <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editExpDlFolder-{share.share_token}" bind:checked={editAllowDownloadFolder} style="width: 15px; height: 15px;" />
+                          <label for="editExpDlFolder-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow downloading entire folder (ZIP)</label>
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editExpActive-{share.share_token}" bind:checked={editIsActive} style="width: 15px; height: 15px;" />
+                          <label for="editExpActive-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Link is active (reactivate link)</label>
+                        </div>
+                      </div>
+
+                      <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                        <button class="btn" style="padding: 4px 8px; font-size: 0.75rem; background: transparent; border: 1px solid var(--glass-border); color: #888;" onclick={() => editingShareToken = null}>
+                          Cancel
+                        </button>
+                        <button class="btn" style="padding: 4px 10px; font-size: 0.75rem; background: var(--text-color); color: var(--bg-color);" disabled={isSavingShareEdit} onclick={() => handleSaveShareEdit(share.share_token)}>
+                          {isSavingShareEdit ? 'Saving...' : 'Save Changes'}
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
+
+                  {#if extendingToken === share.share_token}
+                    <div style="margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); border-radius: 6px;">
+                      <div style="font-size: 0.8rem; color: #ccc; margin-bottom: 6px; font-weight: 500;">Extend Validity:</div>
+                      <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                        <button 
+                          type="button" 
+                          class="btn" 
+                          style="flex: 1; padding: 4px; font-size: 0.75rem; background: {extendExpiryMode === 'duration' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                          onclick={() => extendExpiryMode = 'duration'}>
+                          Duration
+                        </button>
+                        <button 
+                          type="button" 
+                          class="btn" 
+                          style="flex: 1; padding: 4px; font-size: 0.75rem; background: {extendExpiryMode === 'date' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                          onclick={() => extendExpiryMode = 'date'}>
+                          Specific Date & Time
+                        </button>
+                      </div>
+
+                      {#if extendExpiryMode === 'duration'}
+                        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+                          <input type="number" bind:value={extendExpiryValue} min="1" style="width: 60px; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
+                          <select bind:value={extendExpiryUnit} style="flex: 1; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;">
+                            <option value="hours">Hours</option>
+                            <option value="days">Days</option>
+                            <option value="months">Months</option>
+                            <option value="years">Years</option>
+                          </select>
+                        </div>
+                      {:else}
+                        <div style="margin-bottom: 8px;">
+                          <input type="datetime-local" bind:value={extendExpiryDateTime} style="width: 100%; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
+                        </div>
+                      {/if}
+
+                      <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                        <button class="btn" style="padding: 4px 8px; font-size: 0.75rem; background: transparent; border: 1px solid var(--glass-border); color: #888;" onclick={() => extendingToken = null}>Cancel</button>
+                        <button class="btn" style="padding: 4px 10px; font-size: 0.75rem; background: var(--text-color); color: var(--bg-color);" disabled={isExtending} onclick={() => handleExtendShare(share.share_token)}>
+                          {isExtending ? 'Extending...' : 'Save & Extend'}
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        {/if}
+      </div>
+
+    {:else}
+      <!-- Access Requests Tab -->
+      <div>
+        <h4 style="margin-bottom: 12px; font-weight: 500;">Access Requests</h4>
+        {#if accessRequests.length === 0}
+          <p style="color: #666; font-size: 0.875rem;">No access requests for this folder.</p>
+        {:else}
+          <div style="display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto;">
+            {#each accessRequests as req}
+              <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border); padding: 14px; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                  <div>
+                    <div style="font-weight: 500; color: #f4f4f5; font-size: 0.95rem;">
+                      {req.name || 'Anonymous Requester'}
+                    </div>
+                    {#if req.email}
+                      <div style="font-size: 0.78rem; color: #60a5fa; display: flex; align-items: center; gap: 4px; margin-top: 2px;">
+                        <Mail size={12} />
+                        {req.email}
+                      </div>
+                    {/if}
+                  </div>
+                  <div>
+                    {#if req.status === 'pending'}
+                      <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 0.7rem; padding: 2px 8px; border-radius: 9999px; font-weight: 500;">
+                        Pending
+                      </span>
+                    {:else}
+                      <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.7rem; padding: 2px 8px; border-radius: 9999px; font-weight: 500;">
+                        Resolved
+                      </span>
+                    {/if}
+                  </div>
+                </div>
+
+                {#if req.note}
+                  <div style="background: rgba(0,0,0,0.3); border-radius: 6px; padding: 8px 10px; font-size: 0.8rem; color: #d4d4d8; margin-bottom: 10px; font-style: italic;">
+                    "{req.note}"
+                  </div>
+                {/if}
+
+                <div style="font-size: 0.72rem; color: #71717a; display: flex; gap: 12px; margin-bottom: 10px;">
+                  <span>Requested: {formatShareDate(req.created_at)}</span>
+                  <span>Link: ...{req.share_token.substring(0, 8)}</span>
+                </div>
+
+                {#if req.status === 'pending'}
+                  {#if respondingRequestId === req.id}
+                    <div style="background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); border-radius: 6px; padding: 12px; margin-top: 8px;">
+                      <div style="font-size: 0.825rem; font-weight: 500; margin-bottom: 8px; color: #ccc;">How to handle this request:</div>
+                      
+                      <div style="display: flex; gap: 12px; margin-bottom: 10px;">
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #ddd; cursor: pointer;">
+                          <input type="radio" name="req-action-{req.id}" value="extend" bind:group={requestAction} />
+                          Reactivate / Extend validity
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: #ddd; cursor: pointer;">
+                          <input type="radio" name="req-action-{req.id}" value="new_link" bind:group={requestAction} />
+                          Share a new link
+                        </label>
+                      </div>
+
+                      <div style="margin-bottom: 12px;">
+                        <label style="display: block; font-size: 0.75rem; color: #999; margin-bottom: 6px;">Validity Period</label>
+                        <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                          <button 
+                            type="button" 
+                            class="btn" 
+                            style="flex: 1; padding: 4px 6px; font-size: 0.75rem; background: {requestExpiryMode === 'duration' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                            onclick={() => requestExpiryMode = 'duration'}>
+                            Duration
+                          </button>
+                          <button 
+                            type="button" 
+                            class="btn" 
+                            style="flex: 1; padding: 4px 6px; font-size: 0.75rem; background: {requestExpiryMode === 'date' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                            onclick={() => requestExpiryMode = 'date'}>
+                            Date & Time
+                          </button>
+                          <button 
+                            type="button" 
+                            class="btn" 
+                            style="flex: 1; padding: 4px 6px; font-size: 0.75rem; background: {requestExpiryMode === 'never' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                            onclick={() => requestExpiryMode = 'never'}>
+                            Never
+                          </button>
+                        </div>
+
+                        {#if requestExpiryMode === 'duration'}
+                          <div style="display: flex; gap: 6px;">
+                            <input type="number" bind:value={requestExpiryValue} min="1" style="width: 70px; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.8rem;" />
+                            <select bind:value={requestExpiryUnit} style="flex: 1; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.8rem;">
+                              <option value="hours">Hours</option>
+                              <option value="days">Days</option>
+                              <option value="months">Months</option>
+                              <option value="years">Years</option>
+                            </select>
+                          </div>
+                        {:else if requestExpiryMode === 'date'}
+                          <div>
+                            <input type="datetime-local" bind:value={requestExpiryDateTime} style="width: 100%; padding: 6px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.8rem;" />
+                          </div>
+                        {/if}
+                      </div>
+
+                      {#if req.email}
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                          <input type="checkbox" id="notify-user-{req.id}" bind:checked={requestNotifyUser} style="width: 16px; height: 16px;" />
+                          <label for="notify-user-{req.id}" style="font-size: 0.8rem; color: #ccc; cursor: pointer;">
+                            Notify requester via email ({req.email})
+                          </label>
+                        </div>
+                      {/if}
+
+                      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                        <button class="btn" style="padding: 4px 10px; font-size: 0.75rem; background: transparent; border: 1px solid var(--glass-border); color: #888;" onclick={() => respondingRequestId = null}>
+                          Cancel
+                        </button>
+                        <button class="btn" style="padding: 4px 12px; font-size: 0.75rem; background: var(--text-color); color: var(--bg-color);" disabled={isRespondingRequest} onclick={() => handleRespondRequest(req)}>
+                          {isRespondingRequest ? 'Processing...' : 'Grant Access'}
+                        </button>
+                      </div>
+                    </div>
+                  {:else}
+                    <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd;" onclick={() => { 
+                      respondingRequestId = req.id; 
+                      requestNotifyUser = Boolean(req.email);
+                      requestExpiryMode = 'duration';
+                      requestExpiryValue = 7;
+                      requestExpiryUnit = 'days';
+                      const future = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+                      requestExpiryDateTime = toDateTimeLocal(future);
+                    }}>
+                      Respond to Request
+                    </button>
+                  {/if}
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
