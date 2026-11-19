@@ -18,6 +18,7 @@
     allowDownload = true, 
     isSharedView = false, 
     token,
+    watermarkVersion,
     baseFolderPath, folderCoverId,
     onclose,
     onnext,
@@ -28,6 +29,7 @@
     allowDownload?: boolean, 
     isSharedView?: boolean, 
     token?: string,
+    watermarkVersion?: string | number,
     baseFolderPath?: string,
     folderCoverId?: string | null,
     onclose?: () => void,
@@ -577,7 +579,7 @@
         {:else}
           {#key media.id}
             <img 
-              src={getPreviewUrl(media.id, false, token, 'lightbox')} 
+              src={`${getPreviewUrl(media.id, false, token, 'lightbox')}${watermarkVersion ? '&wv=' + watermarkVersion : ''}`} 
               alt={media.file_name} 
               class="media-element" 
               draggable="false" 

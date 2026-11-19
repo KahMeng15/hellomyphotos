@@ -534,6 +534,19 @@ export class WatermarkService {
       return { success: true, purged: purgedCount, regenerated: 0, filesCount: mediaList.length };
     }
 
+    // Touch updated_at on all applicable templates so version/ETag change and browsers instantly fetch new images
+    const templateIds = applicableTemplates.map(t => t.id);
+    if (templateIds.length > 0) {
+      await query(
+        `UPDATE watermark_templates SET updated_at = NOW() WHERE id = ANY($1::uuid[])`,
+        [templateIds]
+      );
+      for (const tpl of applicableTemplates) {
+        const fresh = await this.getTemplate(tpl.id);
+        if (fresh) Object.assign(tpl, fresh);
+      }
+    }
+
     // 4. Pre-render watermarked previews for each template
     let regeneratedCount = 0;
     const cache1080Dir = path.resolve(CACHE_ROOT, '1080p');

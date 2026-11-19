@@ -1733,6 +1733,17 @@ export async function adminRoutes(fastify: FastifyInstance) {
         `UPDATE face_embeddings SET person_id = $1 WHERE person_id = ANY($2)`,
         [targetPersonId, sourcePersonIds]
       );
+      await query(`
+        UPDATE people 
+        SET face_count = (SELECT COUNT(*)::int FROM face_embeddings WHERE person_id = $1),
+            updated_at = NOW()
+        WHERE id = $1
+      `, [targetPersonId]);
+      await query(`DELETE FROM people WHERE id = ANY($1)`, [sourcePersonIds]);
+      try {
+        const keys = await redis.keys('faces:list:*');
+        if (keys.length > 0) await redis.del(...keys);
+      } catch {}
       
       return reply.send({ success: true, message: `Merged ${sourcePersonIds.length} face clusters into ${targetPersonId}` });
     } catch (e: any) {

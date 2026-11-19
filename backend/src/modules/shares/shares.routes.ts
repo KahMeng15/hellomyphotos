@@ -159,8 +159,11 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     if (subPath.includes('..')) return reply.status(400).send({ error: 'Invalid path' });
     
     const result = await query(`
-      SELECT * FROM shared_folders 
-      WHERE share_token = $1
+      SELECT s.*, COALESCE(wt.updated_at, d.updated_at) as watermark_updated_at
+      FROM shared_folders s
+      LEFT JOIN watermark_templates wt ON s.watermark_template_id = wt.id
+      LEFT JOIN LATERAL (SELECT updated_at FROM watermark_templates WHERE is_default = true LIMIT 1) d ON s.watermark_enabled = true
+      WHERE s.share_token = $1
     `, [token]);
     
     if (result.rows.length === 0) {

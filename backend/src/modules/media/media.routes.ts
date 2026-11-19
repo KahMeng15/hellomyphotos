@@ -61,7 +61,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
 
       const etag = `"${safeId}-${effectiveTemplate.id}-${tplVersion}-thumb"`;
       reply.header('ETag', etag);
-      reply.header('Cache-Control', 'public, max-age=86400');
+      reply.header('Cache-Control', 'private, no-cache');
 
       if (request.headers['if-none-match'] === etag) {
         return reply.status(304).send();
@@ -205,7 +205,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
 
         const etag = `"${safeId}-${effectiveTemplate.id}-${tplVersion}"`;
         reply.header('ETag', etag);
-        reply.header('Cache-Control', 'public, max-age=86400');
+        reply.header('Cache-Control', 'private, no-cache');
 
         if (request.headers['if-none-match'] === etag) {
           return reply.status(304).send();

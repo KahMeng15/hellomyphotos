@@ -100,20 +100,34 @@ export class ClusterService {
       console.log(`[Clustering] Processed ${processed}/${total} faces...`);
     }
 
-    // Step 3: Populate the people table from all distinct person_ids with initial cover
+    // Step 3: Populate the people table from all distinct person_ids with initial cover and face count
     await query(`
-      INSERT INTO people (id, name, cover_face_id, cover_media_id)
-      SELECT DISTINCT ON (fe.person_id)
-        fe.person_id,
+      INSERT INTO people (id, name, face_count, cover_face_id, cover_media_id, updated_at)
+      SELECT 
+        agg.person_id,
         '',
-        fe.id,
-        fe.media_id
-      FROM face_embeddings fe
-      WHERE fe.person_id IS NOT NULL
-      ORDER BY fe.person_id, fe.created_at DESC
+        agg.cnt,
+        rep.id,
+        rep.media_id,
+        agg.latest
+      FROM (
+        SELECT person_id, COUNT(*)::int as cnt, MAX(created_at) as latest
+        FROM face_embeddings
+        WHERE person_id IS NOT NULL
+        GROUP BY person_id
+      ) agg
+      CROSS JOIN LATERAL (
+        SELECT id, media_id
+        FROM face_embeddings
+        WHERE person_id = agg.person_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) rep
       ON CONFLICT (id) DO UPDATE SET
+        face_count = EXCLUDED.face_count,
         cover_face_id = COALESCE(people.cover_face_id, EXCLUDED.cover_face_id),
-        cover_media_id = COALESCE(people.cover_media_id, EXCLUDED.cover_media_id)
+        cover_media_id = COALESCE(people.cover_media_id, EXCLUDED.cover_media_id),
+        updated_at = EXCLUDED.updated_at
     `);
 
     // Invalidate face cache in Redis

@@ -299,16 +299,36 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_face_embeddings_person_media ON face_embeddings(person_id, media_id)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_people_cover_media ON people(cover_media_id)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_people_cover_face ON people(cover_face_id)`,
-  `UPDATE people p
-   SET cover_face_id = rf.id,
-       cover_media_id = COALESCE(p.cover_media_id, rf.media_id)
+  `ALTER TABLE people ADD COLUMN IF NOT EXISTS face_count INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE people ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_people_face_count ON people(face_count DESC, updated_at DESC)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_people_name ON people(name, face_count DESC)`,
+  `INSERT INTO people (id, name, face_count, cover_face_id, cover_media_id, updated_at)
+   SELECT 
+     agg.person_id,
+     '',
+     agg.cnt,
+     rep.id,
+     rep.media_id,
+     agg.latest
    FROM (
-     SELECT DISTINCT ON (person_id) id, person_id, media_id
+     SELECT person_id, COUNT(*)::int as cnt, MAX(created_at) as latest
      FROM face_embeddings
      WHERE person_id IS NOT NULL
-     ORDER BY person_id, created_at DESC
-   ) rf
-   WHERE p.id = rf.person_id AND p.cover_face_id IS NULL`,
+     GROUP BY person_id
+   ) agg
+   CROSS JOIN LATERAL (
+     SELECT id, media_id
+     FROM face_embeddings
+     WHERE person_id = agg.person_id
+     ORDER BY created_at DESC
+     LIMIT 1
+   ) rep
+   ON CONFLICT (id) DO UPDATE SET
+     face_count = EXCLUDED.face_count,
+     cover_face_id = COALESCE(people.cover_face_id, EXCLUDED.cover_face_id),
+     cover_media_id = COALESCE(people.cover_media_id, EXCLUDED.cover_media_id),
+     updated_at = EXCLUDED.updated_at`,
 ];
 
 // Statements not yet successfully applied. Succeeded ones are dropped so they

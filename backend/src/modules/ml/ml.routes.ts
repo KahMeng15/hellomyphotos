@@ -84,57 +84,53 @@ export async function mlRoutes(fastify: FastifyInstance) {
       } catch {}
     }
 
-    let orderByClause = 'ORDER BY pc.face_count DESC, pc.latest_created DESC';
-    let outerOrderByClause = 'ORDER BY op.face_count DESC, op.latest_created DESC';
+    let orderByClause = 'ORDER BY p.face_count DESC, p.updated_at DESC';
+    let outerOrderByClause = 'ORDER BY pp.face_count DESC, pp.updated_at DESC';
     if (sort === 'named') {
-      orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, pc.face_count DESC, pc.latest_created DESC";
-      outerOrderByClause = "ORDER BY NULLIF(op.name, '') IS NULL ASC, op.face_count DESC, op.latest_created DESC";
+      orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, p.face_count DESC, p.updated_at DESC";
+      outerOrderByClause = "ORDER BY NULLIF(pp.name, '') IS NULL ASC, pp.face_count DESC, pp.updated_at DESC";
     } else if (sort === 'a-z') {
-      orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, p.name ASC, pc.face_count DESC";
-      outerOrderByClause = "ORDER BY NULLIF(op.name, '') IS NULL ASC, op.name ASC, op.face_count DESC";
+      orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, p.name ASC, p.face_count DESC";
+      outerOrderByClause = "ORDER BY NULLIF(pp.name, '') IS NULL ASC, pp.name ASC, pp.face_count DESC";
     } else if (sort === 'z-a') {
-      orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, p.name DESC, pc.face_count DESC";
-      outerOrderByClause = "ORDER BY NULLIF(op.name, '') IS NULL ASC, op.name DESC, op.face_count DESC";
+      orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, p.name DESC, p.face_count DESC";
+      outerOrderByClause = "ORDER BY NULLIF(pp.name, '') IS NULL ASC, pp.name DESC, pp.face_count DESC";
     }
 
     const result = await query(`
-      WITH person_clusters AS (
+      WITH page_people AS (
         SELECT 
-          person_id,
-          COUNT(*)::int as face_count,
-          MAX(created_at) as latest_created
-        FROM face_embeddings
-        WHERE person_id IS NOT NULL
-        GROUP BY person_id
-      ),
-      ordered_people AS (
-        SELECT 
-          pc.person_id,
-          pc.face_count,
-          pc.latest_created,
+          p.id,
           p.name,
+          p.face_count,
           p.cover_media_id,
-          p.cover_face_id
-        FROM person_clusters pc
-        LEFT JOIN people p ON p.id = pc.person_id
+          p.cover_face_id,
+          p.updated_at
+        FROM people p
+        WHERE p.face_count > 0
         ${orderByClause}
         LIMIT $1 OFFSET $2
       ),
       rep_faces AS (
-        SELECT DISTINCT ON (op.person_id)
-          op.person_id,
-          COALESCE(fe_cov.media_id, fe_fb.media_id) as media_id,
-          COALESCE(fe_cov.bounding_box, fe_fb.bounding_box) as bounding_box
-        FROM ordered_people op
-        LEFT JOIN face_embeddings fe_cov ON fe_cov.id = op.cover_face_id
-        LEFT JOIN face_embeddings fe_fb ON fe_fb.person_id = op.person_id
-        ORDER BY op.person_id, (fe_cov.id IS NOT NULL) DESC, fe_fb.created_at DESC
+        SELECT 
+          pp.id AS person_id,
+          COALESCE(fe_cov.media_id, fb.media_id) AS media_id,
+          COALESCE(fe_cov.bounding_box, fb.bounding_box) AS bounding_box
+        FROM page_people pp
+        LEFT JOIN face_embeddings fe_cov ON fe_cov.id = pp.cover_face_id
+        LEFT JOIN LATERAL (
+          SELECT fe.media_id, fe.bounding_box
+          FROM face_embeddings fe
+          WHERE fe.person_id = pp.id AND fe_cov.id IS NULL
+          ORDER BY fe.created_at DESC
+          LIMIT 1
+        ) fb ON fe_cov.id IS NULL
       )
       SELECT 
-        op.person_id as id,
-        op.person_id,
-        op.face_count as count,
-        op.face_count,
+        pp.id,
+        pp.id AS person_id,
+        pp.face_count AS count,
+        pp.face_count,
         rf.media_id,
         rf.bounding_box,
         COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
@@ -142,10 +138,10 @@ export async function mlRoutes(fastify: FastifyInstance) {
         m.blurhash,
         m.file_name,
         m.folder_path,
-        op.name,
-        op.cover_media_id
-      FROM ordered_people op
-      JOIN rep_faces rf ON op.person_id = rf.person_id
+        pp.name,
+        pp.cover_media_id
+      FROM page_people pp
+      JOIN rep_faces rf ON pp.id = rf.person_id
       JOIN media_files m ON m.id = rf.media_id
       ${outerOrderByClause}
     `, [limit, offset]);
@@ -176,9 +172,9 @@ export async function mlRoutes(fastify: FastifyInstance) {
     }
 
     await query(`
-      INSERT INTO people (id, name)
-      VALUES ($1, $2)
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+      INSERT INTO people (id, name, updated_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
     `, [id, name]);
 
     try {
@@ -291,16 +287,18 @@ export async function mlRoutes(fastify: FastifyInstance) {
     const { mediaId } = request.body;
 
     await query(`
-      INSERT INTO people (id, name, cover_media_id, cover_face_id)
+      INSERT INTO people (id, name, cover_media_id, cover_face_id, updated_at)
       VALUES (
         $1, 
         '', 
         $2, 
-        (SELECT id FROM face_embeddings WHERE person_id = $1 AND media_id = $2 LIMIT 1)
+        (SELECT id FROM face_embeddings WHERE person_id = $1 AND media_id = $2 LIMIT 1),
+        NOW()
       )
       ON CONFLICT (id) DO UPDATE SET 
         cover_media_id = EXCLUDED.cover_media_id,
-        cover_face_id = EXCLUDED.cover_face_id
+        cover_face_id = EXCLUDED.cover_face_id,
+        updated_at = NOW()
     `, [safeId, mediaId]);
 
     try {

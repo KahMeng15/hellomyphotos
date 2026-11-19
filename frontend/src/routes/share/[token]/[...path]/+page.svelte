@@ -693,6 +693,13 @@ import { slide } from 'svelte/transition';
     const currentPath = page.url.pathname;
     return baseUrl ? `${baseUrl}${currentPath}` : currentPath;
   });
+
+  let watermarkVersion = $derived(
+    data.share?.watermark_updated_at 
+      ? new Date(data.share.watermark_updated_at).getTime()
+      : (data.share?.watermark_template_id || (data.share?.watermark_enabled ? '1' : ''))
+  );
+  let watermarkParam = $derived(watermarkVersion ? `&wv=${watermarkVersion}` : '');
 </script>
 
 <svelte:head>
@@ -825,7 +832,7 @@ import { slide } from 'svelte/transition';
     </a>
   {/if}
   {#if fallbackCoverId}
-    <CoverImage src={getPreviewUrl(fallbackCoverId, false, data.token)} objectPosition={coverObjectPosition} />
+    <CoverImage src={`${getPreviewUrl(fallbackCoverId, false, data.token)}${watermarkParam}`} objectPosition={coverObjectPosition} />
     <div class="header-gradient"></div>
   {/if}
 </div>
@@ -1027,7 +1034,7 @@ import { slide } from 'svelte/transition';
           {#if dir.cover_id}
             <BlurhashImage 
               hash={dir.blurhash || ''} 
-              src={`${getThumbnailUrl(dir.cover_id, data.token)}${dir.blurhash ? (getThumbnailUrl(dir.cover_id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(dir.blurhash) : ''}${data.share?.watermark_template_id ? '&wv=' + data.share.watermark_template_id : (data.share?.watermark_enabled ? '&wv=1' : '')}`} 
+              src={`${getThumbnailUrl(dir.cover_id, data.token)}${dir.blurhash ? (getThumbnailUrl(dir.cover_id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(dir.blurhash) : ''}${watermarkParam}`} 
               alt={dir.name}
               objectFit="cover"
               square={true}
@@ -1156,7 +1163,7 @@ import { slide } from 'svelte/transition';
     {#each sortedFiles as file, i}
       <BlurhashImage 
         hash={file.blurhash || ''} 
-        src={`${getThumbnailUrl(file.id, data.token)}${file.blurhash ? (getThumbnailUrl(file.id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(file.blurhash) : ''}${data.share?.watermark_template_id ? '&wv=' + data.share.watermark_template_id : (data.share?.watermark_enabled ? '&wv=1' : '')}`} 
+        src={`${getThumbnailUrl(file.id, data.token)}${file.blurhash ? (getThumbnailUrl(file.id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(file.blurhash) : ''}${watermarkParam}`} 
         alt={file.file_name} 
         fileName={isSearching && file.relative_path ? file.relative_path : file.file_name}
         showFileName={showFileNames || isSearching}
@@ -1173,7 +1180,7 @@ import { slide } from 'svelte/transition';
 {/key}
 
 {#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
-  <Lightbox folderCoverId={data.folderCoverId} media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={page.params.token} baseFolderPath={data.baseFolderPath} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
+  <Lightbox folderCoverId={data.folderCoverId} media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={page.params.token} watermarkVersion={watermarkVersion} baseFolderPath={data.baseFolderPath} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
 {/if}
 
 <ZipDownloadModal 
