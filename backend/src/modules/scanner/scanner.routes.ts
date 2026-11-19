@@ -289,13 +289,205 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true });
   });
 
-  fastify.get<{ Params: { '*': string } }>('/api/folder/*', { preHandler: requireAuth }, async (request, reply) => {
+  const handleFolderGet = async (request: FastifyRequest<{ Params: { '*'?: string }, Querystring: { q?: string } }>, reply: FastifyReply) => {
     // URL decode the path param and sanitize
     const folder = decodeURIComponent(request.params['*'] || '');
+    const { q } = (request.query || {}) as { q?: string };
     const t0 = performance.now();
     
     if (!canBrowseFolder(request.user!, folder)) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+
+    // 0. Search mode: if 'q' is provided, perform recursive search within folder and subfolders
+    if (q && q.trim().length > 0) {
+      const searchQuery = q.trim();
+      const escapedQuery = searchQuery.replace(/([%_\\])/g, '\\$1');
+      const searchLike = `%${escapedQuery}%`;
+
+      let filesResult;
+      if (!folder) {
+        filesResult = await query(
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height 
+           FROM media_files 
+           WHERE file_name ILIKE $1 ESCAPE '\\' 
+           ORDER BY file_name ASC 
+           LIMIT 300`,
+          [searchLike]
+        );
+      } else {
+        const escapedFolder = folder.replace(/([%_\\])/g, '\\$1');
+        filesResult = await query(
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height 
+           FROM media_files 
+           WHERE file_name ILIKE $1 ESCAPE '\\' 
+             AND (folder_path = $2 OR folder_path LIKE $3 ESCAPE '\\') 
+           ORDER BY file_name ASC 
+           LIMIT 300`,
+          [searchLike, folder, `${escapedFolder}/%`]
+        );
+      }
+
+      const allowedFiles = filesResult.rows.filter(f => hasFolderAccess(request.user!, f.folder_path));
+      const filesWithRel = allowedFiles.map(f => {
+        let relativePath = f.file_name;
+        if (!folder) {
+          relativePath = f.folder_path ? `${f.folder_path}/${f.file_name}` : f.file_name;
+        } else if (f.folder_path === folder) {
+          relativePath = f.file_name;
+        } else if (f.folder_path.startsWith(folder + '/')) {
+          relativePath = `${f.folder_path.slice(folder.length + 1)}/${f.file_name}`;
+        }
+        return {
+          ...f,
+          relative_path: relativePath
+        };
+      });
+
+      // Find all matching subfolders
+      let foldersRes;
+      if (!folder) {
+        foldersRes = await query(`
+          SELECT DISTINCT folder_path FROM (
+            SELECT folder_path FROM media_files WHERE folder_path != '' AND folder_path IS NOT NULL
+            UNION
+            SELECT folder_path FROM folder_settings WHERE folder_path != '' AND folder_path IS NOT NULL
+          ) sub
+          WHERE folder_path != '' AND folder_path IS NOT NULL
+        `);
+      } else {
+        const escapedFolder = folder.replace(/([%_\\])/g, '\\$1');
+        foldersRes = await query(`
+          SELECT DISTINCT folder_path FROM (
+            SELECT folder_path FROM media_files WHERE (folder_path = $1 OR folder_path LIKE $2 ESCAPE '\\')
+            UNION
+            SELECT folder_path FROM folder_settings WHERE (folder_path = $1 OR folder_path LIKE $2 ESCAPE '\\')
+          ) sub
+          WHERE folder_path != '' AND folder_path IS NOT NULL AND folder_path != $1
+        `, [folder, `${escapedFolder}/%`]);
+      }
+
+      const subfolderPathsSet = new Set<string>();
+      for (const row of foldersRes.rows) {
+        const fp: string = row.folder_path;
+        if (!fp) continue;
+        let remainder = '';
+        if (!folder) {
+          remainder = fp;
+        } else if (fp.startsWith(folder + '/')) {
+          remainder = fp.slice(folder.length + 1);
+        } else {
+          continue;
+        }
+
+        const segments = remainder.split('/').filter(Boolean);
+        let curRel = '';
+        for (const seg of segments) {
+          curRel = curRel ? `${curRel}/${seg}` : seg;
+          const fullSubPath = folder ? `${folder}/${curRel}` : curRel;
+          subfolderPathsSet.add(fullSubPath);
+        }
+      }
+
+      const matchingFolders: { name: string, path: string, relative_path: string }[] = [];
+      for (const fullSubPath of subfolderPathsSet) {
+        const folderName = fullSubPath.split('/').pop()!;
+        if (folderName.toLowerCase().includes(searchQuery.toLowerCase())) {
+          if (canBrowseFolder(request.user!, fullSubPath)) {
+            const relPath = folder ? (fullSubPath.startsWith(folder + '/') ? fullSubPath.slice(folder.length + 1) : fullSubPath) : fullSubPath;
+            matchingFolders.push({
+              name: folderName,
+              path: fullSubPath,
+              relative_path: relPath
+            });
+          }
+        }
+      }
+
+      matchingFolders.sort((a, b) => a.name.localeCompare(b.name));
+      const limitedFolders = matchingFolders.slice(0, 50);
+
+      const coverMap = new Map<string, { id: string, blurhash: string | null, bounding_box: any, img_width: number | null, img_height: number | null }>();
+      const subPaths = limitedFolders.map(f => f.path);
+
+      if (subPaths.length > 0) {
+        try {
+          const coversRes = await query(`
+            SELECT fs.folder_path, m.id, m.blurhash,
+              COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+              COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+              (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
+            FROM folder_settings fs
+            JOIN media_files m ON m.id = COALESCE(fs.cover_media_id, fs.auto_cover_media_id)
+            WHERE fs.folder_path = ANY($1::text[])
+          `, [subPaths]);
+
+          for (const row of coversRes.rows) {
+            coverMap.set(row.folder_path, {
+              id: row.id,
+              blurhash: row.blurhash,
+              bounding_box: row.bounding_box,
+              img_width: row.img_width,
+              img_height: row.img_height
+            });
+          }
+        } catch (batchErr: any) {
+          logger.error('Failed to batch query folder covers for search', batchErr);
+        }
+
+        const missingSubPaths = subPaths.filter(sp => !coverMap.has(sp));
+        if (missingSubPaths.length > 0) {
+          try {
+            const fallbackRes = await query(`
+              SELECT sub.p AS folder_path, c.id, c.blurhash, c.img_width, c.img_height, c.bounding_box
+              FROM unnest($1::text[]) AS sub(p)
+              CROSS JOIN LATERAL (
+                SELECT m.id, m.blurhash,
+                  COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+                  COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+                  (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
+                FROM media_files m
+                WHERE m.folder_path = sub.p OR m.folder_path LIKE sub.p || '/%'
+                ORDER BY (m.blurhash IS NOT NULL) DESC, m.id ASC
+                LIMIT 1
+              ) c
+            `, [missingSubPaths]);
+
+            for (const row of fallbackRes.rows) {
+              coverMap.set(row.folder_path, {
+                id: row.id,
+                blurhash: row.blurhash,
+                bounding_box: row.bounding_box,
+                img_width: row.img_width,
+                img_height: row.img_height
+              });
+            }
+          } catch (fallbackErr: any) {
+            logger.error('Failed to query fallback covers for search', fallbackErr);
+          }
+        }
+      }
+
+      const directories = limitedFolders.map(f => {
+        const c = coverMap.get(f.path);
+        return {
+          name: f.name,
+          path: f.path,
+          relative_path: f.relative_path,
+          cover_id: c?.id || null,
+          blurhash: c?.blurhash || null,
+          cover_bounding_box: c?.bounding_box || null,
+          cover_img_width: c?.img_width || null,
+          cover_img_height: c?.img_height || null
+        };
+      });
+
+      return reply.send({
+        files: filesWithRel,
+        directories,
+        searching: true,
+        query: searchQuery
+      });
     }
 
     const mark = (name: string) => {
@@ -639,5 +831,8 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       defaultSortMode: defaults.defaultSortMode,
       defaultFolderViewMode: defaults.defaultFolderViewMode
     });
-  });
+  };
+
+  fastify.get<{ Params: { '*'?: string }, Querystring: { q?: string } }>('/api/folder', { preHandler: requireAuth }, handleFolderGet);
+  fastify.get<{ Params: { '*'?: string }, Querystring: { q?: string } }>('/api/folder/*', { preHandler: requireAuth }, handleFolderGet);
 }

@@ -1,12 +1,13 @@
 <script lang="ts">
 import { replaceState } from '$app/navigation';
+import { slide } from 'svelte/transition';
 
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import CoverImage from '$lib/components/CoverImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, regenerateImages, regenerateVideos } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, getStreamUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, regenerateImages, regenerateVideos, searchFolderContent, type MediaFile, type DirectoryInfo } from '$lib/api/media';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
-  import { getSortDate } from '$lib/utils/date';
+  import { getSortDate, getRawDate } from '$lib/utils/date';
   import { createShare, getActiveShares, revokeShare, updateShare, getAccessRequests, respondAccessRequest, type ShareData, type AccessRequest } from '$lib/api/shares';
   import { formatShareDate, isShareExpired, getNearestExpiryDuration } from '$lib/utils/shareUtils';
   import { invalidateAll, goto } from '$app/navigation';
@@ -18,7 +19,7 @@ import { replaceState } from '$app/navigation';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
   import { currentUser } from '$lib/stores/auth';
   import { updatePreferences } from '$lib/api/auth';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2 } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
@@ -79,12 +80,105 @@ import { replaceState } from '$app/navigation';
   let copiedToken = $state<string | null>(null);
   let localCoverOverride: string | null = $state(null);
 
+  // Search state
+  let isSearchOpen = $state(false);
+  let searchQuery = $state('');
+  let isSearching = $state(false);
+  let isSearchLoading = $state(false);
+  let searchFiles: MediaFile[] = $state([]);
+  let searchDirectories: DirectoryInfo[] = $state([]);
+  let searchInputEl: HTMLInputElement | undefined = $state();
+  let searchDebounceTimer: any = null;
+  let searchAbortController: AbortController | null = null;
+
+  async function executeSearch(queryText: string) {
+    const trimmed = queryText.trim();
+    if (!trimmed) {
+      isSearching = false;
+      isSearchLoading = false;
+      searchFiles = [];
+      searchDirectories = [];
+      return;
+    }
+
+    if (searchAbortController) {
+      searchAbortController.abort();
+    }
+    searchAbortController = new AbortController();
+
+    isSearchLoading = true;
+    isSearching = true;
+
+    try {
+      const res = await searchFolderContent(data.folderPath || '', trimmed, fetch, searchAbortController.signal);
+      searchFiles = res.files || [];
+      searchDirectories = res.directories || [];
+      visibleCount = 50;
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error('Failed to search folder:', err);
+      }
+    } finally {
+      isSearchLoading = false;
+    }
+  }
+
+  function handleSearchInput() {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    if (!searchQuery.trim()) {
+      isSearching = false;
+      searchFiles = [];
+      searchDirectories = [];
+      return;
+    }
+    searchDebounceTimer = setTimeout(() => {
+      executeSearch(searchQuery);
+    }, 300);
+  }
+
+  function handleSearchKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+      executeSearch(searchQuery);
+    } else if (e.key === 'Escape') {
+      closeSearch();
+    }
+  }
+
+  function toggleSearch() {
+    isSearchOpen = !isSearchOpen;
+    if (isSearchOpen) {
+      setTimeout(() => {
+        searchInputEl?.focus();
+      }, 50);
+    } else {
+      closeSearch();
+    }
+  }
+
+  function clearSearch() {
+    searchQuery = '';
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    if (searchAbortController) searchAbortController.abort();
+    isSearching = false;
+    isSearchLoading = false;
+    searchFiles = [];
+    searchDirectories = [];
+    searchInputEl?.focus();
+  }
+
+  function closeSearch() {
+    isSearchOpen = false;
+    clearSearch();
+  }
+
   // Initialize input state when data changes
   let previousPath = $state(data.folderPath);
   let hasShownHostError = $state(false);
   $effect(() => {
     folderDescInput = data.folderDescription || '';
     if (data.folderPath !== previousPath) {
+      closeSearch();
       localCoverOverride = null;
       visibleCount = 50; // Reset scroll on path change
       previousPath = data.folderPath;
@@ -464,7 +558,33 @@ import { replaceState } from '$app/navigation';
   }
   
   type SortMode = 'newest' | 'oldest' | 'a-z' | 'z-a';
-  type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square';
+  type ViewMode = 'small-fit' | 'large-fit' | 'small-square' | 'large-square' | 'compact-list';
+
+  function formatBytes(bytes: number | null | undefined): string {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  function formatFileDate(file: { exif_json?: Record<string, unknown> | null; created_at?: string | null }): string {
+    const d = getRawDate(file);
+    if (isNaN(d.getTime()) || d.getTime() === 0) return '—';
+    const clientLocale = typeof navigator !== 'undefined' && navigator.language ? navigator.language : undefined;
+    return d.toLocaleDateString(clientLocale, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  }
+
+  function getFileDimensions(file: { img_width?: number | null; img_height?: number | null; exif_json?: any }): string {
+    const w = file.img_width || file.exif_json?.ExifImageWidth || file.exif_json?.ImageWidth || file.exif_json?.width;
+    const h = file.img_height || file.exif_json?.ExifImageHeight || file.exif_json?.ImageHeight || file.exif_json?.height;
+    if (w && h) return `${w} × ${h}`;
+    return '—';
+  }
 
   function loadPref<T>(key: string, fallback: T): T {
     if ($currentUser && $currentUser.preferences && $currentUser.preferences[key] !== undefined) {
@@ -477,6 +597,7 @@ import { replaceState } from '$app/navigation';
     } catch { return fallback; }
   }
 
+  let savePrefTimer: any = null;
   function savePref(key: string, val: any) {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(key, JSON.stringify(val));
@@ -485,9 +606,14 @@ import { replaceState } from '$app/navigation';
       if (!$currentUser.preferences) $currentUser.preferences = {};
       if ($currentUser.preferences[key] !== val) {
         $currentUser.preferences[key] = val;
-        updatePreferences($currentUser.preferences).catch(err => {
-          console.error('Failed to save preference to DB:', err);
-        });
+        if (savePrefTimer) clearTimeout(savePrefTimer);
+        savePrefTimer = setTimeout(() => {
+          if ($currentUser?.preferences) {
+            updatePreferences($currentUser.preferences).catch(err => {
+              console.error('Failed to save preference to DB:', err);
+            });
+          }
+        }, 500);
       }
     }
   }
@@ -531,9 +657,12 @@ import { replaceState } from '$app/navigation';
     return undefined;
   }
 
-  let isFolderOnly = $derived(data.files.length === 0 && data.directories.length > 0);
+  let displayedDirectories = $derived(isSearching ? searchDirectories : data.directories);
+  let displayedFiles = $derived(isSearching ? searchFiles : data.files);
 
-  let sortedDirectories = $derived([...data.directories].sort((a, b) => {
+  let isFolderOnly = $derived(displayedFiles.length === 0 && displayedDirectories.length > 0);
+
+  let sortedDirectories = $derived([...displayedDirectories].sort((a, b) => {
     if (sortMode === 'a-z') return a.name.localeCompare(b.name);
     if (sortMode === 'z-a') return b.name.localeCompare(a.name);
     return 0;
@@ -592,7 +721,7 @@ import { replaceState } from '$app/navigation';
     showDownloadModal = true;
   }
 
-  let sortedFiles = $derived([...data.files].sort((a, b) => {
+  let sortedFiles = $derived([...displayedFiles].sort((a, b) => {
     if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);
     if (sortMode === 'oldest') return getSortDate(a) - getSortDate(b);
     if (sortMode === 'a-z') return a.file_name.localeCompare(b.file_name);
@@ -692,6 +821,22 @@ import { replaceState } from '$app/navigation';
     }
   });
 
+  // Preload next and previous lightbox previews for fast, instant navigation
+  $effect(() => {
+    if (selectedMediaIndex !== null && sortedFiles.length > 0) {
+      const nextFile = sortedFiles[selectedMediaIndex + 1];
+      const prevFile = sortedFiles[selectedMediaIndex - 1];
+      if (nextFile && !nextFile.mime_type.startsWith('video/')) {
+        const img = new Image();
+        img.src = getPreviewUrl(nextFile.id, false, undefined, 'lightbox');
+      }
+      if (prevFile && !prevFile.mime_type.startsWith('video/')) {
+        const img = new Image();
+        img.src = getPreviewUrl(prevFile.id, false, undefined, 'lightbox');
+      }
+    }
+  });
+
   async function handleSetCover(mediaId: string) {
     localCoverOverride = mediaId;
     coverRefreshKey++;
@@ -753,14 +898,18 @@ import { replaceState } from '$app/navigation';
 
   let coverRefreshKey = $state(0);
 
+  let scrollRafId: number | null = null;
   function handleScroll(e: Event) {
-    if (!headerWrapper) return;
+    if (!headerWrapper || scrollRafId !== null) return;
     const target = e.target as HTMLElement;
-    // Sticking occurs when scrolled past the wrapper's height minus the 25px top offset
-    const threshold = headerWrapper.offsetHeight - 25;
-    if (threshold > 0) {
-      scrollProgress = Math.min(1, Math.max(0, target.scrollTop / threshold));
-    }
+    scrollRafId = requestAnimationFrame(() => {
+      scrollRafId = null;
+      if (!headerWrapper) return;
+      const threshold = headerWrapper.offsetHeight - 25;
+      if (threshold > 0) {
+        scrollProgress = Math.min(1, Math.max(0, target.scrollTop / threshold));
+      }
+    });
   }
 
   onMount(() => {
@@ -773,17 +922,26 @@ import { replaceState } from '$app/navigation';
       toast.info('This folder is still being processed. Some items might be missing or slow to load. Feel free to come back later!', 8000);
     }
 
+    let pollCount = 0;
+    const MAX_POLLS = 10;
     pollInterval = setInterval(() => {
-      // Poll if any file lacks a blurhash (still processing) or if the scanner is active
-      const stillProcessing = data.files.some(f => !f.blurhash) || data.scanning;
+      pollCount++;
+      if (pollCount > MAX_POLLS) {
+        clearInterval(pollInterval);
+        return;
+      }
+      // Poll if any file lacks a blurhash (still processing) or if scanner is active
+      const stillProcessing = (data.files && data.files.some(f => !f.blurhash)) || data.scanning;
       if (stillProcessing) {
         invalidateAll();
+      } else {
+        clearInterval(pollInterval);
       }
-    }, 2000);
+    }, 5000);
 
     const mainContent = document.querySelector('.main-content');
     if (mainContent) {
-      mainContent.addEventListener('scroll', handleScroll);
+      mainContent.addEventListener('scroll', handleScroll, { passive: true });
     }
 
     windowWidth = window.innerWidth;
@@ -792,6 +950,7 @@ import { replaceState } from '$app/navigation';
 
     return () => {
       if (pollInterval) clearInterval(pollInterval);
+      if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
       if (mainContent) {
         mainContent.removeEventListener('scroll', handleScroll);
       }
@@ -828,8 +987,8 @@ import { replaceState } from '$app/navigation';
 <div class="sticky-header" style="
   --scroll-prog: {scrollProgress};
   background: linear-gradient(to bottom, rgba(0,0,0,calc(0.9 * {scrollProgress})) 0%, rgba(0,0,0,calc(0.6 * {scrollProgress})) 100%);
-  backdrop-filter: blur(calc(16px * {scrollProgress}));
-  -webkit-backdrop-filter: blur(calc(16px * {scrollProgress}));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-bottom-color: rgba(255,255,255,calc(0.05 * {scrollProgress}));
   z-index: {showSortMenu || showViewMenu || showFolderViewMenu ? 105 : 50};
 ">
@@ -870,6 +1029,9 @@ import { replaceState } from '$app/navigation';
             <BarChart3 size={18} />
           </a>
         {/if}
+        <button class="icon-btn" class:active={isSearchOpen} onclick={toggleSearch} title="Search folder and subfolders">
+          <Search size={18} />
+        </button>
         <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
           <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; showFolderViewMenu = false; }} title="Sort">
             <ArrowDownUp size={18} />
@@ -892,7 +1054,11 @@ import { replaceState } from '$app/navigation';
         {#if isFolderOnly}
           <div class="dropdown-container" use:clickOutside={() => showFolderViewMenu = false}>
             <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; }} title="View">
-              <LayoutGrid size={18} />
+              {#if folderViewMode === 'list'}
+                <List size={18} />
+              {:else}
+                <LayoutGrid size={18} />
+              {/if}
             </button>
             {#if showFolderViewMenu}
               <div class="dropdown-menu">
@@ -913,7 +1079,11 @@ import { replaceState } from '$app/navigation';
         {:else}
           <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
             <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
-              <LayoutGrid size={18} />
+              {#if viewMode === 'compact-list'}
+                <List size={18} />
+              {:else}
+                <LayoutGrid size={18} />
+              {/if}
             </button>
             {#if showViewMenu}
               <div class="dropdown-menu">
@@ -921,6 +1091,7 @@ import { replaceState } from '$app/navigation';
                 <button class:active={viewMode === 'large-fit'} onclick={() => { viewMode = 'large-fit'; showViewMenu = false; }}>Large Fit Size</button>
                 <button class:active={viewMode === 'small-square'} onclick={() => { viewMode = 'small-square'; showViewMenu = false; }}>Small Square Grid</button>
                 <button class:active={viewMode === 'large-square'} onclick={() => { viewMode = 'large-square'; showViewMenu = false; }}>Large Square Grid</button>
+                <button class:active={viewMode === 'compact-list'} onclick={() => { viewMode = 'compact-list'; showViewMenu = false; }}>Compact List</button>
                 <div class="dropdown-divider"></div>
                 <button class="toggle-item" class:active={showFileNames} onclick={() => { showFileNames = !showFileNames; showViewMenu = false; }}>
                   <span>Show File Names</span>
@@ -945,27 +1116,63 @@ import { replaceState } from '$app/navigation';
       </div>
       
       <span class="count" style="display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 4px;">
-        {#if data.directories.length > 0}
-          <span style="white-space: nowrap;">{data.directories.length} {data.directories.length === 1 ? 'folder' : 'folders'}</span>
-          {#if data.files.length > 0}
-            <span style="white-space: nowrap;">& {data.files.length} {data.files.length === 1 ? 'item' : 'items'}</span>
+        {#if isSearching && isSearchLoading}
+          <span style="white-space: nowrap; color: #a1a1aa;">Searching...</span>
+        {:else if displayedDirectories.length > 0}
+          <span style="white-space: nowrap;">{displayedDirectories.length} {displayedDirectories.length === 1 ? 'folder' : 'folders'}</span>
+          {#if displayedFiles.length > 0}
+            <span style="white-space: nowrap;">& {displayedFiles.length} {displayedFiles.length === 1 ? 'item' : 'items'}</span>
           {/if}
         {:else}
-          <span style="white-space: nowrap;">{data.files.length} {data.files.length === 1 ? 'item' : 'items'}</span>
+          <span style="white-space: nowrap;">{displayedFiles.length} {displayedFiles.length === 1 ? 'item' : 'items'}</span>
         {/if}
       </span>
     </div>
   </div>
+
+  {#if isSearchOpen}
+    <div class="folder-search-bar" transition:slide={{ duration: 180 }}>
+      <div class="search-input-wrapper">
+        {#if isSearchLoading}
+          <Loader2 size={18} class="search-spinner" />
+        {:else}
+          <Search size={18} class="search-icon" />
+        {/if}
+        <input 
+          bind:this={searchInputEl}
+          type="text" 
+          placeholder={data.folderPath ? `Search in ${data.folderPath.split('/').pop()} and subfolders...` : "Search all photos and folders..."}
+          bind:value={searchQuery}
+          oninput={handleSearchInput}
+          onkeydown={handleSearchKeydown}
+          class="folder-search-input"
+        />
+        <button class="search-close-btn" onclick={toggleSearch} title="Close search">
+          <X size={18} />
+        </button>
+      </div>
+    </div>
+  {/if}
 </div>
 
 {#key data.folderPath}
-{#if data.directories.length > 0}
-  <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (data.files.length > 0 ? 'list-view' : '')}">
+{#if isSearching && !isSearchLoading && sortedDirectories.length === 0 && sortedFiles.length === 0 && viewMode !== 'compact-list'}
+  <div class="search-empty-state">
+    <p class="empty-title">No media or folders found matching "{searchQuery}"</p>
+    <p class="empty-subtitle">Check the spelling or try searching for a different name</p>
+    <button class="btn" onclick={clearSearch} style="margin-top: 14px; background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: white;">
+      Clear Search
+    </button>
+  </div>
+{/if}
+
+{#if displayedDirectories.length > 0}
+  <div class="dir-grid {isFolderOnly ? 'folder-mode-' + folderViewMode : (displayedFiles.length > 0 ? 'list-view' : '')}">
     {#each sortedDirectories as dir, i}
       <a 
         class="dir-card" 
         style="animation-delay: {i * 40}ms; z-index: {activeFolderMenu === dir.name ? 50 : 'auto'};" 
-        href="/folder/{data.folderPath ? data.folderPath + '/' + dir.name : dir.name}"
+        href={dir.path ? `/folder/${encodePath(dir.path)}` : `/folder/${data.folderPath ? data.folderPath + '/' + dir.name : dir.name}`}
         onclick={(e) => { 
           if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('.dropdown-menu')) {
             e.preventDefault();
@@ -977,7 +1184,12 @@ import { replaceState } from '$app/navigation';
           <div class="dir-info">
             <div class="dir-label">
               <Folder size={18} />
-              <span class="dir-name">{dir.name}</span>
+              <div>
+                <span class="dir-name">{dir.name}</span>
+                {#if dir.relative_path && dir.relative_path !== dir.name}
+                  <span class="dir-path" style="font-size: 0.75rem; color: #888; display: block;" title={dir.relative_path}>{dir.relative_path}</span>
+                {/if}
+              </div>
             </div>
             <div class="dir-actions" use:clickOutside={() => { if (activeFolderMenu === dir.name) activeFolderMenu = null; }}>
               <button class="icon-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
@@ -985,7 +1197,7 @@ import { replaceState } from '$app/navigation';
               </button>
               {#if activeFolderMenu === dir.name}
                 <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
-                  <button onclick={() => { activeFolderMenu = null; startFolderZipDownload(data.folderPath ? data.folderPath + '/' + dir.name : dir.name, dir.name); }}>Download ZIP</button>
+                  <button onclick={() => { activeFolderMenu = null; startFolderZipDownload(dir.path || (data.folderPath ? data.folderPath + '/' + dir.name : dir.name), dir.name); }}>Download ZIP</button>
                 </div>
               {/if}
             </div>
@@ -1011,7 +1223,7 @@ import { replaceState } from '$app/navigation';
                 {#if activeFolderMenu === dir.name}
                   <div class="dropdown-menu" style="position: absolute; left: 50%; transform: translateX(-50%); top: 100%; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
                     <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
-                    <button onclick={() => { activeFolderMenu = null; startFolderZipDownload(data.folderPath ? data.folderPath + '/' + dir.name : dir.name, dir.name); }}>Download ZIP</button>
+                    <button onclick={() => { activeFolderMenu = null; startFolderZipDownload(dir.path || (data.folderPath ? data.folderPath + '/' + dir.name : dir.name), dir.name); }}>Download ZIP</button>
                   </div>
                 {/if}
               </div>
@@ -1019,6 +1231,9 @@ import { replaceState } from '$app/navigation';
           </div>
           <div class="dir-info">
             <span class="dir-name">{dir.name}</span>
+            {#if dir.relative_path && dir.relative_path !== dir.name}
+              <span class="dir-path" style="font-size: 0.75rem; color: #888; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title={dir.relative_path}>{dir.relative_path}</span>
+            {/if}
             {#if !isFolderOnly}
               <div class="dir-actions" use:clickOutside={() => { if (activeFolderMenu === dir.name) activeFolderMenu = null; }}>
                 <button class="icon-btn" onclick={(e) => toggleFolderMenu(dir.name, e)} title="Options">
@@ -1027,7 +1242,7 @@ import { replaceState } from '$app/navigation';
                 {#if activeFolderMenu === dir.name}
                   <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
                     <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
-                    <button onclick={() => { activeFolderMenu = null; startFolderZipDownload(data.folderPath ? data.folderPath + '/' + dir.name : dir.name, dir.name); }}>Download ZIP</button>
+                    <button onclick={() => { activeFolderMenu = null; startFolderZipDownload(dir.path || (data.folderPath ? data.folderPath + '/' + dir.name : dir.name), dir.name); }}>Download ZIP</button>
                   </div>
                 {/if}
               </div>
@@ -1040,7 +1255,7 @@ import { replaceState } from '$app/navigation';
 {/if}
 {/key}
 
-{#if data.directories.length === 0 && data.files.length === 0}
+{#if !isSearching && data.directories.length === 0 && data.files.length === 0}
   <div class="empty-state">
     <h3 style="color: var(--text-color); margin-bottom: 8px;">This folder is empty</h3>
     <p style="color: #a1a1aa; max-width: 400px; margin: 0 auto;">There are no files or subfolders here yet.</p>
@@ -1048,24 +1263,117 @@ import { replaceState } from '$app/navigation';
 {/if}
 
 {#key data.folderPath}
-<div class="grid {viewMode}">
-  {#each visibleFiles as file, i}
-    <BlurhashImage 
-      hash={file.blurhash || ''} 
-      src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
-      alt={file.file_name} 
-      fileName={file.file_name}
-      showFileName={showFileNames}
-      isVideo={file.mime_type.startsWith('video/')}
-      onclick={() => openLightbox(i)}
-      objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
-      square={viewMode.includes('square')}
-      targetHeight={viewMode.includes('small') ? (windowWidth <= 768 ? 100 : 150) : viewMode.includes('large') ? (windowWidth <= 768 ? 200 : 350) : 250}
-      priority={i < 8}
-      initialAspectRatio={getAspectRatio(file)}
-    />
-  {/each}
-</div>
+{#if viewMode === 'compact-list' && (sortedFiles.length > 0 || isSearching)}
+  <div class="compact-media-list">
+    <div class="compact-list-header">
+      <button 
+        type="button" 
+        class="compact-th col-name" 
+        onclick={() => { sortMode = sortMode === 'a-z' ? 'z-a' : 'a-z'; }}
+        title="Sort by Name"
+      >
+        <span>Name</span>
+        {#if sortMode === 'a-z'}
+          <span class="sort-indicator">↑</span>
+        {:else if sortMode === 'z-a'}
+          <span class="sort-indicator">↓</span>
+        {/if}
+      </button>
+      <button 
+        type="button" 
+        class="compact-th col-date" 
+        onclick={() => { sortMode = sortMode === 'newest' ? 'oldest' : 'newest'; }}
+        title="Sort by Date"
+      >
+        <span>Date</span>
+        {#if sortMode === 'newest'}
+          <span class="sort-indicator">↓</span>
+        {:else if sortMode === 'oldest'}
+          <span class="sort-indicator">↑</span>
+        {/if}
+      </button>
+      <div class="compact-th col-res">
+        <span>Dimensions</span>
+      </div>
+      <div class="compact-th col-size">
+        <span>Size</span>
+      </div>
+      <div class="compact-th col-actions"></div>
+    </div>
+    <div class="compact-list-body">
+      {#if isSearching && !isSearchLoading && sortedFiles.length === 0}
+        <div class="compact-empty-state">
+          <p class="empty-title">{sortedDirectories.length === 0 ? `No media or folders found matching "${searchQuery}"` : `No media found matching "${searchQuery}"`}</p>
+          <p class="empty-subtitle">Check the spelling or try searching for a different name</p>
+          <button class="btn" onclick={clearSearch} style="margin-top: 10px; background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: white;">
+            Clear Search
+          </button>
+        </div>
+      {:else}
+        {#each visibleFiles as file, i (file.id)}
+        {@const isVideo = file.mime_type.startsWith('video/')}
+        <div 
+          class="compact-row" 
+          role="button" 
+          tabindex="0"
+          onclick={() => openLightbox(i)}
+          onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox(i); } }}
+          title={`Open ${file.file_name}`}
+        >
+          <div class="col-name">
+            <span class="file-icon" class:video={isVideo}>
+              {#if isVideo}
+                <Film size={16} />
+              {:else}
+                <ImageIcon size={16} />
+              {/if}
+            </span>
+            <div style="display: flex; flex-direction: column; overflow: hidden; min-width: 0;">
+              <span class="file-name" title={file.file_name}>{file.file_name}</span>
+              {#if isSearching && file.relative_path && file.relative_path !== file.file_name}
+                <span class="file-path" style="font-size: 0.75rem; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title={file.relative_path}>{file.relative_path.slice(0, file.relative_path.lastIndexOf('/'))}</span>
+              {/if}
+            </div>
+          </div>
+          <div class="col-date">{formatFileDate(file)}</div>
+          <div class="col-res">{getFileDimensions(file)}</div>
+          <div class="col-size">{formatBytes(file.size_bytes)}</div>
+          <div class="col-actions" onclick={(e) => e.stopPropagation()}>
+            <a 
+              href={`${getStreamUrl(file.id)}?download=1`} 
+              download={file.file_name} 
+              class="compact-action-btn" 
+              title="Download"
+              aria-label="Download"
+            >
+              <Download size={15} />
+            </a>
+          </div>
+        </div>
+      {/each}
+      {/if}
+    </div>
+  </div>
+{:else}
+  <div class="grid {viewMode}">
+    {#each visibleFiles as file, i}
+      <BlurhashImage 
+        hash={file.blurhash || ''} 
+        src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
+        alt={file.file_name} 
+        fileName={isSearching && file.relative_path ? file.relative_path : file.file_name}
+        showFileName={showFileNames || isSearching}
+        isVideo={file.mime_type.startsWith('video/')}
+        onclick={() => openLightbox(i)}
+        objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
+        square={viewMode.includes('square')}
+        targetHeight={viewMode.includes('small') ? (windowWidth <= 768 ? 100 : 150) : viewMode.includes('large') ? (windowWidth <= 768 ? 200 : 350) : 250}
+        priority={i < 8}
+        initialAspectRatio={getAspectRatio(file)}
+      />
+    {/each}
+  </div>
+{/if}
 {#if visibleCount < sortedFiles.length}
   <div use:infiniteScroll style="height: 20px; width: 100%;"></div>
 {/if}
@@ -2236,6 +2544,190 @@ import { replaceState } from '$app/navigation';
     content: "";
     flex-grow: 999999999;
   }
+
+  /* Compact Media List */
+  .compact-media-list {
+    margin-bottom: 48px;
+    background: rgba(20, 20, 25, 0.4);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .compact-list-header {
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--glass-border);
+    padding: 0 16px;
+    height: 38px;
+  }
+
+  .compact-th {
+    background: none;
+    border: none;
+    color: #a1a1aa;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: inherit;
+    cursor: default;
+    user-select: none;
+  }
+
+  button.compact-th {
+    cursor: pointer;
+    transition: color 0.15s ease;
+  }
+
+  button.compact-th:hover {
+    color: #f4f4f5;
+  }
+
+  .sort-indicator {
+    font-size: 0.85rem;
+    color: #3b82f6;
+    line-height: 1;
+  }
+
+  .compact-list-body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .compact-row {
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    height: 40px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    color: var(--text-color, #f4f4f5);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .compact-row:last-child {
+    border-bottom: none;
+  }
+
+  .compact-row:nth-child(even) {
+    background: rgba(255, 255, 255, 0.015);
+  }
+
+  .compact-row:hover,
+  .compact-row:focus-visible {
+    background: rgba(255, 255, 255, 0.07);
+    outline: none;
+  }
+
+  .compact-media-list .col-name {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-right: 12px;
+  }
+
+  .compact-media-list .file-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #60a5fa;
+    flex-shrink: 0;
+  }
+
+  .compact-media-list .file-icon.video {
+    color: #c084fc;
+  }
+
+  .compact-media-list .file-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 450;
+  }
+
+  .compact-media-list .col-date {
+    width: 140px;
+    flex-shrink: 0;
+    color: #a1a1aa;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  .compact-media-list .col-res {
+    width: 130px;
+    flex-shrink: 0;
+    color: #a1a1aa;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  .compact-media-list .col-size {
+    width: 80px;
+    flex-shrink: 0;
+    color: #a1a1aa;
+    font-size: 0.8rem;
+    text-align: right;
+    white-space: nowrap;
+    justify-content: flex-end;
+  }
+
+  .compact-media-list .col-actions {
+    width: 44px;
+    flex-shrink: 0;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .compact-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    color: #a1a1aa;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none;
+  }
+
+  .compact-action-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  @media (max-width: 768px) {
+    .compact-media-list .col-res {
+      display: none;
+    }
+    .compact-media-list .col-date {
+      width: 110px;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .compact-media-list .col-date {
+      display: none;
+    }
+    .compact-media-list {
+      margin-left: -12px;
+      margin-right: -12px;
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+    }
+  }
   @media (max-width: 768px) {
     .sticky-header {
       padding: calc(24px - (14px * var(--scroll-prog))) 24px;
@@ -2297,6 +2789,101 @@ import { replaceState } from '$app/navigation';
     padding: 64px 24px;
     text-align: center;
     min-height: 400px;
+  }
+  .folder-search-bar {
+    width: 100%;
+    margin-top: 14px;
+    z-index: 10;
+  }
+  .search-input-wrapper {
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 0 12px;
+    height: 42px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .search-input-wrapper:focus-within {
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.12);
+  }
+  :global(.search-spinner) {
+    animation: spin 1s linear infinite;
+    color: #93c5fd;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+  :global(.search-icon) {
+    color: #a1a1aa;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .folder-search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-color, white);
+    font-size: 0.95rem;
+    font-family: inherit;
+    min-width: 0;
+  }
+  .folder-search-input::placeholder {
+    color: #888;
+  }
+  .search-close-btn {
+    background: transparent;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .search-close-btn:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .search-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 64px 24px;
+    text-align: center;
+    min-height: 280px;
+  }
+  .compact-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    text-align: center;
+    width: 100%;
+  }
+  .empty-title {
+    font-size: 1.15rem;
+    font-weight: 500;
+    color: var(--text-color, white);
+    margin-bottom: 6px;
+  }
+  .empty-subtitle {
+    font-size: 0.875rem;
+    color: #a1a1aa;
+    margin-bottom: 16px;
   }
   @media (min-width: 769px) {
     .mobile-only-back {

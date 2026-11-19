@@ -309,7 +309,7 @@
     return panzoomModulePromise;
   }
 
-  let pzInstance: any = $state(null);
+  let pzInstance: any = null;
   let currentZoom = $state(1);
   let showZoomSlider = $state(false);
 

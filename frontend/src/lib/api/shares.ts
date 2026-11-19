@@ -116,3 +116,21 @@ export async function respondAccessRequest(requestId: string, payload: { action:
   const data = await res.json();
   return data.shareToken;
 }
+
+export async function searchShareContent(
+  token: string,
+  subpath: string,
+  queryText: string,
+  fetchFn: typeof fetch = fetch,
+  signal?: AbortSignal
+): Promise<{ files: any[], directories: any[] }> {
+  const pathPart = subpath ? `/${encodeURIComponent(subpath)}` : '';
+  const url = `${API_BASE}/api/shares/${token}${pathPart}?q=${encodeURIComponent(queryText)}`;
+  const res = await fetchFn(url, { signal });
+  if (!res.ok) throw new Error('Failed to search share');
+  const data = await res.json();
+  return {
+    files: data.files || [],
+    directories: data.directories || []
+  };
+}

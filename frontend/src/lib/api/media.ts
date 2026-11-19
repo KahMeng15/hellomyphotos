@@ -9,6 +9,10 @@ export interface MediaFile {
   aspectRatio?: number;
   folder_cover_id?: string | null;
   is_transcoded?: boolean;
+  img_width?: number | null;
+  img_height?: number | null;
+  created_at?: string | null;
+  relative_path?: string;
 }
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -20,6 +24,25 @@ export interface DirectoryInfo {
   cover_bounding_box?: any;
   cover_img_width?: number | null;
   cover_img_height?: number | null;
+  path?: string;
+  relative_path?: string;
+  path_from_share?: string;
+}
+
+export async function searchFolderContent(
+  folderPath: string,
+  queryText: string,
+  fetchFn: typeof fetch = fetch,
+  signal?: AbortSignal
+): Promise<{ files: MediaFile[], directories: DirectoryInfo[] }> {
+  const queryParam = `?q=${encodeURIComponent(queryText)}`;
+  const res = await fetchFn(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}${queryParam}`, { credentials: 'include', signal });
+  if (!res.ok) throw new Error('Failed to search folder');
+  const data = await res.json();
+  return {
+    files: data.files || [],
+    directories: data.directories || []
+  };
 }
 
 export async function fetchFolderContent(
@@ -170,11 +193,36 @@ export function getFolderZipUrl(folderPath: string, token?: string): string {
   return `${API_BASE}/api/zip/${encodeURIComponent(folderPath || '')}${token ? `?shareToken=${token}` : ''}`;
 }
 
-export async function prepareFolderZip(folderPath: string, token?: string): Promise<{ jobId: string, totalFiles: number }> {
+export interface ZipPartInfo {
+  partIndex: number;
+  filename: string;
+  sizeBytes: number;
+  totalFiles: number;
+  status: 'pending' | 'zipping' | 'ready' | 'error';
+}
+
+export interface ZipStatusResponse {
+  status: 'pending' | 'zipping' | 'ready' | 'error';
+  progress: number;
+  processedFiles: number;
+  totalFiles: number;
+  totalBytes: number;
+  totalParts: number;
+  currentPartIndex: number;
+  partSize?: string;
+  parts: ZipPartInfo[];
+  error?: string;
+}
+
+export async function prepareFolderZip(
+  folderPath: string, 
+  token?: string,
+  partSize?: 'single' | '2gb' | '4gb' | '8gb'
+): Promise<{ jobId: string; totalFiles: number; totalParts: number; partSize: string; reused?: boolean }> {
   const res = await fetch(`${API_BASE}/api/zip/prepare`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folderPath, shareToken: token }),
+    body: JSON.stringify({ folderPath, shareToken: token, partSize }),
     credentials: 'include'
   });
   if (!res.ok) {
@@ -184,14 +232,7 @@ export async function prepareFolderZip(folderPath: string, token?: string): Prom
   return res.json();
 }
 
-export async function getZipJobStatus(jobId: string, token?: string): Promise<{
-  status: 'pending' | 'zipping' | 'ready' | 'error';
-  progress: number;
-  processedFiles: number;
-  totalFiles: number;
-  totalBytes: number;
-  error?: string;
-}> {
+export async function getZipJobStatus(jobId: string, token?: string): Promise<ZipStatusResponse> {
   const res = await fetch(`${API_BASE}/api/zip/status/${jobId}${token ? `?shareToken=${token}` : ''}`, {
     credentials: 'include'
   });
@@ -199,8 +240,11 @@ export async function getZipJobStatus(jobId: string, token?: string): Promise<{
   return res.json();
 }
 
-export function getZipDownloadUrl(jobId: string, token?: string): string {
-  return `${API_BASE}/api/zip/download/${jobId}${token ? `?shareToken=${token}` : ''}`;
+export function getZipDownloadUrl(jobId: string, token?: string, partIndex?: number): string {
+  const base = partIndex != null
+    ? `${API_BASE}/api/zip/download/${jobId}/${partIndex}`
+    : `${API_BASE}/api/zip/download/${jobId}`;
+  return `${base}${token ? `?shareToken=${token}` : ''}`;
 }
 
 export function getFaceThumbnailUrl(personId: string): string {

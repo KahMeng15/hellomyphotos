@@ -1,8 +1,40 @@
 
 
+<script module lang="ts">
+  import { decode } from 'blurhash';
+
+  const blurhashPixelCache = new Map<string, Uint8ClampedArray>();
+  let sharedObserver: IntersectionObserver | null = null;
+  const observerCallbacks = new Map<Element, () => void>();
+
+  function observeElement(el: Element, cb: () => void) {
+    if (typeof window === 'undefined') return () => {};
+    if (!sharedObserver) {
+      sharedObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const callback = observerCallbacks.get(entry.target);
+            if (callback) {
+              callback();
+              sharedObserver?.unobserve(entry.target);
+              observerCallbacks.delete(entry.target);
+            }
+          }
+        }
+      }, { rootMargin: '300px' });
+    }
+    observerCallbacks.set(el, cb);
+    sharedObserver.observe(el);
+
+    return () => {
+      observerCallbacks.delete(el);
+      sharedObserver?.unobserve(el);
+    };
+  }
+</script>
+
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { decode } from 'blurhash';
   import { Play } from '@lucide/svelte';
 
   let { 
@@ -43,7 +75,6 @@
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
-  let observer: IntersectionObserver;
   // `visible`: card is scrolled into view — decode blurhash and start loading the image.
   let visible = $state(priority); // If priority, is visible immediately during SSR
   let container: HTMLDivElement | undefined = $state();
@@ -56,7 +87,6 @@
   // Randomize the start of the shimmer animation so they don't all pulse in sync
   let randomDelay = Math.random() * 1.5;
 
-  
   let retryCount = $state(0);
   const MAX_RETRIES = 10;
   let retryTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -130,10 +160,18 @@
   let effectiveSrc = $derived(retrySrc || src);
 
   $effect(() => {
-    // Decode blurhash only when visible
-    if (visible && hash && canvas) {
+    // Decode blurhash only when visible and not yet loaded
+    if (visible && hash && canvas && !imgLoaded) {
       try {
-        const pixels = decode(hash, 16, 16);
+        let pixels = blurhashPixelCache.get(hash);
+        if (!pixels) {
+          pixels = decode(hash, 16, 16);
+          if (blurhashPixelCache.size > 500) {
+            const firstKey = blurhashPixelCache.keys().next().value;
+            if (firstKey) blurhashPixelCache.delete(firstKey);
+          }
+          blurhashPixelCache.set(hash, pixels);
+        }
         const ctx = canvas.getContext('2d');
         if (ctx) {
           const imageData = ctx.createImageData(16, 16);
@@ -147,26 +185,15 @@
   });
 
   onMount(() => {
-
-    // Lazy load image using Intersection Observer ONLY if it's not a priority image
-    if (!priority) {
-      // Stage 2: when actually in view, decode the blurhash and load the real image
-      observer = new IntersectionObserver((entries) => {
-        if (entries[0].isIntersecting) {
-          visible = true;
-          observer.disconnect();
-        }
-      }, { rootMargin: '200px' });
-
-      if (container) observer.observe(container);
-
-      return () => {
-        if (observer) observer.disconnect();
-      };
+    let unobserve: (() => void) | undefined;
+    if (!priority && container) {
+      unobserve = observeElement(container, () => {
+        visible = true;
+      });
     }
 
     return () => {
-      if (observer) observer.disconnect();
+      if (unobserve) unobserve();
       if (retryTimeout) clearTimeout(retryTimeout);
     };
   });
@@ -176,7 +203,9 @@
   <div bind:this={container} class="image-container" style="height: {objectFit === 'cover' ? '100%' : 'auto'}; aspect-ratio: {objectFit === 'cover' ? (square ? 1 : aspectRatio) : aspectRatio};">
     <div class="zoom-wrapper {visible ? '' : 'skeleton'}" style="animation-delay: -{randomDelay}s;">
       {#if visible}
-        <canvas bind:this={canvas} width="16" height="16" class:loaded={imgLoaded} style="{faceBox && transformString ? `transform: ${transformString};` : ''}"></canvas>
+        {#if !imgLoaded}
+          <canvas bind:this={canvas} width="16" height="16" style="{faceBox && transformString ? `transform: ${transformString};` : ''}"></canvas>
+        {/if}
         <img src={effectiveSrc} {alt} onload={handleLoad} onerror={handleError} fetchpriority={priority ? "high" : "auto"} loading={priority ? "eager" : "lazy"} class:loaded={imgLoaded} style="object-fit: {objectFit}; height: {objectFit === 'cover' ? '100%' : 'auto'}; object-position: {objectPosition}; {faceBox && transformString ? `transform: ${transformString};` : ''}" />
       {/if}
     </div>
@@ -200,6 +229,7 @@
     position: relative;
     border-radius: 0;
     content-visibility: auto;
+    contain-intrinsic-size: 200px 200px;
   }
   
   .grid-item:hover .zoom-wrapper {

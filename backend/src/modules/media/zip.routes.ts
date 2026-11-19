@@ -21,11 +21,24 @@ try {
   console.error('[ZIP] Failed to create TEMP_ZIP_DIR:', e);
 }
 
+interface ZipPart {
+  partIndex: number;
+  filename: string;
+  filePath: string;
+  totalFiles: number;
+  processedFiles: number;
+  sizeBytes: number;
+  status: 'pending' | 'zipping' | 'ready' | 'error';
+}
+
 interface ZipJob {
   id: string;
   folderPath: string;
-  zipFilename: string;
-  filePath: string;
+  baseFilename: string;
+  partSize: 'single' | '2gb' | '4gb' | '8gb';
+  totalParts: number;
+  currentPartIndex: number;
+  parts: ZipPart[];
   status: 'pending' | 'zipping' | 'ready' | 'error';
   progress: number;
   processedFiles: number;
@@ -47,11 +60,15 @@ function scheduleJobDeletion(jobId: string, delayMs = 5 * 60 * 1000) {
   if (job.deleteTimer) clearTimeout(job.deleteTimer);
   job.deleteTimer = setTimeout(() => {
     try {
-      if (fs.existsSync(job.filePath)) {
-        fs.unlinkSync(job.filePath);
+      if (job.parts && job.parts.length > 0) {
+        for (const part of job.parts) {
+          if (fs.existsSync(part.filePath)) {
+            fs.unlinkSync(part.filePath);
+          }
+        }
       }
     } catch (err) {
-      console.error(`[ZIP] Failed to delete temp zip ${job.filePath}:`, err);
+      console.error(`[ZIP] Failed to delete temp zip parts for job ${job.id}:`, err);
     }
     zipJobs.delete(jobId);
   }, delayMs);
@@ -79,6 +96,12 @@ function cleanupStaleZips() {
 cleanupStaleZips();
 setInterval(cleanupStaleZips, 5 * 60 * 1000);
 
+const PART_SIZE_MAP: Record<string, number> = {
+  '2gb': 2 * 1024 * 1024 * 1024,
+  '4gb': 4 * 1024 * 1024 * 1024,
+  '8gb': 8 * 1024 * 1024 * 1024,
+};
+
 export async function zipRoutes(fastify: FastifyInstance) {
   // 1. Prepare / Pre-zip endpoint
   fastify.post('/api/zip/prepare', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -87,6 +110,7 @@ export async function zipRoutes(fastify: FastifyInstance) {
     const folderPath = decodeURIComponent(body.folderPath ?? queryParams.folderPath ?? '');
     const shareToken = body.shareToken || queryParams.shareToken;
     const watermark = body.watermark || queryParams.watermark;
+    const partSize = (body.partSize || queryParams.partSize || 'single') as 'single' | '2gb' | '4gb' | '8gb';
 
     if (shareToken && !(request.query as any)?.shareToken) {
       (request.query as any).shareToken = shareToken;
@@ -128,45 +152,107 @@ export async function zipRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'No files found on disk for this folder.' });
     }
 
-    // Compute content fingerprint across all files in this folder & its subfolders
-    // Checks file paths, byte sizes, and disk modification timestamps.
+    // Compute content fingerprint incorporating folder files and partSize
     const hash = crypto.createHash('md5');
+    hash.update(`partSize:${partSize}\n`);
     for (const file of existingFiles) {
       hash.update(`${file.folderPath}/${file.fileName}:${file.sizeBytes}:${file.mtimeMs}\n`);
     }
     const currentFingerprint = hash.digest('hex');
 
-    // Smart check: Reuse existing temporary zip if content hasn't changed and reset deletion timer
+    // Smart check: Reuse existing temporary zip parts if content & part size haven't changed
     for (const [id, existingJob] of zipJobs.entries()) {
       if (existingJob.folderPath === folderPath && existingJob.watermark === watermark) {
-        if (existingJob.contentFingerprint === currentFingerprint && fs.existsSync(existingJob.filePath)) {
-          if (existingJob.status === 'ready') {
-            console.log(`[ZIP] Reusing existing temp zip for "${folderPath}". Resetting 5-minute deletion timer.`);
-            scheduleJobDeletion(id, 5 * 60 * 1000);
-            return reply.send({ jobId: id, totalFiles: existingJob.totalFiles, reused: true });
-          } else if (existingJob.status === 'zipping') {
-            console.log(`[ZIP] Reusing in-progress zip job for "${folderPath}".`);
-            return reply.send({ jobId: id, totalFiles: existingJob.totalFiles, reused: true });
+        if (existingJob.contentFingerprint === currentFingerprint) {
+          const allPartsExist = existingJob.parts && existingJob.parts.length > 0 &&
+            existingJob.parts.every(p => fs.existsSync(p.filePath));
+
+          if (allPartsExist) {
+            if (existingJob.status === 'ready') {
+              console.log(`[ZIP] Reusing existing temp zip(s) for "${folderPath}". Resetting 5-minute deletion timer.`);
+              scheduleJobDeletion(id, 5 * 60 * 1000);
+              return reply.send({
+                jobId: id,
+                totalFiles: existingJob.totalFiles,
+                totalParts: existingJob.totalParts,
+                partSize: existingJob.partSize,
+                reused: true
+              });
+            } else if (existingJob.status === 'zipping') {
+              console.log(`[ZIP] Reusing in-progress zip job for "${folderPath}".`);
+              return reply.send({
+                jobId: id,
+                totalFiles: existingJob.totalFiles,
+                totalParts: existingJob.totalParts,
+                partSize: existingJob.partSize,
+                reused: true
+              });
+            }
           }
         } else {
-          // Content has changed or file is missing; remove outdated job
+          // Content or part size has changed; clean up old job parts
           try {
-            if (fs.existsSync(existingJob.filePath)) fs.unlinkSync(existingJob.filePath);
+            if (existingJob.parts) {
+              for (const p of existingJob.parts) {
+                if (fs.existsSync(p.filePath)) fs.unlinkSync(p.filePath);
+              }
+            }
           } catch {}
           zipJobs.delete(id);
         }
       }
     }
 
+    // Partition files into standalone parts based on chosen size threshold
+    const maxBytesPerPart = PART_SIZE_MAP[partSize] || Infinity;
+    const partsFiles: Array<typeof existingFiles> = [];
+    let currentPart: typeof existingFiles = [];
+    let currentPartBytes = 0;
+
+    for (const file of existingFiles) {
+      if (currentPart.length > 0 && (currentPartBytes + file.sizeBytes > maxBytesPerPart)) {
+        partsFiles.push(currentPart);
+        currentPart = [];
+        currentPartBytes = 0;
+      }
+      currentPart.push(file);
+      currentPartBytes += file.sizeBytes;
+    }
+    if (currentPart.length > 0) {
+      partsFiles.push(currentPart);
+    }
+
+    const totalParts = partsFiles.length;
+    const baseName = (folderPath ? folderPath.split('/').pop() : 'Home_Photos') || 'Photos';
+    const totalPadded = String(totalParts).padStart(2, '0');
     const jobId = crypto.randomUUID();
-    const zipFilename = folderPath ? folderPath.split('/').pop() : 'Home_Photos';
-    const tempFilePath = path.join(TEMP_ZIP_DIR, `${jobId}.zip`);
+
+    const parts: ZipPart[] = partsFiles.map((pFiles, idx) => {
+      const partIndex = idx + 1;
+      const filename = totalParts === 1
+        ? `${baseName}.zip`
+        : `${baseName}_Part_${String(partIndex).padStart(2, '0')}_of_${totalPadded}.zip`;
+      const filePath = path.join(TEMP_ZIP_DIR, `${jobId}_part${partIndex}.zip`);
+
+      return {
+        partIndex,
+        filename,
+        filePath,
+        totalFiles: pFiles.length,
+        processedFiles: 0,
+        sizeBytes: 0,
+        status: 'pending'
+      };
+    });
 
     const job: ZipJob = {
       id: jobId,
       folderPath,
-      zipFilename: zipFilename || 'Photos',
-      filePath: tempFilePath,
+      baseFilename: baseName,
+      partSize,
+      totalParts,
+      currentPartIndex: 1,
+      parts,
       status: 'zipping',
       progress: 0,
       processedFiles: 0,
@@ -180,69 +266,81 @@ export async function zipRoutes(fastify: FastifyInstance) {
 
     zipJobs.set(jobId, job);
 
-    // Asynchronous background pre-zipping
+    // Asynchronous background packaging of all parts sequentially
     (async () => {
-      const output = fs.createWriteStream(tempFilePath);
-      const archive = new ZipArchive({
-        zlib: { level: 0 } // Store mode: ultra fast, no CPU waste on compressed media
-      });
+      for (let pIdx = 0; pIdx < parts.length; pIdx++) {
+        const part = parts[pIdx];
+        job.currentPartIndex = pIdx + 1;
+        part.status = 'zipping';
 
-      archive.pipe(output);
+        await new Promise<void>((resolve, reject) => {
+          const output = fs.createWriteStream(part.filePath);
+          const archive = new ZipArchive({
+            zlib: { level: 0 },
+            forceZip64: maxBytesPerPart >= 4 * 1024 * 1024 * 1024
+          });
 
-      archive.on('error', (err: any) => {
-        console.error('[ZIP] Archiver error:', err);
-        job.status = 'error';
-        job.error = err.message || 'Archiver error';
-      });
+          archive.pipe(output);
 
-      output.on('error', (err: any) => {
-        console.error('[ZIP] Output write error:', err);
-        job.status = 'error';
-        job.error = err.message || 'Write error';
-      });
+          archive.on('error', (err: any) => {
+            console.error(`[ZIP] Archiver error on part ${part.partIndex}:`, err);
+            reject(err);
+          });
 
-      output.on('finish', () => {
-        try {
-          if (fs.existsSync(tempFilePath)) {
-            const stat = fs.statSync(tempFilePath);
-            job.totalBytes = stat.size;
-            job.status = 'ready';
-            job.progress = 100;
-            // Failsafe: if user never initiates download, delete after 15 minutes
-            scheduleJobDeletion(jobId, 15 * 60 * 1000);
-          } else {
-            job.status = 'error';
-            job.error = 'Temporary zip file was not found on completion.';
-          }
-        } catch (e: any) {
-          job.status = 'error';
-          job.error = e.message;
-        }
-      });
+          output.on('error', (err: any) => {
+            console.error(`[ZIP] Write error on part ${part.partIndex}:`, err);
+            reject(err);
+          });
 
-      for (let i = 0; i < existingFiles.length; i++) {
-        const file = existingFiles[i];
-        const relativeName = file.folderPath === folderPath
-          ? file.fileName
-          : path.relative(folderPath, path.join(file.folderPath, file.fileName));
+          output.on('finish', () => {
+            try {
+              if (fs.existsSync(part.filePath)) {
+                const stat = fs.statSync(part.filePath);
+                part.sizeBytes = stat.size;
+                part.status = 'ready';
+                resolve();
+              } else {
+                reject(new Error(`Temporary zip part ${part.filePath} not found on finish.`));
+              }
+            } catch (e) {
+              reject(e);
+            }
+          });
 
-        if (shouldWatermark && file.mimeType?.startsWith('image/')) {
-          try {
-            const buffer = await WatermarkService.addWatermarkToStream(file.fullPath);
-            archive.append(buffer, { name: relativeName });
-          } catch (e) {
-            console.error('[ZIP] Failed to watermark in zip:', e);
-            archive.file(file.fullPath, { name: relativeName });
-          }
-        } else {
-          archive.file(file.fullPath, { name: relativeName });
-        }
+          (async () => {
+            const fileList = partsFiles[pIdx];
+            for (let i = 0; i < fileList.length; i++) {
+              const file = fileList[i];
+              const relativeName = file.folderPath === folderPath
+                ? file.fileName
+                : path.relative(folderPath, path.join(file.folderPath, file.fileName));
 
-        job.processedFiles = i + 1;
-        job.progress = Math.round(((i + 1) / existingFiles.length) * 100);
+              if (shouldWatermark && file.mimeType?.startsWith('image/')) {
+                try {
+                  const buffer = await WatermarkService.addWatermarkToStream(file.fullPath);
+                  archive.append(buffer, { name: relativeName });
+                } catch (e) {
+                  console.error('[ZIP] Failed to watermark in zip:', e);
+                  archive.file(file.fullPath, { name: relativeName });
+                }
+              } else {
+                archive.file(file.fullPath, { name: relativeName });
+              }
+
+              part.processedFiles++;
+              job.processedFiles++;
+              job.progress = Math.round((job.processedFiles / job.totalFiles) * 100);
+            }
+
+            await archive.finalize();
+          })().catch(reject);
+        });
       }
 
-      await archive.finalize();
+      job.status = 'ready';
+      job.progress = 100;
+      job.totalBytes = job.parts.reduce((sum, p) => sum + p.sizeBytes, 0);
+      scheduleJobDeletion(jobId, 15 * 60 * 1000);
     })().catch(err => {
       console.error('[ZIP] Background zip error:', err);
       job.status = 'error';
@@ -251,7 +349,9 @@ export async function zipRoutes(fastify: FastifyInstance) {
 
     return reply.send({
       jobId,
-      totalFiles: existingFiles.length
+      totalFiles: existingFiles.length,
+      totalParts: job.totalParts,
+      partSize: job.partSize
     });
   });
 
@@ -272,25 +372,41 @@ export async function zipRoutes(fastify: FastifyInstance) {
       processedFiles: job.processedFiles,
       totalFiles: job.totalFiles,
       totalBytes: job.totalBytes,
+      totalParts: job.totalParts,
+      currentPartIndex: job.currentPartIndex,
+      partSize: job.partSize,
+      parts: job.parts.map(p => ({
+        partIndex: p.partIndex,
+        filename: p.filename,
+        sizeBytes: p.sizeBytes,
+        totalFiles: p.totalFiles,
+        status: p.status
+      })),
       error: job.error
     });
   });
 
-  // 3. Download endpoint (serves the pre-zipped file with full Content-Length and resets 5-minute cleanup)
-  fastify.get<{ Params: { jobId: string }, Querystring: { shareToken?: string } }>('/api/zip/download/:jobId', async (request, reply) => {
-    const { jobId } = request.params;
+  // Helper for serving a specific zip part
+  async function serveZipPart(request: FastifyRequest, reply: FastifyReply, jobId: string, partIndexParam?: string) {
     const job = zipJobs.get(jobId);
 
-    if (!job || !fs.existsSync(job.filePath)) {
-      return reply.status(404).send({ error: 'ZIP file not found or expired.' });
+    if (!job) {
+      return reply.status(404).send({ error: 'ZIP job not found or expired.' });
     }
 
     if (!(await verifyFolderAccess(request, reply, job.folderPath))) return;
 
+    const targetPartIndex = partIndexParam ? parseInt(partIndexParam, 10) : 1;
+    const targetPart = job.parts.find(p => p.partIndex === targetPartIndex);
+
+    if (!targetPart || !fs.existsSync(targetPart.filePath)) {
+      return reply.status(404).send({ error: `ZIP part ${targetPartIndex} not found or expired.` });
+    }
+
     AnalyticsService.logVisit({
       actionType: 'download_folder',
       folderPath: job.folderPath,
-      shareToken: request.query.shareToken || job.shareToken,
+      shareToken: (request.query as any)?.shareToken || job.shareToken,
       ip: request.ip,
       userAgent: request.headers['user-agent'] as string | undefined,
       referrer: request.headers.referer as string | undefined,
@@ -298,20 +414,20 @@ export async function zipRoutes(fastify: FastifyInstance) {
     });
 
     const isAuth = (request as any).user != null;
-    const stat = fs.statSync(job.filePath);
+    const stat = fs.statSync(targetPart.filePath);
     reply.header('Content-Type', 'application/zip');
-    reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(job.zipFilename || 'Photos')}.zip"`);
+    reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(targetPart.filename)}"`);
     reply.header('Content-Length', stat.size);
 
     const ip = request.ip || 'unknown';
     const limits = await getThrottleLimits();
     const globalLimit = isAuth ? limits.authGlobalLimit : limits.publicGlobalLimit;
 
-    const fileStream = fs.createReadStream(job.filePath);
+    const fileStream = fs.createReadStream(targetPart.filePath);
 
     // Reset deletion timer to 5 minutes after download completes
     reply.raw.on('finish', () => {
-      console.log(`[ZIP] Download completed for job ${job.id}. Deletion timer reset to 5 minutes.`);
+      console.log(`[ZIP] Download completed for job ${job.id} (part ${targetPart.partIndex}). Deletion timer reset to 5 minutes.`);
       scheduleJobDeletion(job.id, 5 * 60 * 1000);
     });
 
@@ -320,6 +436,15 @@ export async function zipRoutes(fastify: FastifyInstance) {
     } else {
       return reply.send(fileStream);
     }
+  }
+
+  // 3. Download endpoints (serves pre-zipped parts with full Content-Length and resets 5-minute cleanup)
+  fastify.get<{ Params: { jobId: string }, Querystring: { shareToken?: string, part?: string } }>('/api/zip/download/:jobId', async (request, reply) => {
+    return serveZipPart(request, reply, request.params.jobId, (request.query as any)?.part);
+  });
+
+  fastify.get<{ Params: { jobId: string; partIndex: string }, Querystring: { shareToken?: string } }>('/api/zip/download/:jobId/:partIndex', async (request, reply) => {
+    return serveZipPart(request, reply, request.params.jobId, request.params.partIndex);
   });
 
   // 4. Fallback direct stream endpoint

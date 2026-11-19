@@ -102,12 +102,21 @@
     sortMode = loadPref<SortMode>('timelineSortMode', data.defaultSortMode || 'newest');
     viewMode = loadPref<ViewMode>('timelineViewMode', data.defaultViewMode || 'small-fit');
 
+    let pollCount = 0;
+    const MAX_POLLS = 10;
     pollInterval = setInterval(() => {
-      const stillProcessing = data.files.some(f => !f.blurhash);
+      pollCount++;
+      if (pollCount > MAX_POLLS) {
+        clearInterval(pollInterval);
+        return;
+      }
+      const stillProcessing = data.files && data.files.some(f => !f.blurhash);
       if (stillProcessing) {
         invalidateAll();
+      } else {
+        clearInterval(pollInterval);
       }
-    }, 2000);
+    }, 5000);
 
     function updateStickyBottom() {
       const header = document.querySelector<HTMLElement>('.sticky-header');

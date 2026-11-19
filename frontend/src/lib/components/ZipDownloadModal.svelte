@@ -1,7 +1,7 @@
 <script lang="ts">
   import Modal from '$lib/components/Modal.svelte';
-  import { prepareFolderZip, getZipJobStatus, getZipDownloadUrl } from '$lib/api/media';
-  import { Loader2, Check, AlertCircle } from '@lucide/svelte';
+  import { prepareFolderZip, getZipJobStatus, getZipDownloadUrl, type ZipPartInfo } from '$lib/api/media';
+  import { Loader2, Check, AlertCircle, Archive, Download } from '@lucide/svelte';
 
   let {
     show = $bindable(false),
@@ -24,10 +24,15 @@
   let processedFiles = $state(0);
   let totalFiles = $state(0);
   let totalBytes = $state(0);
+  let totalParts = $state(1);
+  let currentPartIndex = $state(1);
+  let parts = $state<ZipPartInfo[]>([]);
   let errorMessage = $state('');
   let currentJobId = $state<string | null>(null);
   let pollInterval: any = null;
-  let downloadUrl = $state('');
+  let singleDownloadUrl = $state('');
+  let selectedPartSize = $state<'single' | '2gb' | '4gb' | '8gb'>('single');
+  let isDownloadingAll = $state(false);
 
   function stopPolling() {
     if (pollInterval) {
@@ -42,20 +47,56 @@
     if (onclose) onclose();
   }
 
-  async function startZipProcess() {
+  function triggerDownloadUrl(url: string, filename?: string) {
+    const a = document.createElement('a');
+    a.href = url;
+    if (filename) a.download = filename;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  function downloadSinglePart(partIdx: number, filename: string) {
+    if (!currentJobId) return;
+    const url = getZipDownloadUrl(currentJobId, shareToken, partIdx);
+    triggerDownloadUrl(url, filename);
+  }
+
+  function downloadAllParts() {
+    if (!currentJobId || parts.length === 0 || isDownloadingAll) return;
+    isDownloadingAll = true;
+    parts.forEach((p, index) => {
+      setTimeout(() => {
+        const url = getZipDownloadUrl(currentJobId!, shareToken, p.partIndex);
+        triggerDownloadUrl(url, p.filename);
+        if (index === parts.length - 1) {
+          setTimeout(() => { isDownloadingAll = false; }, 1000);
+        }
+      }, index * 750);
+    });
+  }
+
+  async function startZipProcess(chosenSize: 'single' | '2gb' | '4gb' | '8gb' = 'single') {
+    selectedPartSize = chosenSize;
     stopPolling();
     status = 'preparing';
     progress = 0;
     processedFiles = 0;
     totalFiles = 0;
     totalBytes = 0;
+    totalParts = 1;
+    currentPartIndex = 1;
+    parts = [];
     errorMessage = '';
-    downloadUrl = '';
+    singleDownloadUrl = '';
+    isDownloadingAll = false;
 
     try {
-      const res = await prepareFolderZip(folderPath, shareToken);
+      const res = await prepareFolderZip(folderPath, shareToken, chosenSize);
       currentJobId = res.jobId;
       totalFiles = res.totalFiles || 0;
+      totalParts = res.totalParts || 1;
       status = 'zipping';
 
       // Poll status every 750ms
@@ -67,15 +108,19 @@
           processedFiles = job.processedFiles;
           totalFiles = job.totalFiles;
           totalBytes = job.totalBytes;
+          totalParts = job.totalParts || 1;
+          currentPartIndex = job.currentPartIndex || 1;
+          parts = job.parts || [];
 
           if (job.status === 'ready') {
             stopPolling();
             status = 'ready';
             progress = 100;
-            const finalUrl = getZipDownloadUrl(currentJobId, shareToken);
-            downloadUrl = finalUrl;
-            // Automatically open download in new tab
-            window.open(finalUrl, '_blank');
+            if (totalParts === 1) {
+              const finalUrl = getZipDownloadUrl(currentJobId, shareToken);
+              singleDownloadUrl = finalUrl;
+              window.open(finalUrl, '_blank');
+            }
           } else if (job.status === 'error') {
             stopPolling();
             status = 'error';
@@ -94,7 +139,7 @@
   $effect(() => {
     if (show) {
       if (autoStart) {
-        startZipProcess();
+        startZipProcess('single');
       } else {
         status = 'idle';
       }
@@ -105,23 +150,53 @@
   });
 </script>
 
-<Modal bind:show={show} id="download-folder" title={status === 'ready' ? 'Download Ready' : 'Download Folder'}>
+<Modal bind:show={show} id="download-folder" title={status === 'ready' ? (totalParts > 1 ? 'Downloads Ready' : 'Download Ready') : 'Download Folder'}>
   {#if status === 'idle'}
-    <div>
+    <div style="display: flex; flex-direction: column; gap: 14px;">
       <button 
         class="btn" 
-        style="display: block; text-align: center; width: 100%; margin-bottom: 12px; background: var(--text-color); color: var(--bg-color);" 
-        onclick={startZipProcess}
+        style="display: block; text-align: center; width: 100%; padding: 12px; font-weight: 500; background: var(--text-color); color: var(--bg-color);" 
+        onclick={() => startZipProcess('single')}
       >
         Download All in One Zip
       </button>
-      <button 
-        class="btn" 
-        style="width: 100%; background: var(--glass-bg); border: 1px solid var(--glass-border); color: rgba(255, 255, 255, 0.4); cursor: not-allowed;" 
-        disabled
-      >
-        Download as Multi-part Zips (Coming Soon)
-      </button>
+
+      <div style="display: flex; align-items: center; gap: 10px; margin: 2px 0;">
+        <div style="flex: 1; height: 1px; background: var(--glass-border);"></div>
+        <span style="font-size: 0.75rem; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">or in parts</span>
+        <div style="flex: 1; height: 1px; background: var(--glass-border);"></div>
+      </div>
+
+      <div>
+        <div style="font-size: 0.85rem; font-weight: 500; margin-bottom: 4px; color: var(--text-color);">Download as Multi-part Zips</div>
+        <p class="zip-muted" style="margin-top: 0; margin-bottom: 10px; font-size: 0.8rem;">
+          Recommended for large folders. Splits files into standalone zip archives.
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+          <button 
+            class="btn multi-part-opt-btn"
+            onclick={() => startZipProcess('2gb')}
+          >
+            <span class="part-size-title">2 GB</span>
+            <span class="part-size-sub">Parts</span>
+          </button>
+          <button 
+            class="btn multi-part-opt-btn recommended-btn"
+            onclick={() => startZipProcess('4gb')}
+          >
+            <span class="part-size-title">4 GB</span>
+            <span class="part-size-sub">Recommended</span>
+          </button>
+          <button 
+            class="btn multi-part-opt-btn"
+            onclick={() => startZipProcess('8gb')}
+          >
+            <span class="part-size-title">8 GB</span>
+            <span class="part-size-sub">Parts</span>
+          </button>
+        </div>
+      </div>
     </div>
   {:else if status === 'preparing'}
     <div class="zip-progress-container">
@@ -134,7 +209,13 @@
   {:else if status === 'zipping'}
     <div class="zip-progress-container">
       <div class="zip-header-row">
-        <span>Archiving files...</span>
+        <span>
+          {#if totalParts > 1}
+            Archiving Part {currentPartIndex} of {totalParts}...
+          {:else}
+            Archiving files...
+          {/if}
+        </span>
         <span class="zip-pct">{progress}%</span>
       </div>
       
@@ -154,30 +235,78 @@
           <Check size={18} />
         </div>
         <div>
-          <div style="font-weight: 600; font-size: 1rem;">Archive Ready</div>
-          <div class="zip-muted">Download started automatically.</div>
+          <div style="font-weight: 600; font-size: 1rem;">
+            {totalParts > 1 ? `Archive Ready (${totalParts} Parts)` : 'Archive Ready'}
+          </div>
+          <div class="zip-muted">
+            {totalParts > 1 ? 'Download each part below or download all at once.' : 'Download started automatically.'}
+          </div>
         </div>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px;">
-        {#if downloadUrl}
-          <a 
-            href={downloadUrl} 
-            target="_blank" 
+      {#if totalParts > 1}
+        <div class="parts-list" style="margin-top: 14px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+          {#each parts as part}
+            <div class="part-item-row">
+              <div class="part-item-left">
+                <Archive size={16} class="part-icon" />
+                <span class="part-name" title={part.filename}>{part.filename}</span>
+              </div>
+              <button 
+                class="btn part-dl-btn" 
+                onclick={() => downloadSinglePart(part.partIndex, part.filename)}
+              >
+                <Download size={14} />
+                <span>Download</span>
+              </button>
+            </div>
+          {/each}
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px;">
+          <button 
             class="btn" 
-            style="display: block; text-align: center; text-decoration: none; width: 100%; background: var(--text-color); color: var(--bg-color);"
+            style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; background: var(--text-color); color: var(--bg-color);"
+            onclick={downloadAllParts}
+            disabled={isDownloadingAll}
           >
-            Click to Download Again
-          </a>
-        {/if}
-        <button 
-          class="btn" 
-          style="width: 100%; background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--text-color);" 
-          onclick={handleClose}
-        >
-          Close
-        </button>
-      </div>
+            {#if isDownloadingAll}
+              <Loader2 size={16} class="spinner" />
+              <span>Starting Downloads...</span>
+            {:else}
+              <Download size={16} />
+              <span>Download All Parts ({totalParts})</span>
+            {/if}
+          </button>
+          <button 
+            class="btn" 
+            style="width: 100%; background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--text-color);" 
+            onclick={handleClose}
+          >
+            Close
+          </button>
+        </div>
+      {:else}
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px;">
+          {#if singleDownloadUrl}
+            <a 
+              href={singleDownloadUrl} 
+              target="_blank" 
+              class="btn" 
+              style="display: block; text-align: center; text-decoration: none; width: 100%; background: var(--text-color); color: var(--bg-color);"
+            >
+              Click to Download Again
+            </a>
+          {/if}
+          <button 
+            class="btn" 
+            style="width: 100%; background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--text-color);" 
+            onclick={handleClose}
+          >
+            Close
+          </button>
+        </div>
+      {/if}
     </div>
   {:else if status === 'error'}
     <div class="zip-progress-container">
@@ -200,7 +329,7 @@
         <button 
           class="btn" 
           style="flex: 1; background: var(--text-color); color: var(--bg-color);" 
-          onclick={startZipProcess}
+          onclick={() => startZipProcess(selectedPartSize)}
         >
           Try Again
         </button>
@@ -227,6 +356,88 @@
     font-size: 0.85rem;
     color: #a1a1aa;
     margin-top: 6px;
+  }
+
+  .multi-part-opt-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 8px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-color);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+
+  .multi-part-opt-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+
+  .recommended-btn {
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .part-size-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+
+  .part-size-sub {
+    font-size: 0.72rem;
+    color: #a1a1aa;
+    margin-top: 2px;
+  }
+
+  .part-item-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
+    gap: 8px;
+  }
+
+  .part-item-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .part-name {
+    font-size: 0.85rem;
+    color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  :global(.part-icon) {
+    color: #a1a1aa;
+    flex-shrink: 0;
+  }
+
+  .part-dl-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    padding: 5px 10px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-color);
+    flex-shrink: 0;
+  }
+
+  .part-dl-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
   }
 
   .zip-header-row {
