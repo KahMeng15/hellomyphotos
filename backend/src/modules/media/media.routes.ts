@@ -92,11 +92,6 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     if (!(await verifyMediaAccess(request, reply, safeId))) return;
 
     const { watermark, shareToken, context } = request.query;
-    const cache1080Dir = path.resolve(CACHE_ROOT, '1080p');
-    const filePath = path.resolve(cache1080Dir, `${safeId}.webp`);
-    if (!filePath.startsWith(cache1080Dir + path.sep)) {
-      return reply.status(400).send({ error: 'Invalid ID' });
-    }
     
     if (context === 'lightbox') {
       AnalyticsService.logView(safeId, 'VIEW_1080P', 120000, shareToken);
@@ -111,13 +106,65 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       });
     }
 
+    const effectiveTemplate = await WatermarkService.getEffectiveTemplateForShare(shareToken);
+    const shouldWatermark = (watermark === 'true') || Boolean(effectiveTemplate?.apply_to_previews);
+
+    const cache1080Dir = path.resolve(CACHE_ROOT, '1080p');
+    const cache480Dir = path.resolve(CACHE_ROOT, '480p');
+
+    // Pick source tier: if HD is restricted and tier is 500px, use 480p for preview
+    let baseDir = cache1080Dir;
+    if (effectiveTemplate && !effectiveTemplate.allow_hd_download && effectiveTemplate.restricted_tier === '500px') {
+      baseDir = cache480Dir;
+    }
+
+    let filePath = path.resolve(baseDir, `${safeId}.webp`);
+    if (!fs.existsSync(filePath)) {
+      filePath = path.resolve(cache1080Dir, `${safeId}.webp`);
+      if (!fs.existsSync(filePath)) {
+        filePath = path.resolve(cache480Dir, `${safeId}.webp`);
+      }
+    }
+
     if (fs.existsSync(filePath)) {
       reply.header('Content-Type', 'image/webp');
-      
-      const wSettings = await WatermarkService.getSettings();
-      if (watermark === 'true' || wSettings.enforceGlobal) {
-        reply.header('Cache-Control', 'private, no-store');
-        const buffer = await WatermarkService.addWatermarkToStream(filePath);
+
+      if (shouldWatermark && effectiveTemplate) {
+        const tplVersion = effectiveTemplate.updated_at ? new Date(effectiveTemplate.updated_at).getTime() : 0;
+        const wmCacheDir = path.resolve(CACHE_ROOT, 'watermark_previews');
+        if (!fs.existsSync(wmCacheDir)) {
+          fs.mkdirSync(wmCacheDir, { recursive: true });
+        }
+        const wmCachedPath = path.resolve(wmCacheDir, `${safeId}_${effectiveTemplate.id}_${tplVersion}.webp`);
+
+        const etag = `"${safeId}-${effectiveTemplate.id}-${tplVersion}"`;
+        reply.header('ETag', etag);
+        reply.header('Cache-Control', 'private, max-age=86400');
+
+        if (request.headers['if-none-match'] === etag) {
+          return reply.status(304).send();
+        }
+
+        if (fs.existsSync(wmCachedPath)) {
+          return sendThrottled(request, reply, fs.createReadStream(wmCachedPath));
+        }
+
+        const metaRes = await query(
+          `SELECT file_name, folder_path, created_at, 
+                  exif_json->>'Make' as camera_make, 
+                  exif_json->>'Model' as camera_model, 
+                  exif_json->>'LensModel' as lens_model, 
+                  exif_json->>'ISO' as iso, 
+                  exif_json->>'ExposureTime' as shutter_speed, 
+                  exif_json->>'FNumber' as f_number, 
+                  exif_json->>'Copyright' as copyright 
+           FROM media_files WHERE id = $1`,
+          [safeId]
+        );
+        const buffer = await WatermarkService.addWatermarkToStream(filePath, effectiveTemplate, metaRes.rows[0], 'webp');
+        fs.promises.writeFile(wmCachedPath, buffer).catch((err) => {
+          console.error('[WatermarkCache] Write error:', err);
+        });
         return sendThrottled(request, reply, buffer);
       } else {
         reply.header('Cache-Control', 'public, max-age=3600');
@@ -125,7 +172,6 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       }
     }
     // Fallback to 480p if 1080p isn't ready or doesn't exist (e.g. video thumbs)
-    const cache480Dir = path.resolve(CACHE_ROOT, '480p');
     const fallback = path.resolve(cache480Dir, `${safeId}.webp`);
     if (!fallback.startsWith(cache480Dir + path.sep)) {
       return reply.status(400).send({ error: 'Invalid ID' });
@@ -166,7 +212,16 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     const { download, watermark, shareToken } = request.query as any;
     const result = await query(
       `SELECT folder_path, file_name, mime_type, size_bytes,
-              is_transcoded, transcoded_mp4_path, transcoded_webm_path
+              is_transcoded, transcoded_mp4_path, transcoded_webm_path,
+              created_at,
+              exif_json->>'DateTimeOriginal' as captured_at,
+              exif_json->>'Make' as camera_make,
+              exif_json->>'Model' as camera_model,
+              exif_json->>'LensModel' as lens_model,
+              exif_json->>'ISO' as iso,
+              exif_json->>'ExposureTime' as shutter_speed,
+              exif_json->>'FNumber' as f_number,
+              exif_json->>'Copyright' as copyright
        FROM media_files WHERE id = $1`,
       [id]
     );
@@ -191,18 +246,52 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       });
     }
 
-    const wSettings = await WatermarkService.getSettings();
-    if (download !== 'true' && download !== '1' && (watermark === 'true' || wSettings.enforceGlobal)) {
-      reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
-      reply.header('Cache-Control', 'private, no-store');
-      const buffer = await WatermarkService.addWatermarkToStream(fullPath);
-      return sendThrottled(request, reply, buffer);
-    }
+    const effectiveTemplate = await WatermarkService.getEffectiveTemplateForShare(shareToken);
 
+    // Explicit download handling
     if (download === '1' || download === 'true') {
+      if (effectiveTemplate && file.mime_type.startsWith('image/')) {
+        let serveImagePath = fullPath;
+        let outFileName = file.file_name;
+
+        // If HD download is forbidden, downgrade to restricted tier (1080p or 500px)
+        if (!effectiveTemplate.allow_hd_download) {
+          const tier = effectiveTemplate.restricted_tier || '1080p';
+          const cacheTierDir = path.resolve(CACHE_ROOT, tier === '500px' ? '480p' : '1080p');
+          const tierPath = path.resolve(cacheTierDir, `${id}.webp`);
+          if (fs.existsSync(tierPath)) {
+            serveImagePath = tierPath;
+            const ext = file.file_name.match(/\.[^/.]+$/)?.[0] || '.jpg';
+            outFileName = `${file.file_name.replace(/\.[^/.]+$/, '')}_${tier}${ext}`;
+          }
+        }
+
+        reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(outFileName)}"`);
+
+        if (effectiveTemplate.apply_to_downloads) {
+          reply.header('Cache-Control', 'private, no-store');
+          const buffer = await WatermarkService.addWatermarkToStream(serveImagePath, effectiveTemplate, file);
+          const isJpg = outFileName.match(/\.jpe?g$/i);
+          const isPng = outFileName.match(/\.png$/i);
+          reply.header('Content-Type', isJpg ? 'image/jpeg' : (isPng ? 'image/png' : 'image/webp'));
+          reply.header('Content-Length', buffer.length);
+          return sendThrottled(request, reply, buffer);
+        } else if (!effectiveTemplate.allow_hd_download) {
+          reply.header('Cache-Control', 'private, no-store');
+          reply.header('Content-Type', 'image/webp');
+          return sendThrottled(request, reply, fs.createReadStream(serveImagePath));
+        }
+      }
+
       reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(file.file_name)}"`);
     } else {
       reply.header('Content-Disposition', `inline; filename="${encodeURIComponent(file.file_name)}"`);
+      // Inline stream preview: apply watermark if enabled
+      if (effectiveTemplate && effectiveTemplate.apply_to_previews && file.mime_type.startsWith('image/')) {
+        reply.header('Cache-Control', 'private, no-store');
+        const buffer = await WatermarkService.addWatermarkToStream(fullPath, effectiveTemplate, file);
+        return sendThrottled(request, reply, buffer);
+      }
     }
 
     // --- Prefer transcoded MP4 for video streaming (not for explicit downloads) ---

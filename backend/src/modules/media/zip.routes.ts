@@ -118,13 +118,33 @@ export async function zipRoutes(fastify: FastifyInstance) {
 
     if (!(await verifyFolderAccess(request, reply, folderPath))) return;
 
-    const wSettings = await WatermarkService.getSettings();
-    const shouldWatermark = watermark === 'true' || wSettings.enforceGlobal;
+    const effectiveTemplate = await WatermarkService.getEffectiveTemplateForShare(shareToken);
+    const shouldWatermark = watermark === 'true' || Boolean(effectiveTemplate?.apply_to_downloads);
 
     const result = folderPath === ''
-      ? await query(`SELECT folder_path, file_name, mime_type, size_bytes FROM media_files ORDER BY folder_path ASC, file_name ASC`)
+      ? await query(
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, created_at,
+                  exif_json->>'DateTimeOriginal' as captured_at,
+                  exif_json->>'Make' as camera_make,
+                  exif_json->>'Model' as camera_model,
+                  exif_json->>'LensModel' as lens_model,
+                  exif_json->>'ISO' as iso,
+                  exif_json->>'ExposureTime' as shutter_speed,
+                  exif_json->>'FNumber' as f_number,
+                  exif_json->>'Copyright' as copyright
+           FROM media_files ORDER BY folder_path ASC, file_name ASC`
+        )
       : await query(
-          `SELECT folder_path, file_name, mime_type, size_bytes FROM media_files WHERE folder_path = $1 OR folder_path LIKE $1 || '/%' ORDER BY folder_path ASC, file_name ASC`, 
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, created_at,
+                  exif_json->>'DateTimeOriginal' as captured_at,
+                  exif_json->>'Make' as camera_make,
+                  exif_json->>'Model' as camera_model,
+                  exif_json->>'LensModel' as lens_model,
+                  exif_json->>'ISO' as iso,
+                  exif_json->>'ExposureTime' as shutter_speed,
+                  exif_json->>'FNumber' as f_number,
+                  exif_json->>'Copyright' as copyright
+           FROM media_files WHERE folder_path = $1 OR folder_path LIKE $1 || '/%' ORDER BY folder_path ASC, file_name ASC`, 
           [folderPath]
         );
     
@@ -132,12 +152,13 @@ export async function zipRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'No files found in this folder.' });
     }
 
-    const existingFiles: Array<{ fullPath: string; fileName: string; folderPath: string; mimeType: string; sizeBytes: number; mtimeMs: number }> = [];
+    const existingFiles: Array<any> = [];
     for (const file of result.rows) {
       const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
       if (fs.existsSync(fullPath)) {
         const stat = fs.statSync(fullPath);
         existingFiles.push({
+          ...file,
           fullPath,
           fileName: file.file_name,
           folderPath: file.folder_path,
@@ -315,16 +336,32 @@ export async function zipRoutes(fastify: FastifyInstance) {
                 ? file.fileName
                 : path.relative(folderPath, path.join(file.folderPath, file.fileName));
 
+              let sourcePath = file.fullPath;
+              let destName = relativeName;
+
+              if (effectiveTemplate && !effectiveTemplate.allow_hd_download && file.mimeType?.startsWith('image/')) {
+                const tier = effectiveTemplate.restricted_tier || '1080p';
+                const cacheTierDir = path.resolve(CACHE_ROOT, tier === '500px' ? '480p' : '1080p');
+                const tierPath = path.resolve(cacheTierDir, `${file.id}.webp`);
+                if (fs.existsSync(tierPath)) {
+                  sourcePath = tierPath;
+                  const ext = file.fileName.match(/\.[^/.]+$/)?.[0] || '.jpg';
+                  destName = `${relativeName.replace(/\.[^/.]+$/, '')}_${tier}${ext}`;
+                }
+              }
+
               if (shouldWatermark && file.mimeType?.startsWith('image/')) {
                 try {
-                  const buffer = await WatermarkService.addWatermarkToStream(file.fullPath);
-                  archive.append(buffer, { name: relativeName });
+                  const isJpg = destName.match(/\.jpe?g$/i);
+                  const format = isJpg ? 'jpeg' : 'webp';
+                  const buffer = await WatermarkService.addWatermarkToStream(sourcePath, effectiveTemplate, file, format);
+                  archive.append(buffer, { name: destName });
                 } catch (e) {
                   console.error('[ZIP] Failed to watermark in zip:', e);
-                  archive.file(file.fullPath, { name: relativeName });
+                  archive.file(sourcePath, { name: destName });
                 }
               } else {
-                archive.file(file.fullPath, { name: relativeName });
+                archive.file(sourcePath, { name: destName });
               }
 
               part.processedFiles++;
@@ -464,13 +501,33 @@ export async function zipRoutes(fastify: FastifyInstance) {
       path: request.url
     });
     
-    const wSettings = await WatermarkService.getSettings();
-    const shouldWatermark = watermark === 'true' || wSettings.enforceGlobal;
+    const effectiveTemplate = await WatermarkService.getEffectiveTemplateForShare(shareToken);
+    const shouldWatermark = watermark === 'true' || Boolean(effectiveTemplate?.apply_to_downloads);
 
     const result = folderPath === ''
-      ? await query(`SELECT folder_path, file_name, mime_type, size_bytes FROM media_files ORDER BY folder_path ASC, file_name ASC`)
+      ? await query(
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, created_at,
+                  exif_json->>'DateTimeOriginal' as captured_at,
+                  exif_json->>'Make' as camera_make,
+                  exif_json->>'Model' as camera_model,
+                  exif_json->>'LensModel' as lens_model,
+                  exif_json->>'ISO' as iso,
+                  exif_json->>'ExposureTime' as shutter_speed,
+                  exif_json->>'FNumber' as f_number,
+                  exif_json->>'Copyright' as copyright
+           FROM media_files ORDER BY folder_path ASC, file_name ASC`
+        )
       : await query(
-          `SELECT folder_path, file_name, mime_type, size_bytes FROM media_files WHERE folder_path = $1 OR folder_path LIKE $1 || '/%' ORDER BY folder_path ASC, file_name ASC`, 
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, created_at,
+                  exif_json->>'DateTimeOriginal' as captured_at,
+                  exif_json->>'Make' as camera_make,
+                  exif_json->>'Model' as camera_model,
+                  exif_json->>'LensModel' as lens_model,
+                  exif_json->>'ISO' as iso,
+                  exif_json->>'ExposureTime' as shutter_speed,
+                  exif_json->>'FNumber' as f_number,
+                  exif_json->>'Copyright' as copyright
+           FROM media_files WHERE folder_path = $1 OR folder_path LIKE $1 || '/%' ORDER BY folder_path ASC, file_name ASC`, 
           [folderPath]
         );
     
@@ -478,12 +535,13 @@ export async function zipRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'No files found in this folder.' });
     }
 
-    const existingFiles: Array<{ fullPath: string; fileName: string; folderPath: string; mimeType: string; sizeBytes: number }> = [];
+    const existingFiles: Array<any> = [];
     for (const file of result.rows) {
       const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
       if (fs.existsSync(fullPath)) {
         const stat = fs.statSync(fullPath);
         existingFiles.push({
+          ...file,
           fullPath,
           fileName: file.file_name,
           folderPath: file.folder_path,
@@ -526,9 +584,9 @@ export async function zipRoutes(fastify: FastifyInstance) {
     const globalLimit = isAuth ? limits.authGlobalLimit : limits.publicGlobalLimit;
     
     if (globalLimit > 0 || (isAuth ? limits.authLimit : limits.publicLimit) > 0) {
-      return reply.send(archive.pipe(new BandwidthThrottler(ip, isAuth)));
+      reply.send(archive.pipe(new BandwidthThrottler(ip, isAuth)));
     } else {
-      return reply.send(archive);
+      reply.send(archive);
     }
 
     archive.on('error', (err: any) => {
@@ -540,16 +598,31 @@ export async function zipRoutes(fastify: FastifyInstance) {
         ? file.fileName
         : path.relative(folderPath, path.join(file.folderPath, file.fileName));
 
+      let sourcePath = file.fullPath;
+      let destName = relativeName;
+
+      if (effectiveTemplate) {
+        if (!effectiveTemplate.allow_hd_download && file.mimeType?.startsWith('image/')) {
+          const tier = effectiveTemplate.restricted_tier || '1080p';
+          const cacheTierDir = path.resolve(CACHE_ROOT, tier === '500px' ? '480p' : '1080p');
+          const tierPath = path.resolve(cacheTierDir, `${file.id}.webp`);
+          if (fs.existsSync(tierPath)) {
+            sourcePath = tierPath;
+            destName = `${relativeName.replace(/\.[^/.]+$/, '')}_${tier}.webp`;
+          }
+        }
+      }
+
       if (shouldWatermark && file.mimeType?.startsWith('image/')) {
         try {
-          const buffer = await WatermarkService.addWatermarkToStream(file.fullPath);
-          archive.append(buffer, { name: relativeName });
+          const buffer = await WatermarkService.addWatermarkToStream(sourcePath, effectiveTemplate, file);
+          archive.append(buffer, { name: destName });
         } catch (e) {
           console.error('[ZIP] Failed to watermark in zip:', e);
-          archive.file(file.fullPath, { name: relativeName });
+          archive.file(sourcePath, { name: destName });
         }
       } else {
-        archive.file(file.fullPath, { name: relativeName });
+        archive.file(sourcePath, { name: destName });
       }
     }
 

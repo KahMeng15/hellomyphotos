@@ -107,7 +107,7 @@
   // --- Idle management ---
 
   let isIdle = $state(false);
-  let lastActivity = $state(Date.now());
+  let lastActivity = Date.now();
 
   function onActivity() {
     lastActivity = Date.now();

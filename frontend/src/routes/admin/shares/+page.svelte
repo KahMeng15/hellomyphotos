@@ -11,7 +11,8 @@
   import Modal from '$lib/components/Modal.svelte';
   import { 
     getAdminLockdown, setAdminLockdown, getAdminShares, updateAdminShare, 
-    deleteAdminShare, getAdminAccessRequests, createShare, createPersonShare 
+    deleteAdminShare, getAdminAccessRequests, createShare, createPersonShare,
+    getWatermarkTemplatesForShare, type WatermarkTemplateOption
   } from '$lib/api/shares';
   import { formatShareDate, getNearestExpiryDuration, isShareExpired } from '$lib/utils/shareUtils';
   import { toast } from '$lib/stores/toast';
@@ -40,6 +41,7 @@
   let createAllowDownloadImages = $state(true);
   let createAllowDownloadFolder = $state(true);
   let createWatermarkEnabled = $state(false);
+  let createWatermarkTemplateId = $state<string>('');
   let newlyCreatedToken = $state<string | null>(null);
 
   // Edit share state
@@ -51,7 +53,10 @@
   let editAllowDownloadImages = $state(false);
   let editAllowDownloadFolder = $state(false);
   let editWatermarkEnabled = $state(false);
+  let editWatermarkTemplateId = $state<string>('');
   let editIsActive = $state(true);
+
+  let watermarkTemplates = $state<WatermarkTemplateOption[]>([]);
   let isSavingEdit = $state(false);
 
   // Extend validity state
@@ -77,14 +82,16 @@
   async function loadData() {
     isLoading = true;
     try {
-      const [sharesData, lockdownStatus, pendingReqs] = await Promise.all([
+      const [sharesData, lockdownStatus, pendingReqs, wData] = await Promise.all([
         getAdminShares(serverSearchQuery || undefined),
         getAdminLockdown().catch(() => false),
-        getAdminAccessRequests('pending').catch(() => [])
+        getAdminAccessRequests('pending').catch(() => []),
+        getWatermarkTemplatesForShare().catch(() => ({ templates: [] }))
       ]);
       shares = sharesData;
       isLockdown = lockdownStatus;
       pendingRequestsCount = pendingReqs.length;
+      watermarkTemplates = wData.templates || [];
     } catch (e: any) {
       console.error(e);
       toast.error('Failed to load shares data');
@@ -163,14 +170,16 @@
 
       const folderParam = createTargetType === 'folder' ? createTargetPath.trim() : '';
       const mediaParam = createTargetType === 'media' ? createTargetPath.trim() : null;
+      const isWatermarked = Boolean(createWatermarkTemplateId) || createWatermarkEnabled;
 
       const token = await createShare(
         folderParam, 
         mediaParam, 
         createAllowDownloadImages, 
         createAllowDownloadFolder, 
-        createWatermarkEnabled, 
-        expiresAt
+        isWatermarked, 
+        expiresAt,
+        createWatermarkTemplateId || null
       );
 
       toast.success('Share link created successfully!');
@@ -209,6 +218,7 @@
     editAllowDownloadImages = share.allow_download_images ?? false;
     editAllowDownloadFolder = share.allow_download_folder ?? false;
     editWatermarkEnabled = share.watermark_enabled ?? false;
+    editWatermarkTemplateId = share.watermark_template_id || '';
     editIsActive = share.is_active !== false;
 
     if (!share.expires_at) {
@@ -248,12 +258,14 @@
         expiresAt = new Date(editExpiryDateTime).toISOString();
       }
 
+      const isWatermarked = Boolean(editWatermarkTemplateId) || editWatermarkEnabled;
       await updateAdminShare(token, {
         is_active: editIsActive,
         expires_at: expiresAt,
         allow_download_images: editAllowDownloadImages,
         allow_download_folder: editAllowDownloadFolder,
-        watermark_enabled: editWatermarkEnabled
+        watermark_enabled: isWatermarked,
+        watermark_template_id: editWatermarkTemplateId || null
       });
 
       toast.success('Share link parameters updated!');
@@ -624,10 +636,15 @@
           <input type="checkbox" bind:checked={createAllowDownloadFolder} style="width: 16px; height: 16px;" />
           Allow downloading entire folder (ZIP)
         </label>
-        <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #cbd5e1; cursor: pointer;">
-          <input type="checkbox" bind:checked={createWatermarkEnabled} style="width: 16px; height: 16px;" />
-          Enable watermark
-        </label>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label style="font-size: 0.85rem; color: #cbd5e1;">Watermark:</label>
+          <select bind:value={createWatermarkTemplateId} style="padding: 4px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.85rem;">
+            <option value="">None (No Watermark)</option>
+            {#each watermarkTemplates as t}
+              <option value={t.id}>{t.name} {!t.allow_hd_download ? `[${t.restricted_tier}]` : ''}</option>
+            {/each}
+          </select>
+        </div>
       </div>
 
       <div style="display: flex; justify-content: flex-end; gap: 10px;">
@@ -887,10 +904,15 @@
                     <input type="checkbox" bind:checked={editAllowDownloadFolder} style="width: 16px; height: 16px;" />
                     Allow downloading entire folder (ZIP)
                   </label>
-                  <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #ccc; cursor: pointer;">
-                    <input type="checkbox" bind:checked={editWatermarkEnabled} style="width: 16px; height: 16px;" />
-                    Enable watermark
-                  </label>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="font-size: 0.82rem; color: #ccc;">Watermark:</label>
+                    <select bind:value={editWatermarkTemplateId} style="padding: 4px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.82rem;">
+                      <option value="">None (No Watermark)</option>
+                      {#each watermarkTemplates as t}
+                        <option value={t.id}>{t.name} {!t.allow_hd_download ? `[${t.restricted_tier}]` : ''}</option>
+                      {/each}
+                    </select>
+                  </div>
                   <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #ccc; cursor: pointer;">
                     <input type="checkbox" bind:checked={editIsActive} style="width: 16px; height: 16px;" />
                     Link is active (enabled)

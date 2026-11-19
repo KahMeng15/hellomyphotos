@@ -1,5 +1,4 @@
 <script lang="ts">
-import { replaceState } from '$app/navigation';
 import { slide } from 'svelte/transition';
 
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
@@ -385,7 +384,7 @@ import { slide } from 'svelte/transition';
     const update = () => {
       const url = index !== null ? mediaUrl(index) : folderUrl();
       if (typeof window !== 'undefined' && window.location.pathname !== url) {
-        replaceState(url, history.state);
+        history.replaceState(history.state, '', url);
       }
     };
     if (immediate || index === null) {

@@ -6,12 +6,34 @@ export interface ShareData {
   allow_download_images: boolean;
   allow_download_folder: boolean;
   watermark_enabled: boolean;
+  watermark_template_id?: string | null;
+  watermark_template_name?: string | null;
   expires_at: string | null;
   created_at?: string;
   created_by_name?: string;
   can_manage?: boolean;
   folder_path?: string;
   is_active?: boolean;
+}
+
+export interface WatermarkTemplateOption {
+  id: string;
+  name: string;
+  description?: string;
+  is_default: boolean;
+  type: 'text' | 'image';
+  allow_hd_download: boolean;
+  restricted_tier: '1080p' | '500px';
+}
+
+export async function getWatermarkTemplatesForShare(): Promise<{
+  templates: WatermarkTemplateOption[];
+  globalEnforced: boolean;
+  globalTemplateId: string | null;
+}> {
+  const res = await fetch(`${API_BASE}/api/shares/watermark-templates`);
+  if (!res.ok) throw new Error('Failed to fetch watermark templates');
+  return res.json();
 }
 
 export interface AccessRequest {
@@ -27,22 +49,37 @@ export interface AccessRequest {
   expires_at?: string | null;
 }
 
-export async function createShare(folderPath: string, mediaId: string | null, allowDownloadImages: boolean, allowDownloadFolder: boolean, watermarkEnabled: boolean, expiresAt: string | null): Promise<string> {
+export async function createShare(
+  folderPath: string,
+  mediaId: string | null,
+  allowDownloadImages: boolean,
+  allowDownloadFolder: boolean,
+  watermarkEnabled: boolean,
+  expiresAt: string | null,
+  watermarkTemplateId?: string | null
+): Promise<string> {
   const res = await fetch(`${API_BASE}/api/shares`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt })
+    body: JSON.stringify({ folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt })
   });
   if (!res.ok) throw new Error('Failed to create share');
   const data = await res.json();
   return data.shareToken;
 }
 
-export async function createPersonShare(personId: string, allowDownloadImages: boolean, allowDownloadFolder: boolean, watermarkEnabled: boolean, expiresAt: string | null): Promise<string> {
+export async function createPersonShare(
+  personId: string,
+  allowDownloadImages: boolean,
+  allowDownloadFolder: boolean,
+  watermarkEnabled: boolean,
+  expiresAt: string | null,
+  watermarkTemplateId?: string | null
+): Promise<string> {
   const res = await fetch(`${API_BASE}/api/shares`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt, folderPath: null, mediaId: null })
+    body: JSON.stringify({ personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, folderPath: null, mediaId: null })
   });
   if (!res.ok) throw new Error('Failed to create person share');
   const data = await res.json();
@@ -69,6 +106,7 @@ export interface UpdateSharePayload {
   allowDownloadImages?: boolean;
   allowDownloadFolder?: boolean;
   watermarkEnabled?: boolean;
+  watermarkTemplateId?: string | null;
 }
 
 export async function updateShare(token: string, updates: UpdateSharePayload): Promise<ShareData> {
@@ -179,6 +217,7 @@ export async function updateAdminShare(token: string, payload: {
   allow_download_images?: boolean;
   allow_download_folder?: boolean;
   watermark_enabled?: boolean;
+  watermark_template_id?: string | null;
 }): Promise<void> {
   const jwt = localStorage.getItem('token');
   const res = await fetch(`${API_BASE}/api/admin/shares/${token}`, {

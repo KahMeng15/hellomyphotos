@@ -295,6 +295,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       watermarkOpacity: 0.5,
       watermarkPosition: 'center',
       watermarkEnforceGlobal: false,
+      watermarkGlobalTemplateId: null,
       defaultViewMode: 'small-fit',
       defaultSortMode: 'oldest',
       defaultFolderViewMode: 'small-grid',
@@ -322,6 +323,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       if (r.key === 'watermark_opacity') settings.watermarkOpacity = r.value;
       if (r.key === 'watermark_position') settings.watermarkPosition = r.value;
       if (r.key === 'watermark_enforce_global') settings.watermarkEnforceGlobal = r.value;
+      if (r.key === 'watermark_global_template_id') settings.watermarkGlobalTemplateId = r.value;
       if (r.key === 'default_view_mode') settings.defaultViewMode = r.value;
       if (r.key === 'default_sort_mode') settings.defaultSortMode = r.value;
       if (r.key === 'default_folder_view_mode') settings.defaultFolderViewMode = r.value;
@@ -336,7 +338,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.put('/api/admin/settings', async (request, reply) => {
-    const { scanInterval, scanSchedule, mlConfidenceThreshold, mlClusterStrictness, throttleAuthGlobal, throttlePublicGlobal, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal, defaultViewMode, defaultSortMode, defaultFolderViewMode, defaultShareViewMode, defaultShareSortMode, defaultShareFolderViewMode, analyticsFilterBots, analyticsFilterSpam } = request.body as any;
+    const { scanInterval, scanSchedule, mlConfidenceThreshold, mlClusterStrictness, throttleAuthGlobal, throttlePublicGlobal, throttleAuth, throttlePublic, rateLimitApi, authMaxLoginTries, authTimeoutMinutes, authDoubleTimeout, watermarkText, watermarkOpacity, watermarkPosition, watermarkEnforceGlobal, watermarkGlobalTemplateId, defaultViewMode, defaultSortMode, defaultFolderViewMode, defaultShareViewMode, defaultShareSortMode, defaultShareFolderViewMode, analyticsFilterBots, analyticsFilterSpam } = request.body as any;
     
     const updates = [];
     if (scanInterval !== undefined) updates.push({ k: 'scan_interval', v: scanInterval });
@@ -355,6 +357,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
     if (watermarkOpacity !== undefined) updates.push({ k: 'watermark_opacity', v: watermarkOpacity });
     if (watermarkPosition !== undefined) updates.push({ k: 'watermark_position', v: watermarkPosition });
     if (watermarkEnforceGlobal !== undefined) updates.push({ k: 'watermark_enforce_global', v: watermarkEnforceGlobal });
+    if (watermarkGlobalTemplateId !== undefined) updates.push({ k: 'watermark_global_template_id', v: watermarkGlobalTemplateId });
     if (defaultViewMode !== undefined) updates.push({ k: 'default_view_mode', v: defaultViewMode });
     if (defaultSortMode !== undefined) updates.push({ k: 'default_sort_mode', v: defaultSortMode });
     if (defaultFolderViewMode !== undefined) updates.push({ k: 'default_folder_view_mode', v: defaultFolderViewMode });
@@ -1650,16 +1653,17 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post('/api/admin/shares', async (request, reply) => {
     try {
-      const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt } = (request.body || {}) as any;
+      const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt } = (request.body || {}) as any;
       if (!folderPath && !mediaId && !personId) {
         return reply.status(400).send({ error: 'Missing folderPath, mediaId, or personId' });
       }
       const crypto = await import('crypto');
       const shareToken = crypto.randomBytes(6).toString('base64url');
+      const isWatermarked = watermarkEnabled ?? Boolean(watermarkTemplateId);
       await query(`
-        INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null, request.user!.id]);
+        INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id]);
       return reply.send({ success: true, shareToken });
     } catch (e: any) {
       request.log.error(e);
@@ -1669,7 +1673,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.put('/api/admin/shares/:token', async (request, reply) => {
     const { token } = request.params as any;
-    const { is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled } = request.body as any;
+    const { is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id } = request.body as any;
     try {
       await query(`
         UPDATE shared_folders 
@@ -1677,9 +1681,10 @@ export async function adminRoutes(fastify: FastifyInstance) {
             expires_at = $2,
             allow_download_images = COALESCE($3, allow_download_images),
             allow_download_folder = COALESCE($4, allow_download_folder),
-            watermark_enabled = COALESCE($5, watermark_enabled)
-        WHERE share_token = $6
-      `, [is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, token]);
+            watermark_enabled = COALESCE($5, watermark_enabled),
+            watermark_template_id = COALESCE($6, watermark_template_id)
+        WHERE share_token = $7
+      `, [is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, token]);
       return reply.send({ success: true });
     } catch (e: any) {
       request.log.error(e);

@@ -17,10 +17,11 @@ import { requireAuth, hasFolderAccess } from '../../utils/auth';
 import { getClientIp } from '../../utils/getIp';
 import { sendPlainTextEmail } from '../../utils/mailer';
 import { isShareLockdownActive } from '../../utils/lockdown.js';
+import { WatermarkService } from '../media/watermark.service';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
-    const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt } = request.body as any;
+    const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt } = request.body as any;
     
     // Check permissions
     if (request.user?.role === 'viewer') {
@@ -40,11 +41,12 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
     
     const shareToken = crypto.randomBytes(6).toString('base64url');
+    const isWatermarked = watermarkEnabled ?? Boolean(watermarkTemplateId);
     
     await query(`
-      INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-    `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null, request.user!.id]);
+      INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id]);
     
     // Automatically prioritize processing for all unprocessed items in the shared folder
     if (folderPath) {
@@ -762,11 +764,12 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
 
     const result = await query(`
-      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.expires_at, s.created_at,
+      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
              s.is_active,
              u.name as created_by_name, s.created_by, s.folder_path
       FROM shared_folders s
       LEFT JOIN users u ON s.created_by = u.id
+      LEFT JOIN watermark_templates wt ON s.watermark_template_id = wt.id
       WHERE s.folder_path = ANY($1::text[])
       ORDER BY (s.folder_path = $2) DESC, s.created_at DESC
     `, [pathsToCheck, folderPath]);
@@ -794,11 +797,12 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const isAdmin = request.user?.role === 'admin' || request.user?.role === 'super_admin';
 
     const result = await query(`
-      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.expires_at, s.created_at,
+      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
              s.is_active,
              u.name as created_by_name, s.created_by, s.person_id
       FROM shared_folders s
       LEFT JOIN users u ON s.created_by = u.id
+      LEFT JOIN watermark_templates wt ON s.watermark_template_id = wt.id
       WHERE s.person_id = $1
       ORDER BY s.created_at DESC
     `, [id]);
@@ -848,13 +852,15 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       expiresAt, 
       allowDownloadImages, 
       allowDownloadFolder, 
-      watermarkEnabled 
+      watermarkEnabled,
+      watermarkTemplateId
     } = request.body as { 
       isActive?: boolean; 
       expiresAt?: string | null;
       allowDownloadImages?: boolean;
       allowDownloadFolder?: boolean;
       watermarkEnabled?: boolean;
+      watermarkTemplateId?: string | null;
     };
 
     if (request.user?.role === 'viewer') {
@@ -905,6 +911,14 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       values.push(watermarkEnabled);
     }
 
+    if (watermarkTemplateId !== undefined) {
+      updates.push(`watermark_template_id = $${idx++}`);
+      values.push(watermarkTemplateId || null);
+      if (watermarkTemplateId) {
+        updates.push(`watermark_enabled = true`);
+      }
+    }
+
     if (updates.length === 0) {
       return reply.send({ success: true, share });
     }
@@ -918,6 +932,30 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     `, values);
 
     return reply.send({ success: true, share: updateRes.rows[0] });
+  });
+
+  // Public endpoint for share modal to query available watermark templates
+  fastify.get('/api/shares/watermark-templates', async (request, reply) => {
+    try {
+      const templates = await WatermarkService.getAllTemplates();
+      const { enforceGlobal, globalTemplateId } = await WatermarkService.getGlobalEnforcement();
+      return reply.send({
+        templates: templates.map(t => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          is_default: t.is_default,
+          type: t.type,
+          allow_hd_download: t.allow_hd_download,
+          restricted_tier: t.restricted_tier
+        })),
+        globalEnforced: enforceGlobal,
+        globalTemplateId: globalTemplateId
+      });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
   });
 
   // Public endpoint: submit an access request for an expired or disabled link

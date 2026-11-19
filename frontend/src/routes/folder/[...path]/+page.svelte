@@ -1,5 +1,4 @@
 <script lang="ts">
-import { replaceState } from '$app/navigation';
 import { slide } from 'svelte/transition';
 
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
@@ -8,7 +7,7 @@ import { slide } from 'svelte/transition';
   import { getThumbnailUrl, getPreviewUrl, getStreamUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, regenerateImages, regenerateVideos, searchFolderContent, type MediaFile, type DirectoryInfo } from '$lib/api/media';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
   import { getSortDate, getRawDate } from '$lib/utils/date';
-  import { createShare, getActiveShares, revokeShare, updateShare, getAccessRequests, respondAccessRequest, type ShareData, type AccessRequest } from '$lib/api/shares';
+  import { createShare, getActiveShares, revokeShare, updateShare, getAccessRequests, respondAccessRequest, getWatermarkTemplatesForShare, type ShareData, type AccessRequest, type WatermarkTemplateOption } from '$lib/api/shares';
   import { formatShareDate, isShareExpired, getNearestExpiryDuration } from '$lib/utils/shareUtils';
   import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
@@ -35,6 +34,10 @@ import { slide } from 'svelte/transition';
   let shareExpiryValue = $state(7);
   let shareExpiryUnit = $state('days');
   let shareExpiryDateTime = $state('');
+  let watermarkTemplates = $state<WatermarkTemplateOption[]>([]);
+  let shareWatermarkTemplateId = $state<string>('');
+  let shareGlobalEnforced = $state(false);
+  let shareGlobalTemplateName = $state('');
 
   let shareActiveTab: 'links' | 'requests' = $state('links');
   let shareLinksSubTab: 'active' | 'expired' = $state('active');
@@ -209,12 +212,20 @@ import { slide } from 'svelte/transition';
   async function loadAllSharesAndRequests() {
     try {
       const folder = data.folderPath || '';
-      const [shares, requests] = await Promise.all([
+      const [shares, requests, wData] = await Promise.all([
         getActiveShares(folder),
-        getAccessRequests(folder).catch(() => [])
+        getAccessRequests(folder).catch(() => []),
+        getWatermarkTemplatesForShare().catch(() => ({ templates: [], globalEnforced: false, globalTemplateId: null }))
       ]);
       allShares = shares;
       accessRequests = requests;
+      watermarkTemplates = wData.templates || [];
+      shareGlobalEnforced = Boolean(wData.globalEnforced);
+      const gTpl = watermarkTemplates.find(t => t.id === wData.globalTemplateId);
+      shareGlobalTemplateName = gTpl?.name || 'Default';
+      if (shareGlobalEnforced && wData.globalTemplateId) {
+        shareWatermarkTemplateId = wData.globalTemplateId;
+      }
     } catch (e) {
       console.error(e);
     }
@@ -240,7 +251,16 @@ import { slide } from 'svelte/transition';
         expiresAt = new Date(shareExpiryDateTime).toISOString();
       }
       
-      const token = await createShare(data.folderPath || '', null, shareAllowDownloadImages, shareAllowDownloadFolder, false, expiresAt);
+      const isWatermarked = shareGlobalEnforced || Boolean(shareWatermarkTemplateId);
+      const token = await createShare(
+        data.folderPath || '',
+        null,
+        shareAllowDownloadImages,
+        shareAllowDownloadFolder,
+        isWatermarked,
+        expiresAt,
+        shareWatermarkTemplateId || null
+      );
       toast.success('Share link created successfully!');
       newlyCreatedShareToken = token;
       await loadAllSharesAndRequests();
@@ -772,7 +792,7 @@ import { slide } from 'svelte/transition';
     const update = () => {
       const url = index !== null ? mediaUrl(index) : folderUrl();
       if (typeof window !== 'undefined' && window.location.pathname !== url) {
-        replaceState(url, history.state);
+        history.replaceState(history.state, '', url);
       }
     };
     if (immediate || index === null) {
@@ -1491,6 +1511,27 @@ import { slide } from 'svelte/transition';
         <div class="form-group" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
           <input type="checkbox" id="allowDlsFolder" bind:checked={shareAllowDownloadFolder} style="width: 18px; height: 18px;" />
           <label for="allowDlsFolder" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading the entire folder (ZIP)</label>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 18px;">
+          <label style="display: block; margin-bottom: 6px; font-size: 0.875rem; color: #ccc;">Watermark Protection</label>
+          {#if shareGlobalEnforced}
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 8px 12px; border-radius: 6px;">
+              <span>🔒 Enforced Globally by Admin ({shareGlobalTemplateName})</span>
+            </div>
+          {:else}
+            <select
+              bind:value={shareWatermarkTemplateId}
+              style="width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.875rem;"
+            >
+              <option value="">None (No Watermark)</option>
+              {#each watermarkTemplates as t}
+                <option value={t.id}>
+                  {t.name} {t.is_default ? '(Default)' : ''} {!t.allow_hd_download ? `[${t.restricted_tier} restricted]` : ''}
+                </option>
+              {/each}
+            </select>
+          {/if}
         </div>
         
         <button class="btn" style="width: 100%; background: var(--text-color); color: var(--bg-color);" onclick={handleCreateShare} disabled={isCreatingShare}>

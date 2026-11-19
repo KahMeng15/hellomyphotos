@@ -6,6 +6,7 @@ import { sharesRoutes } from './modules/shares/shares.routes';
 import { adminRoutes } from './modules/admin/admin.routes';
 import { queueRoutes } from './modules/admin/queue.routes';
 import { timelineRoutes } from './modules/timeline/timeline.routes';
+import { watermarkRoutes } from './modules/admin/watermark.routes';
 import { authRoutes } from './modules/auth/auth.routes';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
@@ -97,6 +98,7 @@ app.register(sharesRoutes);
 app.register(adminRoutes);
 app.register(queueRoutes);
 app.register(timelineRoutes);
+app.register(watermarkRoutes);
 app.register(analyticsRoutes);
 
 // Frontend log ingest (used by frontendLogger utility)
