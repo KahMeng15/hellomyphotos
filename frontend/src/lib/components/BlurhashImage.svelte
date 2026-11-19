@@ -5,7 +5,41 @@
   import { decode } from 'blurhash';
   import { Play } from '@lucide/svelte';
 
-  let { hash, src, fallbackSrc, alt = '', isVideo = false, objectFit = 'contain', faceBox, origWidth, origHeight, square = false, targetHeight = 250, priority = false, onclick, initialAspectRatio }: { hash: string, src: string, fallbackSrc?: string, alt?: string, isVideo?: boolean, objectFit?: 'contain' | 'cover', faceBox?: {x1?: number, y1?: number, x2?: number, y2?: number, x?: number, y?: number, w?: number, h?: number}, origWidth?: number, origHeight?: number, square?: boolean, targetHeight?: number, priority?: boolean, onclick?: (e: MouseEvent) => void, initialAspectRatio?: number } = $props();
+  let { 
+    hash, 
+    src, 
+    fallbackSrc, 
+    alt = '', 
+    fileName = '',
+    showFileName = false,
+    isVideo = false, 
+    objectFit = 'contain', 
+    faceBox, 
+    origWidth, 
+    origHeight, 
+    square = false, 
+    targetHeight = 250, 
+    priority = false, 
+    onclick, 
+    initialAspectRatio 
+  }: { 
+    hash: string, 
+    src: string, 
+    fallbackSrc?: string, 
+    alt?: string, 
+    fileName?: string,
+    showFileName?: boolean,
+    isVideo?: boolean, 
+    objectFit?: 'contain' | 'cover', 
+    faceBox?: {x1?: number, y1?: number, x2?: number, y2?: number, x?: number, y?: number, w?: number, h?: number}, 
+    origWidth?: number, 
+    origHeight?: number, 
+    square?: boolean, 
+    targetHeight?: number, 
+    priority?: boolean, 
+    onclick?: (e: MouseEvent) => void, 
+    initialAspectRatio?: number 
+  } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
   let imgLoaded = $state(false);
@@ -152,6 +186,11 @@
       <Play size={16} fill="white" />
     </div>
   {/if}
+  {#if showFileName && (fileName || alt)}
+    <div class="file-name {isVideo ? 'with-video' : ''}" title={fileName || alt}>
+      <span>{fileName || alt}</span>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -179,6 +218,36 @@
     justify-content: center;
     align-items: center;
     color: white;
+  }
+
+  .file-name {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    max-width: calc(100% - 16px);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .file-name.with-video {
+    max-width: calc(100% - 48px);
+  }
+
+  .file-name span {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.25;
+    color: #ffffff;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    padding: 3px 6px;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   }
 
   .grid-item.is-square {

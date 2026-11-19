@@ -170,6 +170,39 @@ export function getFolderZipUrl(folderPath: string, token?: string): string {
   return `${API_BASE}/api/zip/${encodeURIComponent(folderPath || '')}${token ? `?shareToken=${token}` : ''}`;
 }
 
+export async function prepareFolderZip(folderPath: string, token?: string): Promise<{ jobId: string, totalFiles: number }> {
+  const res = await fetch(`${API_BASE}/api/zip/prepare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folderPath, shareToken: token }),
+    credentials: 'include'
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to prepare ZIP');
+  }
+  return res.json();
+}
+
+export async function getZipJobStatus(jobId: string, token?: string): Promise<{
+  status: 'pending' | 'zipping' | 'ready' | 'error';
+  progress: number;
+  processedFiles: number;
+  totalFiles: number;
+  totalBytes: number;
+  error?: string;
+}> {
+  const res = await fetch(`${API_BASE}/api/zip/status/${jobId}${token ? `?shareToken=${token}` : ''}`, {
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error('Failed to get ZIP status');
+  return res.json();
+}
+
+export function getZipDownloadUrl(jobId: string, token?: string): string {
+  return `${API_BASE}/api/zip/download/${jobId}${token ? `?shareToken=${token}` : ''}`;
+}
+
 export function getFaceThumbnailUrl(personId: string): string {
   return `${API_BASE}/api/faces/${personId}/thumbnail`;
 }

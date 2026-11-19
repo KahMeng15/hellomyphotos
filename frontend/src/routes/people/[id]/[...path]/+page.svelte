@@ -329,9 +329,23 @@ import { replaceState } from '$app/navigation';
     return `${personUrl()}/${file.id}`;
   }
 
-  function syncUrl(index: number | null) {
-    const url = index !== null ? mediaUrl(index) : personUrl();
-    replaceState(url, history.state);
+  let syncUrlTimer: ReturnType<typeof setTimeout> | null = null;
+  function syncUrl(index: number | null, immediate = false) {
+    if (syncUrlTimer) {
+      clearTimeout(syncUrlTimer);
+      syncUrlTimer = null;
+    }
+    const update = () => {
+      const url = index !== null ? mediaUrl(index) : personUrl();
+      if (typeof window !== 'undefined' && window.location.pathname !== url) {
+        replaceState(url, history.state);
+      }
+    };
+    if (immediate || index === null) {
+      update();
+    } else {
+      syncUrlTimer = setTimeout(update, 200);
+    }
   }
 
   async function handleSetCover(mediaId: string) {
@@ -354,12 +368,12 @@ import { replaceState } from '$app/navigation';
 
   function openLightbox(index: number) {
     selectedMediaIndex = index;
-    syncUrl(index);
+    syncUrl(index, true);
   }
 
   function closeLightbox() {
     selectedMediaIndex = null;
-    syncUrl(null);
+    syncUrl(null, true);
   }
 
   function nextMedia() {

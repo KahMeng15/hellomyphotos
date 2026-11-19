@@ -15,6 +15,7 @@ import { replaceState } from '$app/navigation';
   import { env } from '$env/dynamic/public';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
+  import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
   import { currentUser } from '$lib/stores/auth';
   import { updatePreferences } from '$lib/api/auth';
   import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil } from '@lucide/svelte';
@@ -495,6 +496,7 @@ import { replaceState } from '$app/navigation';
   let sortMode: SortMode = $state(data.defaultSortMode || 'oldest');
   let viewMode: ViewMode = $state(data.defaultViewMode || 'small-fit');
   let folderViewMode: FolderViewMode = $state(data.defaultFolderViewMode || 'small-grid');
+  let showFileNames = $state(false);
 
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
@@ -505,12 +507,14 @@ import { replaceState } from '$app/navigation';
       if ($currentUser.preferences.folderSortMode) sortMode = $currentUser.preferences.folderSortMode as SortMode;
       if ($currentUser.preferences.folderViewMode) viewMode = $currentUser.preferences.folderViewMode as ViewMode;
       if ($currentUser.preferences.folderFolderViewMode) folderViewMode = $currentUser.preferences.folderFolderViewMode as FolderViewMode;
+      if ($currentUser.preferences.showFileNames !== undefined) showFileNames = !!$currentUser.preferences.showFileNames;
     }
   });
 
   $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderSortMode', sortMode); });
   $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderViewMode', viewMode); });
   $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderFolderViewMode', folderViewMode); });
+  $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('showFileNames', showFileNames); });
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
@@ -570,6 +574,24 @@ import { replaceState } from '$app/navigation';
   let showShareModal = $state(false);
   let showSettingsModal = $state(false);
 
+  let zipTargetFolderPath = $state('');
+  let zipTargetFolderName = $state('');
+  let zipAutoStart = $state(false);
+
+  function openDownloadModal() {
+    zipTargetFolderPath = data.folderPath || '';
+    zipTargetFolderName = (data.folderPath ? data.folderPath.split('/').pop() : 'Photos') || 'Photos';
+    zipAutoStart = false;
+    showDownloadModal = true;
+  }
+
+  function startFolderZipDownload(folderPath: string, folderName?: string) {
+    zipTargetFolderPath = folderPath;
+    zipTargetFolderName = folderName || (folderPath ? folderPath.split('/').pop() : 'Photos') || 'Photos';
+    zipAutoStart = true;
+    showDownloadModal = true;
+  }
+
   let sortedFiles = $derived([...data.files].sort((a, b) => {
     if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);
     if (sortMode === 'oldest') return getSortDate(a) - getSortDate(b);
@@ -612,19 +634,33 @@ import { replaceState } from '$app/navigation';
     return `${folderUrl()}/${encodeURIComponent(file.file_name)}`;
   }
 
-  function syncUrl(index: number | null) {
-    const url = index !== null ? mediaUrl(index) : folderUrl();
-    replaceState(url, history.state);
+  let syncUrlTimer: ReturnType<typeof setTimeout> | null = null;
+  function syncUrl(index: number | null, immediate = false) {
+    if (syncUrlTimer) {
+      clearTimeout(syncUrlTimer);
+      syncUrlTimer = null;
+    }
+    const update = () => {
+      const url = index !== null ? mediaUrl(index) : folderUrl();
+      if (typeof window !== 'undefined' && window.location.pathname !== url) {
+        replaceState(url, history.state);
+      }
+    };
+    if (immediate || index === null) {
+      update();
+    } else {
+      syncUrlTimer = setTimeout(update, 200);
+    }
   }
 
   function openLightbox(index: number) {
     selectedMediaIndex = index;
-    syncUrl(index);
+    syncUrl(index, true);
   }
   
   function closeLightbox() {
     selectedMediaIndex = null;
-    syncUrl(null);
+    syncUrl(null, true);
   }
   
   function nextMedia() {
@@ -731,6 +767,7 @@ import { replaceState } from '$app/navigation';
     sortMode = loadPref<SortMode>('folderSortMode', data.defaultSortMode || 'newest');
     viewMode = loadPref<ViewMode>('folderViewMode', data.defaultViewMode || 'small-fit');
     folderViewMode = loadPref<FolderViewMode>('folderFolderViewMode', data.defaultFolderViewMode || 'small-grid');
+    showFileNames = loadPref<boolean>('showFileNames', false);
 
     if (data.isProcessing) {
       toast.info('This folder is still being processed. Some items might be missing or slow to load. Feel free to come back later!', 8000);
@@ -863,6 +900,13 @@ import { replaceState } from '$app/navigation';
                 <button class:active={folderViewMode === 'medium-grid'} onclick={() => { folderViewMode = 'medium-grid'; showFolderViewMenu = false; }}>Medium Grid</button>
                 <button class:active={folderViewMode === 'large-grid'} onclick={() => { folderViewMode = 'large-grid'; showFolderViewMenu = false; }}>Large Grid</button>
                 <button class:active={folderViewMode === 'list'} onclick={() => { folderViewMode = 'list'; showFolderViewMenu = false; }}>List</button>
+                <div class="dropdown-divider"></div>
+                <button class="toggle-item" class:active={showFileNames} onclick={() => { showFileNames = !showFileNames; showFolderViewMenu = false; }}>
+                  <span>Show File Names</span>
+                  {#if showFileNames}
+                    <Check size={16} />
+                  {/if}
+                </button>
               </div>
             {/if}
           </div>
@@ -877,12 +921,19 @@ import { replaceState } from '$app/navigation';
                 <button class:active={viewMode === 'large-fit'} onclick={() => { viewMode = 'large-fit'; showViewMenu = false; }}>Large Fit Size</button>
                 <button class:active={viewMode === 'small-square'} onclick={() => { viewMode = 'small-square'; showViewMenu = false; }}>Small Square Grid</button>
                 <button class:active={viewMode === 'large-square'} onclick={() => { viewMode = 'large-square'; showViewMenu = false; }}>Large Square Grid</button>
+                <div class="dropdown-divider"></div>
+                <button class="toggle-item" class:active={showFileNames} onclick={() => { showFileNames = !showFileNames; showViewMenu = false; }}>
+                  <span>Show File Names</span>
+                  {#if showFileNames}
+                    <Check size={16} />
+                  {/if}
+                </button>
               </div>
             {/if}
           </div>
         {/if}
         
-        <button class="icon-btn" onclick={() => showDownloadModal = true} title="Download">
+        <button class="icon-btn" onclick={openDownloadModal} title="Download">
           <Download size={18} />
         </button>
         <button class="icon-btn" onclick={() => showShareModal = true} title="Share">
@@ -934,7 +985,7 @@ import { replaceState } from '$app/navigation';
               </button>
               {#if activeFolderMenu === dir.name}
                 <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
-                  <button onclick={() => { activeFolderMenu = null; window.open(getFolderZipUrl(data.folderPath ? data.folderPath + '/' + dir.name : dir.name), '_blank'); }}>Download ZIP</button>
+                  <button onclick={() => { activeFolderMenu = null; startFolderZipDownload(data.folderPath ? data.folderPath + '/' + dir.name : dir.name, dir.name); }}>Download ZIP</button>
                 </div>
               {/if}
             </div>
@@ -960,7 +1011,7 @@ import { replaceState } from '$app/navigation';
                 {#if activeFolderMenu === dir.name}
                   <div class="dropdown-menu" style="position: absolute; left: 50%; transform: translateX(-50%); top: 100%; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
                     <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
-                    <button onclick={() => { activeFolderMenu = null; window.open(getFolderZipUrl(data.folderPath ? data.folderPath + '/' + dir.name : dir.name), '_blank'); }}>Download ZIP</button>
+                    <button onclick={() => { activeFolderMenu = null; startFolderZipDownload(data.folderPath ? data.folderPath + '/' + dir.name : dir.name, dir.name); }}>Download ZIP</button>
                   </div>
                 {/if}
               </div>
@@ -976,7 +1027,7 @@ import { replaceState } from '$app/navigation';
                 {#if activeFolderMenu === dir.name}
                   <div class="dropdown-menu" style="position: absolute; right: 0; top: 100%; z-index: 100; margin-top: 4px;" onclick={(e) => e.stopPropagation()}>
                     <button onclick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetDirCoverAsParentCover(dir); }}>Set as cover</button>
-                    <button onclick={() => { activeFolderMenu = null; window.open(getFolderZipUrl(data.folderPath ? data.folderPath + '/' + dir.name : dir.name), '_blank'); }}>Download ZIP</button>
+                    <button onclick={() => { activeFolderMenu = null; startFolderZipDownload(data.folderPath ? data.folderPath + '/' + dir.name : dir.name, dir.name); }}>Download ZIP</button>
                   </div>
                 {/if}
               </div>
@@ -1003,6 +1054,8 @@ import { replaceState } from '$app/navigation';
       hash={file.blurhash || ''} 
       src={`${getThumbnailUrl(file.id)}${file.blurhash ? '?cb=' + encodeURIComponent(file.blurhash) : ''}`} 
       alt={file.file_name} 
+      fileName={file.file_name}
+      showFileName={showFileNames}
       isVideo={file.mime_type.startsWith('video/')}
       onclick={() => openLightbox(i)}
       objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
@@ -1028,10 +1081,12 @@ import { replaceState } from '$app/navigation';
   />
 {/if}
 
-<Modal bind:show={showDownloadModal} id="download-folder" title="Download Folder">
-  <a href={getFolderZipUrl(data.folderPath || '')} target="_blank" class="btn" style="display: block; text-align: center; text-decoration: none; width: 100%; margin-bottom: 12px; background: var(--text-color); color: var(--bg-color);" onclick={() => showDownloadModal = false}>Download All in One Zip</a>
-  <button class="btn" style="width: 100%; background: var(--glass-bg); border: 1px solid var(--glass-border); color: white;">Download as Multi-part Zips (Coming Soon)</button>
-</Modal>
+<ZipDownloadModal 
+  bind:show={showDownloadModal} 
+  folderPath={zipTargetFolderPath} 
+  folderName={zipTargetFolderName} 
+  autoStart={zipAutoStart}
+/>
 
 <Modal bind:show={showShareModal} id="share-settings" title="Share Settings">
   <div style="max-height: 80vh; overflow-y: auto; padding-right: 4px;">
@@ -1891,6 +1946,7 @@ import { replaceState } from '$app/navigation';
     cursor: pointer;
     font-size: 0.875rem;
     transition: background 0.2s, color 0.2s;
+    white-space: nowrap;
   }
   
   .dropdown-menu button:hover {
@@ -1902,6 +1958,19 @@ import { replaceState } from '$app/navigation';
     background: rgba(255,255,255,0.15);
     color: white;
     font-weight: 500;
+  }
+
+  .dropdown-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.12);
+    margin: 4px 0;
+  }
+
+  .dropdown-menu button.toggle-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
   }
 
   .count {

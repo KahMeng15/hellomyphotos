@@ -34,9 +34,17 @@ export const handle: Handle = async ({ event, resolve }) => {
     });
 
     const responseHeaders = new Headers(response.headers);
+    const hasEncoding = responseHeaders.has('content-encoding');
     responseHeaders.delete('content-encoding');
-    responseHeaders.delete('content-length');
     responseHeaders.delete('transfer-encoding');
+
+    // Only strip content-length if the payload was compressed (e.g. gzip/br)
+    // because fetch() automatically decompresses the stream, altering its byte length.
+    // For uncompressed streams (like ZIP files and media), preserving content-length allows
+    // browsers to display an accurate progress bar and total file size ("X MB of Y MB").
+    if (hasEncoding) {
+      responseHeaders.delete('content-length');
+    }
 
     return new Response(response.body, {
       status: response.status,

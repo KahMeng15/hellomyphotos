@@ -65,6 +65,7 @@
   }
   
   function close() {
+    stopHold();
     tracker.endPhotoDwell();
     if (onclose) onclose();
   }
@@ -113,11 +114,68 @@
     isIdle = false;
   }
 
+  let lastNavTime = 0;
+  const NAV_THROTTLE_MS = 100;
+
+  function handleNext() {
+    onActivity();
+    const now = Date.now();
+    if (now - lastNavTime < NAV_THROTTLE_MS) return;
+    lastNavTime = now;
+    if (onnext) onnext();
+  }
+
+  function handlePrev() {
+    onActivity();
+    const now = Date.now();
+    if (now - lastNavTime < NAV_THROTTLE_MS) return;
+    lastNavTime = now;
+    if (onprev) onprev();
+  }
+
+  let holdTimeout: ReturnType<typeof setTimeout> | null = null;
+  let holdInterval: ReturnType<typeof setInterval> | null = null;
+
+  function startHold(action: () => void) {
+    stopHold();
+    action();
+    holdTimeout = setTimeout(() => {
+      holdInterval = setInterval(() => {
+        action();
+      }, 150);
+    }, 350);
+  }
+
+  function stopHold() {
+    if (holdTimeout) {
+      clearTimeout(holdTimeout);
+      holdTimeout = null;
+    }
+    if (holdInterval) {
+      clearInterval(holdInterval);
+      holdInterval = null;
+    }
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     onActivity();
-    if (e.key === 'Escape') close();
-    if (e.key === 'ArrowRight' && onnext) onnext();
-    if (e.key === 'ArrowLeft' && onprev) onprev();
+    if (e.key === 'Escape') {
+      close();
+      return;
+    }
+    if (e.key === 'ArrowRight') {
+      if (e.repeat) {
+        const now = Date.now();
+        if (now - lastNavTime < 150) return;
+      }
+      handleNext();
+    } else if (e.key === 'ArrowLeft') {
+      if (e.repeat) {
+        const now = Date.now();
+        if (now - lastNavTime < 150) return;
+      }
+      handlePrev();
+    }
   }
   
   // --- Swipe management ---
@@ -151,9 +209,9 @@
     if (Math.abs(deltaX) > Math.abs(deltaY)) {
       // Horizontal swipe
       if (deltaX > swipeThreshold) {
-        if (onprev) onprev();
+        handlePrev();
       } else if (deltaX < -swipeThreshold) {
-        if (onnext) onnext();
+        handleNext();
       }
     } else {
       // Vertical swipe
@@ -243,9 +301,14 @@
   let scale = $state(1);
   let isZoomed = $derived(scale > 1);
 
-  $effect(() => {
-    // Other effects if any...
-  });
+  let panzoomModulePromise: Promise<any> | null = null;
+  function getPanzoom() {
+    if (!panzoomModulePromise) {
+      panzoomModulePromise = import('panzoom').then(m => m.default || m);
+    }
+    return panzoomModulePromise;
+  }
+
   let pzInstance: any = $state(null);
   let currentZoom = $state(1);
   let showZoomSlider = $state(false);
@@ -253,33 +316,42 @@
   function initPanzoom(node: HTMLElement) {
     if (media.mime_type.startsWith('video/')) return;
     
-    import('panzoom').then(({ default: panzoom }) => {
-      pzInstance = panzoom(node, {
+    let isDestroyed = false;
+    let localPz: any = null;
+
+    getPanzoom().then((panzoom) => {
+      if (isDestroyed || !node.isConnected) return;
+
+      localPz = panzoom(node, {
         maxZoom: 5,
         minZoom: 1,
         bounds: false,
         smoothScroll: false,
       });
+      pzInstance = localPz;
 
-      pzInstance.on('transform', () => {
-        if (!pzInstance) return;
-        const transform = pzInstance.getTransform();
+      localPz.on('transform', () => {
+        if (isDestroyed || !localPz) return;
+        const transform = localPz.getTransform();
         currentZoom = transform.scale;
         if (currentZoom > 1.05) {
           showZoomSlider = true;
         } else {
           showZoomSlider = false;
-          if (Math.abs(transform.x) > 0.1 || Math.abs(transform.y) > 0.1) {
-            pzInstance.moveTo(0, 0);
-          }
         }
       });
+    }).catch(err => {
+      console.error('Panzoom init error:', err);
     });
 
     return {
       destroy() {
-        if (pzInstance) {
-          pzInstance.dispose();
+        isDestroyed = true;
+        if (localPz) {
+          localPz.dispose();
+          localPz = null;
+        }
+        if (pzInstance === localPz) {
           pzInstance = null;
         }
       }
@@ -368,11 +440,13 @@
 
   // Reset zoom & pan when navigating between media items
   $effect(() => {
-    if (media.id && pzInstance) {
-      pzInstance.zoomAbs(window.innerWidth / 2, window.innerHeight / 2, 1);
-      pzInstance.moveTo(0, 0);
+    if (media.id) {
       currentZoom = 1;
       showZoomSlider = false;
+      if (pzInstance) {
+        pzInstance.zoomAbs(window.innerWidth / 2, window.innerHeight / 2, 1);
+        pzInstance.moveTo(0, 0);
+      }
     }
   });
 
@@ -389,6 +463,14 @@
       document.removeEventListener('keydown', handleKeydown);
       clearInterval(interval);
     };
+  });
+
+  onDestroy(() => {
+    stopHold();
+    if (pzInstance) {
+      pzInstance.dispose();
+      pzInstance = null;
+    }
   });
 </script>
 
@@ -444,7 +526,16 @@
         </button>
       </div>
 
-      <button class="nav-btn prev-btn" style:opacity={isIdle ? 0 : 1} onclick={() => { if (onprev) onprev(); }}>
+      <button 
+        class="nav-btn prev-btn" 
+        style:opacity={isIdle ? 0 : 1} 
+        onclick={handlePrev}
+        onpointerdown={(e) => { if (e.button === 0) startHold(handlePrev); }}
+        onpointerup={stopHold}
+        onpointerleave={stopHold}
+        onpointercancel={stopHold}
+        aria-label="Previous image"
+      >
         <ChevronLeft size={32} strokeWidth={2} />
       </button>
       
@@ -453,7 +544,7 @@
           {#key media.id}
             {#if media.is_transcoded === false}
               <div class="processing-video-container">
-                <img src={getPreviewUrl(media.id, false, token, 'lightbox')} alt={media.file_name} class="media-element" draggable="false" style="opacity: 0.3" />
+                <img src={getPreviewUrl(media.id, false, token, 'lightbox')} alt={media.file_name} class="media-element" draggable="false" decoding="async" style="opacity: 0.3" />
                 <div class="processing-overlay">
                   <Clock size={48} strokeWidth={2} />
                   <div class="processing-text">
@@ -485,12 +576,28 @@
           {/key}
         {:else}
           {#key media.id}
-            <img src={getPreviewUrl(media.id, false, token, 'lightbox')} alt={media.file_name} class="media-element" draggable="false" use:initPanzoom />
+            <img 
+              src={getPreviewUrl(media.id, false, token, 'lightbox')} 
+              alt={media.file_name} 
+              class="media-element" 
+              draggable="false" 
+              decoding="async"
+              use:initPanzoom 
+            />
           {/key}
         {/if}
       </div>
       
-      <button class="nav-btn next-btn" style:opacity={isIdle ? 0 : 1} onclick={() => { if (onnext) onnext(); }}>
+      <button 
+        class="nav-btn next-btn" 
+        style:opacity={isIdle ? 0 : 1} 
+        onclick={handleNext}
+        onpointerdown={(e) => { if (e.button === 0) startHold(handleNext); }}
+        onpointerup={stopHold}
+        onpointerleave={stopHold}
+        onpointercancel={stopHold}
+        aria-label="Next image"
+      >
         <ChevronRight size={32} strokeWidth={2} />
       </button>
     </div>
@@ -1020,6 +1127,8 @@
   }
 
   .media-element {
+    width: 100%;
+    height: 100%;
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
