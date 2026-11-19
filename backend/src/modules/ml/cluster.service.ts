@@ -100,14 +100,27 @@ export class ClusterService {
       console.log(`[Clustering] Processed ${processed}/${total} faces...`);
     }
 
-    // Step 3: Populate the people table from all distinct person_ids
+    // Step 3: Populate the people table from all distinct person_ids with initial cover
     await query(`
-      INSERT INTO people (id, name)
-      SELECT DISTINCT person_id, ''
-      FROM face_embeddings
-      WHERE person_id IS NOT NULL
-      ON CONFLICT (id) DO NOTHING
+      INSERT INTO people (id, name, cover_face_id, cover_media_id)
+      SELECT DISTINCT ON (fe.person_id)
+        fe.person_id,
+        '',
+        fe.id,
+        fe.media_id
+      FROM face_embeddings fe
+      WHERE fe.person_id IS NOT NULL
+      ORDER BY fe.person_id, fe.created_at DESC
+      ON CONFLICT (id) DO UPDATE SET
+        cover_face_id = COALESCE(people.cover_face_id, EXCLUDED.cover_face_id),
+        cover_media_id = COALESCE(people.cover_media_id, EXCLUDED.cover_media_id)
     `);
+
+    // Invalidate face cache in Redis
+    try {
+      const keys = await redis.keys('faces:list:*');
+      if (keys.length > 0) await redis.del(...keys);
+    } catch {}
 
     console.log('[Clustering] Face clustering complete!');
   }

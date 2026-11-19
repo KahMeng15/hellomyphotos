@@ -5,6 +5,7 @@ import pkg from '@resvg/resvg-js';
 const { Resvg } = pkg;
 
 import { query } from '../../config/db';
+import { CacheTrackerService } from './cacheTracker.service';
 
 export interface WatermarkTemplate {
   id: string;
@@ -286,7 +287,7 @@ export class WatermarkService {
       const files = await fs.promises.readdir(wmCacheDir);
       for (const file of files) {
         if (file.includes(`_${templateId}_`)) {
-          await fs.promises.unlink(path.join(wmCacheDir, file)).catch(() => {});
+          await CacheTrackerService.unlinkFile(path.join(wmCacheDir, file)).catch(() => {});
           purgedCount++;
         }
       }
@@ -403,6 +404,7 @@ export class WatermarkService {
             const buffer = await this.addWatermarkToStream(basePath, template, file, 'webp');
             const targetPath = path.resolve(wmCacheDir, `${file.id}_${template.id}_${tplVersion}.webp`);
             await fs.promises.writeFile(targetPath, buffer);
+            CacheTrackerService.recordWrite('watermark_previews', buffer.length).catch(() => {});
             regeneratedCount++;
           } catch (err) {
             console.error(`[WatermarkRegen] Failed to pre-render media ${file.id}:`, err);
@@ -415,6 +417,168 @@ export class WatermarkService {
     return { success: true, purged: purgedCount, regenerated: regeneratedCount };
   }
 
+  /**
+   * Purge old cached preview files and regenerate watermarked photos for a specific folder
+   */
+  static async regenerateFolderWatermarks(folderPath: string): Promise<{ success: boolean; purged: number; regenerated: number; filesCount: number }> {
+    const wmCacheDir = path.resolve(CACHE_ROOT, 'watermark_previews');
+    if (!fs.existsSync(wmCacheDir)) {
+      fs.mkdirSync(wmCacheDir, { recursive: true });
+    }
+
+    // 1. Fetch all media files in this folder
+    const folder = (folderPath || '').trim();
+    let mediaResult;
+    if (!folder) {
+      mediaResult = await query(
+        `SELECT id, folder_path, file_name, mime_type, created_at,
+                exif_json->>'DateTimeOriginal' as captured_at,
+                exif_json->>'Make' as camera_make,
+                exif_json->>'Model' as camera_model,
+                exif_json->>'LensModel' as lens_model,
+                exif_json->>'ISO' as iso,
+                exif_json->>'ExposureTime' as shutter_speed,
+                exif_json->>'FNumber' as f_number,
+                exif_json->>'Copyright' as copyright
+         FROM media_files
+         WHERE mime_type LIKE 'image/%'
+         ORDER BY created_at DESC`
+      );
+    } else {
+      mediaResult = await query(
+        `SELECT id, folder_path, file_name, mime_type, created_at,
+                exif_json->>'DateTimeOriginal' as captured_at,
+                exif_json->>'Make' as camera_make,
+                exif_json->>'Model' as camera_model,
+                exif_json->>'LensModel' as lens_model,
+                exif_json->>'ISO' as iso,
+                exif_json->>'ExposureTime' as shutter_speed,
+                exif_json->>'FNumber' as f_number,
+                exif_json->>'Copyright' as copyright
+         FROM media_files
+         WHERE (folder_path = $1 OR folder_path LIKE $2)
+           AND mime_type LIKE 'image/%'
+         ORDER BY created_at DESC`,
+        [folder, `${folder}/%`]
+      );
+    }
+
+    const mediaList = mediaResult.rows;
+    if (mediaList.length === 0) {
+      return { success: true, purged: 0, regenerated: 0, filesCount: 0 };
+    }
+
+    // 2. Purge cached preview files for these media files
+    let purgedCount = 0;
+    const mediaIdSet = new Set(mediaList.map((m: any) => m.id));
+    try {
+      const files = await fs.promises.readdir(wmCacheDir);
+      for (const file of files) {
+        const parts = file.split('_');
+        if (parts.length >= 2 && mediaIdSet.has(parts[0])) {
+          await CacheTrackerService.unlinkFile(path.join(wmCacheDir, file)).catch(() => {});
+          purgedCount++;
+        }
+      }
+    } catch (err) {
+      console.error('[WatermarkFolderRegen] Error purging old cache:', err);
+    }
+
+    // 3. Determine applicable templates
+    const templatesMap = new Map<string, WatermarkTemplate>();
+    const globalSettings = await this.getGlobalEnforcement();
+    if (globalSettings.enforceGlobal && globalSettings.globalTemplateId) {
+      const globalTpl = await this.getTemplate(globalSettings.globalTemplateId);
+      if (globalTpl) {
+        templatesMap.set(globalTpl.id, globalTpl);
+      }
+    }
+
+    // Check shared folders covering this folder
+    const sharesQuery = folder
+      ? `SELECT DISTINCT watermark_enabled, watermark_template_id
+         FROM shared_folders
+         WHERE is_active = true
+           AND (
+             folder_path = $1
+             OR folder_path LIKE $1 || '/%'
+             OR $1 LIKE folder_path || '/%'
+           )`
+      : `SELECT DISTINCT watermark_enabled, watermark_template_id
+         FROM shared_folders
+         WHERE is_active = true`;
+    const sharesParams = folder ? [folder] : [];
+    const sharesRes = await query(sharesQuery, sharesParams);
+
+    for (const share of sharesRes.rows) {
+      if (share.watermark_template_id) {
+        const tpl = await this.getTemplate(share.watermark_template_id);
+        if (tpl) templatesMap.set(tpl.id, tpl);
+      } else if (share.watermark_enabled) {
+        const defaultTpl = await this.getDefaultTemplate();
+        if (defaultTpl) templatesMap.set(defaultTpl.id, defaultTpl);
+      }
+    }
+
+    // If no templates mapped yet, fall back to default template
+    if (templatesMap.size === 0) {
+      const defaultTpl = await this.getDefaultTemplate();
+      if (defaultTpl) {
+        templatesMap.set(defaultTpl.id, defaultTpl);
+      }
+    }
+
+    const applicableTemplates = Array.from(templatesMap.values());
+    if (applicableTemplates.length === 0) {
+      console.log(`[WatermarkFolderRegen] No applicable watermark templates found for folder "${folder}". Purged ${purgedCount} cached files.`);
+      return { success: true, purged: purgedCount, regenerated: 0, filesCount: mediaList.length };
+    }
+
+    // 4. Pre-render watermarked previews for each template
+    let regeneratedCount = 0;
+    const cache1080Dir = path.resolve(CACHE_ROOT, '1080p');
+    const cache480Dir = path.resolve(CACHE_ROOT, '480p');
+
+    for (const template of applicableTemplates) {
+      const tplVersion = template.updated_at ? new Date(template.updated_at).getTime() : Date.now();
+      const use480p = !template.allow_hd_download && template.restricted_tier === '500px';
+
+      const BATCH_SIZE = 4;
+      for (let i = 0; i < mediaList.length; i += BATCH_SIZE) {
+        const batch = mediaList.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (file: any) => {
+            try {
+              let baseDir = use480p ? cache480Dir : cache1080Dir;
+              let basePath = path.resolve(baseDir, `${file.id}.webp`);
+              if (!fs.existsSync(basePath)) {
+                basePath = path.resolve(cache1080Dir, `${file.id}.webp`);
+                if (!fs.existsSync(basePath)) {
+                  basePath = path.resolve(cache480Dir, `${file.id}.webp`);
+                  if (!fs.existsSync(basePath)) {
+                    basePath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+                    if (!fs.existsSync(basePath)) return;
+                  }
+                }
+              }
+
+              const buffer = await this.addWatermarkToStream(basePath, template, file, 'webp');
+              const targetPath = path.resolve(wmCacheDir, `${file.id}_${template.id}_${tplVersion}.webp`);
+              await fs.promises.writeFile(targetPath, buffer);
+              CacheTrackerService.recordWrite('watermark_previews', buffer.length).catch(() => {});
+              regeneratedCount++;
+            } catch (err) {
+              console.error(`[WatermarkFolderRegen] Failed to pre-render media ${file.id}:`, err);
+            }
+          })
+        );
+      }
+    }
+
+    console.log(`[WatermarkFolderRegen] Completed folder "${folder}": regenerated ${regeneratedCount} items across ${applicableTemplates.length} template(s), purged ${purgedCount} files.`);
+    return { success: true, purged: purgedCount, regenerated: regeneratedCount, filesCount: mediaList.length };
+  }
+
   static async deleteTemplate(id: string): Promise<boolean> {
     // Purge cached files for this template
     try {
@@ -423,7 +587,7 @@ export class WatermarkService {
         const files = await fs.promises.readdir(wmCacheDir);
         for (const file of files) {
           if (file.includes(`_${id}_`)) {
-            await fs.promises.unlink(path.join(wmCacheDir, file)).catch(() => {});
+            await CacheTrackerService.unlinkFile(path.join(wmCacheDir, file)).catch(() => {});
           }
         }
       }

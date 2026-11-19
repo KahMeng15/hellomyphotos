@@ -112,6 +112,17 @@ export async function regenerateVideos(folderPath: string): Promise<{ count: num
   return res.json();
 }
 
+export async function regenerateFolderWatermarks(folderPath: string): Promise<{ success: boolean; purged: number; regenerated: number; filesCount: number }> {
+  const res = await fetch(`${API_BASE}/api/folder/regenerate-watermarks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder: folderPath }),
+    credentials: 'include'
+  });
+  if (!res.ok) throw new Error('Failed to regenerate watermarks');
+  return res.json();
+}
+
 export async function rescanFolder(folderPath: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/folder/rescan`, {
     method: 'POST',

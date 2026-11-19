@@ -7,6 +7,7 @@ const execFileAsync = util.promisify(execFile);
 import { query } from '../../config/db';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { WatermarkService } from './watermark.service';
+import { CacheTrackerService } from './cacheTracker.service';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
@@ -40,6 +41,66 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     
     if (!(await verifyMediaAccess(request, reply, safeId))) return;
 
+    const { shareToken } = request.query;
+
+    const effectiveTemplate = await WatermarkService.getEffectiveTemplateForShare(shareToken);
+    const shouldWatermark = Boolean(effectiveTemplate?.apply_to_previews);
+
+    if (shouldWatermark && effectiveTemplate) {
+      const tplVersion = effectiveTemplate.updated_at ? new Date(effectiveTemplate.updated_at).getTime() : 0;
+      const wmCacheDir = path.resolve(CACHE_ROOT, 'watermark_previews');
+      if (!fs.existsSync(wmCacheDir)) {
+        fs.mkdirSync(wmCacheDir, { recursive: true });
+      }
+
+      // Check if we already have the watermarked thumbnail cached
+      const is500px = !effectiveTemplate.allow_hd_download && effectiveTemplate.restricted_tier === '500px';
+      const wmThumbPath = is500px 
+        ? path.resolve(wmCacheDir, `${safeId}_${effectiveTemplate.id}_${tplVersion}.webp`)
+        : path.resolve(wmCacheDir, `${safeId}_${effectiveTemplate.id}_${tplVersion}_thumb.webp`);
+
+      const etag = `"${safeId}-${effectiveTemplate.id}-${tplVersion}-thumb"`;
+      reply.header('ETag', etag);
+      reply.header('Cache-Control', 'public, max-age=86400');
+
+      if (request.headers['if-none-match'] === etag) {
+        return reply.status(304).send();
+      }
+
+      if (fs.existsSync(wmThumbPath)) {
+        reply.header('Content-Type', 'image/webp');
+        return sendThrottled(request, reply, fs.createReadStream(wmThumbPath));
+      }
+
+      // Base image is 480p
+      let baseDir = path.resolve(CACHE_ROOT, '480p');
+      let baseImgPath = path.resolve(baseDir, `${safeId}.webp`);
+      if (!fs.existsSync(baseImgPath)) {
+        baseImgPath = path.resolve(CACHE_ROOT, '1080p', `${safeId}.webp`);
+      }
+
+      if (fs.existsSync(baseImgPath)) {
+        reply.header('Content-Type', 'image/webp');
+        const metaRes = await query(
+          `SELECT file_name, folder_path, created_at, 
+                  exif_json->>'Make' as camera_make, 
+                  exif_json->>'Model' as camera_model, 
+                  exif_json->>'LensModel' as lens_model, 
+                  exif_json->>'ISO' as iso, 
+                  exif_json->>'ExposureTime' as shutter_speed, 
+                  exif_json->>'FNumber' as f_number, 
+                  exif_json->>'Copyright' as copyright 
+           FROM media_files WHERE id = $1`,
+          [safeId]
+        );
+        const buffer = await WatermarkService.addWatermarkToStream(baseImgPath, effectiveTemplate, metaRes.rows[0], 'webp');
+        fs.promises.writeFile(wmThumbPath, buffer).catch((err) => {
+          console.error('[WatermarkCache] Write error:', err);
+        });
+        return sendThrottled(request, reply, buffer);
+      }
+    }
+
     const cache480Dir = path.resolve(CACHE_ROOT, '480p');
     const filePath = path.resolve(cache480Dir, `${safeId}.webp`);
     if (!filePath.startsWith(cache480Dir + path.sep)) {
@@ -47,8 +108,13 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     }
     
     if (fs.existsSync(filePath)) {
+      const etag = `"${safeId}-480p"`;
+      reply.header('ETag', etag);
+      if (request.headers['if-none-match'] === etag) {
+        return reply.status(304).send();
+      }
       reply.header('Content-Type', 'image/webp');
-      reply.header('Cache-Control', 'public, max-age=3600');
+      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
       return sendThrottled(request, reply, fs.createReadStream(filePath));
     }
     
@@ -139,7 +205,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
 
         const etag = `"${safeId}-${effectiveTemplate.id}-${tplVersion}"`;
         reply.header('ETag', etag);
-        reply.header('Cache-Control', 'private, max-age=86400');
+        reply.header('Cache-Control', 'public, max-age=86400');
 
         if (request.headers['if-none-match'] === etag) {
           return reply.status(304).send();
@@ -165,9 +231,15 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         fs.promises.writeFile(wmCachedPath, buffer).catch((err) => {
           console.error('[WatermarkCache] Write error:', err);
         });
+        CacheTrackerService.recordWrite('watermark_previews', buffer.length).catch(() => {});
         return sendThrottled(request, reply, buffer);
       } else {
-        reply.header('Cache-Control', 'public, max-age=3600');
+        const etag = `"${safeId}-1080p"`;
+        reply.header('ETag', etag);
+        if (request.headers['if-none-match'] === etag) {
+          return reply.status(304).send();
+        }
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
         return sendThrottled(request, reply, fs.createReadStream(filePath));
       }
     }
@@ -177,7 +249,13 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Invalid ID' });
     }
     if (fs.existsSync(fallback)) {
+      const etag = `"${safeId}-480p"`;
+      reply.header('ETag', etag);
+      if (request.headers['if-none-match'] === etag) {
+        return reply.status(304).send();
+      }
       reply.header('Content-Type', 'image/webp');
+      reply.header('Cache-Control', 'public, max-age=31536000, immutable');
       return sendThrottled(request, reply, fs.createReadStream(fallback));
     }
     
@@ -407,10 +485,8 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       await query(`UPDATE media_files SET has_480p = false, is_transcoded = false WHERE id = $1`, [id]);
       
       // Delete corrupted files
-      try { fs.unlinkSync(file.transcoded_mp4_path); } catch (e) {}
-      if (file.transcoded_webm_path) {
-        try { fs.unlinkSync(file.transcoded_webm_path); } catch (e) {}
-      }
+      if (file.transcoded_mp4_path) CacheTrackerService.unlinkFileSync(file.transcoded_mp4_path);
+      if (file.transcoded_webm_path) CacheTrackerService.unlinkFileSync(file.transcoded_webm_path);
       
       // Re-queue
       const { videoQueue } = await import('../../queue/videoQueue');

@@ -4,6 +4,7 @@ import path from 'path';
 import sharp from 'sharp';
 import ffmpeg from 'fluent-ffmpeg';
 import { encode } from 'blurhash';
+import { CacheTrackerService } from './cacheTracker.service';
 import { query } from '../../config/db';
 import { VideoService } from './video.service';
 
@@ -93,6 +94,7 @@ export class MediaService {
           .toBuffer();
       }
       await fs.promises.writeFile(out1080, preview1080);
+      CacheTrackerService.recordWrite('1080p', preview1080.length).catch(() => {});
 
       // 2. Generate 480p WebP thumbnail (max 854x480, quality 65)
       // Downscale the already-decoded preview instead of decoding the source again.
@@ -102,6 +104,7 @@ export class MediaService {
         .toBuffer();
       
       await fs.promises.writeFile(out480, buffer480);
+      CacheTrackerService.recordWrite('480p', buffer480.length).catch(() => {});
 
       // 3. Calculate Blurhash string using sharp and blurhash library
       const rawImage = await sharp(buffer480)

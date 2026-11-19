@@ -3,10 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import { query } from '../../config/db';
+import { redis } from '../../config/redis';
 import { requireAuth, verifyMediaAccess } from '../../utils/auth';
 import { SmartSearchService } from './smartSearch.service';
 import { MLService, FACE_THUMB_SIZE, FACE_PADDING, parseBoundingBox } from './ml.service';
 import { faceThumbnailQueue } from '../../queue/faceThumbnailQueue';
+import { CacheTrackerService } from '../media/cacheTracker.service';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
@@ -67,19 +69,32 @@ function sendDefaultAvatar(reply: any) {
 export async function mlRoutes(fastify: FastifyInstance) {
   
   // Get all unique people clusters (with a representative face image and face count)
-  fastify.get<{ Querystring: { page?: string, limit?: string, sort?: string } }>('/api/faces', { preHandler: requireAuth }, async (request, reply) => {
+  fastify.get<{ Querystring: { page?: string, limit?: string, sort?: string, refresh?: string } }>('/api/faces', { preHandler: requireAuth }, async (request, reply) => {
     const page = parseInt(request.query.page || '1', 10);
     const limit = parseInt(request.query.limit || '50', 10);
     const offset = (page - 1) * limit;
     const sort = request.query.sort || 'named';
+    const refresh = request.query.refresh === '1';
+
+    const cacheKey = `faces:list:${page}:${limit}:${sort}`;
+    if (!refresh) {
+      try {
+        const cached = await redis.get(cacheKey);
+        if (cached) return reply.send(JSON.parse(cached));
+      } catch {}
+    }
 
     let orderByClause = 'ORDER BY pc.face_count DESC, pc.latest_created DESC';
+    let outerOrderByClause = 'ORDER BY op.face_count DESC, op.latest_created DESC';
     if (sort === 'named') {
       orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, pc.face_count DESC, pc.latest_created DESC";
+      outerOrderByClause = "ORDER BY NULLIF(op.name, '') IS NULL ASC, op.face_count DESC, op.latest_created DESC";
     } else if (sort === 'a-z') {
       orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, p.name ASC, pc.face_count DESC";
+      outerOrderByClause = "ORDER BY NULLIF(op.name, '') IS NULL ASC, op.name ASC, op.face_count DESC";
     } else if (sort === 'z-a') {
       orderByClause = "ORDER BY NULLIF(p.name, '') IS NULL ASC, p.name DESC, pc.face_count DESC";
+      outerOrderByClause = "ORDER BY NULLIF(op.name, '') IS NULL ASC, op.name DESC, op.face_count DESC";
     }
 
     const result = await query(`
@@ -92,25 +107,34 @@ export async function mlRoutes(fastify: FastifyInstance) {
         WHERE person_id IS NOT NULL
         GROUP BY person_id
       ),
+      ordered_people AS (
+        SELECT 
+          pc.person_id,
+          pc.face_count,
+          pc.latest_created,
+          p.name,
+          p.cover_media_id,
+          p.cover_face_id
+        FROM person_clusters pc
+        LEFT JOIN people p ON p.id = pc.person_id
+        ${orderByClause}
+        LIMIT $1 OFFSET $2
+      ),
       rep_faces AS (
-        SELECT DISTINCT ON (fe.person_id)
-          fe.person_id,
-          fe.media_id,
-          fe.bounding_box
-        FROM face_embeddings fe
-        LEFT JOIN people p ON p.id = fe.person_id
-        JOIN media_files m ON m.id = fe.media_id
-        WHERE fe.person_id IS NOT NULL
-        ORDER BY fe.person_id,
-                 CASE WHEN fe.media_id = p.cover_media_id THEN 0 ELSE 1 END,
-                 (SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe.media_id) ASC,
-                 m.created_at DESC
+        SELECT DISTINCT ON (op.person_id)
+          op.person_id,
+          COALESCE(fe_cov.media_id, fe_fb.media_id) as media_id,
+          COALESCE(fe_cov.bounding_box, fe_fb.bounding_box) as bounding_box
+        FROM ordered_people op
+        LEFT JOIN face_embeddings fe_cov ON fe_cov.id = op.cover_face_id
+        LEFT JOIN face_embeddings fe_fb ON fe_fb.person_id = op.person_id
+        ORDER BY op.person_id, (fe_cov.id IS NOT NULL) DESC, fe_fb.created_at DESC
       )
       SELECT 
-        pc.person_id as id,
-        pc.person_id,
-        pc.face_count as count,
-        pc.face_count,
+        op.person_id as id,
+        op.person_id,
+        op.face_count as count,
+        op.face_count,
         rf.media_id,
         rf.bounding_box,
         COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
@@ -118,27 +142,27 @@ export async function mlRoutes(fastify: FastifyInstance) {
         m.blurhash,
         m.file_name,
         m.folder_path,
-        p.name,
-        p.cover_media_id
-      FROM person_clusters pc
-      JOIN rep_faces rf ON pc.person_id = rf.person_id
+        op.name,
+        op.cover_media_id
+      FROM ordered_people op
+      JOIN rep_faces rf ON op.person_id = rf.person_id
       JOIN media_files m ON m.id = rf.media_id
-      LEFT JOIN people p ON p.id = pc.person_id
-      ${orderByClause}
-      LIMIT $1 OFFSET $2
+      ${outerOrderByClause}
     `, [limit, offset]);
     
     const facesDir = path.join(CACHE_ROOT, 'faces');
     for (const row of result.rows) {
       const cachedPath = path.join(facesDir, `${row.person_id}.webp`);
       row.has_thumbnail = fs.existsSync(cachedPath);
-      if (!row.has_thumbnail) {
-        // Enqueue background generation non-blockingly so it doesn't freeze the backend!
-        // We require the queue here to avoid circular imports if any
-
+      if (!row.has_thumbnail && row.media_id) {
         faceThumbnailQueue.add('generate-face-thumbnails', { mediaId: row.media_id }).catch((err: any) => console.error(err));
       }
     }
+
+    try {
+      await redis.set(cacheKey, JSON.stringify(result.rows), 'EX', 600);
+    } catch {}
+
     return reply.send(result.rows);
   });
 
@@ -156,6 +180,11 @@ export async function mlRoutes(fastify: FastifyInstance) {
       VALUES ($1, $2)
       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
     `, [id, name]);
+
+    try {
+      const keys = await redis.keys('faces:list:*');
+      if (keys.length > 0) await redis.del(...keys);
+    } catch {}
 
     return reply.send({ success: true, name });
   });
@@ -262,10 +291,22 @@ export async function mlRoutes(fastify: FastifyInstance) {
     const { mediaId } = request.body;
 
     await query(`
-      INSERT INTO people (id, name, cover_media_id)
-      VALUES ($1, '', $2)
-      ON CONFLICT (id) DO UPDATE SET cover_media_id = EXCLUDED.cover_media_id
+      INSERT INTO people (id, name, cover_media_id, cover_face_id)
+      VALUES (
+        $1, 
+        '', 
+        $2, 
+        (SELECT id FROM face_embeddings WHERE person_id = $1 AND media_id = $2 LIMIT 1)
+      )
+      ON CONFLICT (id) DO UPDATE SET 
+        cover_media_id = EXCLUDED.cover_media_id,
+        cover_face_id = EXCLUDED.cover_face_id
     `, [safeId, mediaId]);
+
+    try {
+      const keys = await redis.keys('faces:list:*');
+      if (keys.length > 0) await redis.del(...keys);
+    } catch {}
 
     // Delete cached face thumbnail so it regenerates from the new cover photo
     const facesDir = path.resolve(CACHE_ROOT, 'faces');
@@ -274,7 +315,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Invalid ID' });
     }
     if (fs.existsSync(cachedPath)) {
-      await fs.promises.unlink(cachedPath);
+      await CacheTrackerService.unlinkFile(cachedPath);
     }
 
     return reply.send({ success: true, mediaId });

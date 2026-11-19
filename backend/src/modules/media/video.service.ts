@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
+import { CacheTrackerService } from './cacheTracker.service';
 import ffmpeg from 'fluent-ffmpeg';
 import { encode } from 'blurhash';
 import { query } from '../../config/db';
@@ -155,6 +156,7 @@ export class VideoService {
           .toBuffer();
 
         await fs.promises.writeFile(thumb480Out, buffer480);
+        CacheTrackerService.recordWrite('480p', buffer480.length).catch(() => {});
         has480p = true;
 
         const rawImage = await sharp(buffer480)
@@ -215,6 +217,14 @@ export class VideoService {
         await transcodeToWebm(fullPath, webmOut);
 
         isTranscoded = fs.existsSync(mp4Out) && fs.existsSync(webmOut);
+        if (fs.existsSync(mp4Out)) {
+          const s = await fs.promises.stat(mp4Out).catch(() => null);
+          if (s) CacheTrackerService.recordWrite('transcoded', s.size).catch(() => {});
+        }
+        if (fs.existsSync(webmOut)) {
+          const s = await fs.promises.stat(webmOut).catch(() => null);
+          if (s) CacheTrackerService.recordWrite('transcoded', s.size).catch(() => {});
+        }
         await query(
           `UPDATE media_files SET is_transcoded = $1, transcoded_mp4_path = $2, transcoded_webm_path = $3, updated_at = NOW() WHERE id = $4`,
           [isTranscoded, isTranscoded ? mp4Out : null, isTranscoded ? webmOut : null, mediaId]

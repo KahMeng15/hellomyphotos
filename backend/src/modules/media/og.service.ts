@@ -5,6 +5,7 @@ import { Resvg } from '@resvg/resvg-js';
 import sharp from 'sharp';
 import { query } from '../../config/db';
 import { computeCoverObjectPosition } from './cover.utils';
+import { CacheTrackerService } from './cacheTracker.service';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_DIR = path.join(process.env.CACHE_ROOT || defaultCacheDir, 'og');
@@ -207,6 +208,7 @@ export class OgService {
     const resvg = new Resvg(svg);
     const pngData = resvg.render().asPng();
     fs.writeFileSync(cachePath, pngData);
+    CacheTrackerService.recordWrite('og', pngData.length).catch(() => {});
     
     return cachePath;
   }

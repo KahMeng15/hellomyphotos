@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { redis } from '../config/redis';
 import { ScannerService } from '../modules/scanner/scanner.service';
 import { query } from '../config/db';
+import { CacheTrackerService } from '../modules/media/cacheTracker.service';
 import fs from 'fs';
 import path from 'path';
 
@@ -39,7 +40,7 @@ if (process.env.IS_WORKER === 'true') {
           for (const file of files) {
             const id = file.split('.')[0];
             if (id.length === 36 && !validIds.has(id)) {
-              await fs.promises.unlink(path.join(dirPath, file)).catch(()=>{});
+              await CacheTrackerService.unlinkFile(path.join(dirPath, file)).catch(()=>{});
               delCount++;
             }
           }

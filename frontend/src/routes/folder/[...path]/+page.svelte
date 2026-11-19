@@ -4,7 +4,7 @@ import { slide } from 'svelte/transition';
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import CoverImage from '$lib/components/CoverImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, getStreamUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, regenerateImages, regenerateVideos, searchFolderContent, type MediaFile, type DirectoryInfo } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, getStreamUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, regenerateImages, regenerateVideos, regenerateFolderWatermarks, searchFolderContent, type MediaFile, type DirectoryInfo } from '$lib/api/media';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
   import { getSortDate, getRawDate } from '$lib/utils/date';
   import { createShare, getActiveShares, revokeShare, updateShare, getAccessRequests, respondAccessRequest, getWatermarkTemplatesForShare, type ShareData, type AccessRequest, type WatermarkTemplateOption } from '$lib/api/shares';
@@ -574,6 +574,20 @@ import { slide } from 'svelte/transition';
       showAppAlert('Error', 'Failed to regenerate OG image');
     } finally {
       isRegeneratingOG = false;
+    }
+  }
+
+  let isRegeneratingWatermarks = $state(false);
+  async function handleRegenerateWatermarks() {
+    try {
+      isRegeneratingWatermarks = true;
+      const res = await regenerateFolderWatermarks(data.folderPath || '');
+      showAppAlert('Success', `Watermark regeneration complete! Purged ${res.purged} cached, regenerated ${res.regenerated} preview photos.`);
+    } catch (e: any) {
+      console.error(e);
+      showAppAlert('Error', e.message || 'Failed to regenerate watermarks');
+    } finally {
+      isRegeneratingWatermarks = false;
     }
   }
   
@@ -2111,6 +2125,10 @@ import { slide } from 'svelte/transition';
     
     <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRegenerateOG} disabled={isRegeneratingOG}>
       {isRegeneratingOG ? 'Regenerating...' : 'Regenerate WhatsApp / OG Images'}
+    </button>
+    
+    <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: white; width: 100%; justify-content: flex-start;" onclick={handleRegenerateWatermarks} disabled={isRegeneratingWatermarks}>
+      {isRegeneratingWatermarks ? 'Regenerating...' : 'Regenerate Watermarked Photos'}
     </button>
     
     <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: #ff9999; width: 100%; justify-content: flex-start;" onclick={handleRegenerateImages} disabled={isRegeneratingImages}>

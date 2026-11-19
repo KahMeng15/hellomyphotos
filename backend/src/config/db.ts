@@ -293,6 +293,22 @@ const SCHEMA_STATEMENTS = [
   `INSERT INTO watermark_templates (id, name, description, is_default, type, text_content, font_family, anchor, inset_x, inset_y, scale_mode, scale_value, opacity, allow_hd_download, restricted_tier)
    SELECT '00000000-0000-0000-0000-000000000001', 'Default Studio Copyright', 'Standard bottom-right copyright badge with 1080p web downloads', true, 'text', '© {year} {copyright}', 'Inter', 'bottom-right', 3.0, 3.0, 'proportional_long_edge', 15.0, 0.85, false, '1080p'
    WHERE NOT EXISTS (SELECT 1 FROM watermark_templates)`,
+
+  // ---- Performance Optimization: Fast People Clusters & Indexes ----
+  `ALTER TABLE people ADD COLUMN IF NOT EXISTS cover_face_id UUID REFERENCES face_embeddings(id) ON DELETE SET NULL`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_face_embeddings_person_media ON face_embeddings(person_id, media_id)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_people_cover_media ON people(cover_media_id)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_people_cover_face ON people(cover_face_id)`,
+  `UPDATE people p
+   SET cover_face_id = rf.id,
+       cover_media_id = COALESCE(p.cover_media_id, rf.media_id)
+   FROM (
+     SELECT DISTINCT ON (person_id) id, person_id, media_id
+     FROM face_embeddings
+     WHERE person_id IS NOT NULL
+     ORDER BY person_id, created_at DESC
+   ) rf
+   WHERE p.id = rf.person_id AND p.cover_face_id IS NULL`,
 ];
 
 // Statements not yet successfully applied. Succeeded ones are dropped so they

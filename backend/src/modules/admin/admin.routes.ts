@@ -19,6 +19,7 @@ import { normalizeReferrer, SPAM_DOMAINS, SPAM_SUBSTRINGS } from '../../utils/re
 import { AnalyticsService } from '../analytics/analytics.service';
 import { isShareLockdownActive, setShareLockdown } from '../../utils/lockdown.js';
 import { lookupIp } from '../../utils/geoIp';
+import { CacheTrackerService } from '../media/cacheTracker.service';
 import path from 'path';
 import fs from 'fs';
 
@@ -41,48 +42,10 @@ async function enrichIPs(rows: any[]): Promise<any[]> {
 
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
 
-// Walk a directory recursively and sum the size of every file it contains.
-async function getDirSize(dir: string): Promise<number> {
-  let total = 0;
-  const stack = [dir];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    let entries;
-    try {
-      entries = await fs.promises.readdir(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(full);
-      } else if (entry.isFile()) {
-        try { total += (await fs.promises.stat(full)).size; } catch {}
-      }
-    }
-  }
-  return total;
-}
-
-// Per top-level subfolder sizes of the cache directory (480p, 1080p, faces, transcodes, ...)
-async function getCacheBreakdown(root: string): Promise<{ name: string; bytes: number }[]> {
-  let entries;
-  try {
-    entries = await fs.promises.readdir(root, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  const out: { name: string; bytes: number }[] = [];
-  for (const entry of entries) {
-    const full = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      out.push({ name: entry.name, bytes: await getDirSize(full) });
-    } else if (entry.isFile()) {
-      try { out.push({ name: entry.name, bytes: (await fs.promises.stat(full)).size }); } catch {}
-    }
-  }
-  return out.sort((a, b) => b.bytes - a.bytes);
+// Cache sizes are tracked in real-time in Redis/DB via CacheTrackerService
+// rather than doing slow recursive filesystem walks on every HTTP request.
+async function getCacheStats() {
+  return CacheTrackerService.getCacheStats();
 }
 
 function logAudit(level: string, message: string, userId?: string, ipAddress?: string) {
@@ -403,6 +366,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
       await fs.promises.rm(path.join(cacheRoot, 'faces'), { recursive: true, force: true });
       await fs.promises.mkdir(path.join(cacheRoot, 'faces'), { recursive: true });
+      await CacheTrackerService.recordDirWiped('faces');
 
       // 3. Clean stale face thumbnail queue jobs
       await faceThumbnailQueue.clean(0, 10000, 'completed');
@@ -475,6 +439,9 @@ export async function adminRoutes(fastify: FastifyInstance) {
       await fs.promises.mkdir(path.join(cacheRoot, '1080p'), { recursive: true });
       await fs.promises.mkdir(path.join(cacheRoot, '480p'), { recursive: true });
       await fs.promises.mkdir(path.join(cacheRoot, 'faces'), { recursive: true });
+      await CacheTrackerService.recordDirWiped('1080p');
+      await CacheTrackerService.recordDirWiped('480p');
+      await CacheTrackerService.recordDirWiped('faces');
 
 
       for (const q of Object.values(allQueues)) {
@@ -639,6 +606,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       // M-5 Fix: async rm
       await fs.promises.rm(path.join(cacheRoot, 'faces'), { recursive: true, force: true });
       await fs.promises.mkdir(path.join(cacheRoot, 'faces'), { recursive: true });
+      await CacheTrackerService.recordDirWiped('faces');
 
       await faceThumbnailQueue.clean(0, 10000, 'completed');
       await faceThumbnailQueue.clean(0, 10000, 'failed');
@@ -670,19 +638,20 @@ export async function adminRoutes(fastify: FastifyInstance) {
     }
   });
 
+  fastify.post('/api/admin/cache/sync', async (request, reply) => {
+    try {
+      const stats = await CacheTrackerService.syncFromDisk();
+      return reply.send({ success: true, ...stats });
+    } catch (e: any) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
   fastify.get('/api/admin/analytics', async (request, reply) => {
     try {
-      await AnalyticsService.flushToPostgres();
-      const photosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'image/%'`);
-      const videosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'video/%'`);
-
       // Scope: 'all' (global) or 'shares' (shared links only)
-      const { scope } = request.query as any;
+      const { scope, refresh, nocache } = (request.query || {}) as any;
       const shareOnly = scope === 'shares';
-      const mediaScope = shareOnly ? ' AND share_token IS NOT NULL' : '';
-      const mediaWhere = shareOnly ? ' WHERE share_token IS NOT NULL' : '';
-
-      const visitsStats = await query(`SELECT COUNT(*) as count FROM media_analytics${mediaWhere}`);
 
       // Analytics filtering preferences (bot traffic / referrer spam)
       const prefRes = await query(`SELECT key, value FROM admin_settings WHERE key IN ('analytics_filter_bots', 'analytics_filter_spam')`);
@@ -693,6 +662,33 @@ export async function adminRoutes(fastify: FastifyInstance) {
       };
       const filterBots = pref('analytics_filter_bots', false);
       const filterSpam = pref('analytics_filter_spam', false);
+
+      const cacheKey = `admin:analytics:summary:${scope || 'all'}:${filterBots ? 1 : 0}:${filterSpam ? 1 : 0}`;
+      if (!refresh && !nocache) {
+        try {
+          const cached = await redis.get(cacheKey);
+          if (cached) {
+            const data = JSON.parse(cached);
+            const liveCache = await CacheTrackerService.getCacheStats();
+            if (data.stats?.cache) {
+              data.stats.cache.size = liveCache.size;
+            }
+            data.cacheBreakdown = liveCache.breakdown;
+            return reply.send(data);
+          }
+        } catch (err) {
+          // Redis fallback
+        }
+      }
+
+      await AnalyticsService.flushToPostgres();
+      const photosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'image/%'`);
+      const videosStats = await query(`SELECT COUNT(*) as count, COALESCE(SUM(size_bytes), 0) as size FROM media_files WHERE mime_type LIKE 'video/%'`);
+
+      const mediaScope = shareOnly ? ' AND share_token IS NOT NULL' : '';
+      const mediaWhere = shareOnly ? ' WHERE share_token IS NOT NULL' : '';
+
+      const visitsStats = await query(`SELECT COUNT(*) as count FROM media_analytics${mediaWhere}`);
 
       // Build a reusable WHERE clause for visitor-based queries
       const visitConds: string[] = [];
@@ -836,8 +832,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         query(`SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') as point, COALESCE(SUM(cache_bytes_saved), 0) as bytes FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} cache_bytes_saved > 0 GROUP BY point ORDER BY point`, visitParams)
       ]);
 
-      const cacheSize = await getDirSize(CACHE_ROOT);
-      const cacheBreakdown = await getCacheBreakdown(CACHE_ROOT);
+      const { size: cacheSize, breakdown: cacheBreakdown } = await CacheTrackerService.getCacheStats();
 
       const toInt = (v: any) => {
         if (v === null || v === undefined) return 0;
@@ -894,7 +889,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       const normBreakdown = (rows: any[]) => rows.map(r => ({ name: r.name, count: toInt(r.count) }));
       const normIPs = (rows: any[]) => rows.map(r => ({ ip: r.ip, visits: toInt(r.visits) }));
 
-      return reply.send({
+      const responsePayload = {
         filters: {
           filterBots,
           filterSpam
@@ -1086,7 +1081,10 @@ export async function adminRoutes(fastify: FastifyInstance) {
             hitRatio: cacheHitRatio
           }
         }
-      });
+      };
+
+      redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 600).catch(() => {});
+      return reply.send(responsePayload);
     } catch (e: any) {
       request.log.error(e);
       return reply.status(500).send({ error: e.message });
@@ -1098,8 +1096,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
   // caller narrow to shared-link traffic, or to one specific shared link.
   fastify.get('/api/admin/analytics/folder', async (request, reply) => {
     try {
-      await AnalyticsService.flushToPostgres();
-      const { path: folderPath = '', includeDescendants = '0', scope = 'all', shareToken = '' } = request.query as any;
+      const { path: folderPath = '', includeDescendants = '0', scope = 'all', shareToken = '', refresh, nocache } = request.query as any;
       const descend = includeDescendants === '1';
       const shareOnly = scope === 'shares';
 
@@ -1112,6 +1109,20 @@ export async function adminRoutes(fastify: FastifyInstance) {
       };
       const filterBots = pref('analytics_filter_bots', false);
       const filterSpam = pref('analytics_filter_spam', false);
+
+      const cacheKey = `admin:analytics:folder:${folderPath}:${descend ? 1 : 0}:${scope}:${shareToken || ''}:${filterBots ? 1 : 0}:${filterSpam ? 1 : 0}`;
+      if (!refresh && !nocache) {
+        try {
+          const cached = await redis.get(cacheKey);
+          if (cached) {
+            return reply.send(JSON.parse(cached));
+          }
+        } catch (err) {
+          // Redis fallback
+        }
+      }
+
+      await AnalyticsService.flushToPostgres();
 
       // Each query builds its own params (contiguous, starting at $1) so Postgres can
       // infer parameter types; unused placeholders in the bind array would error.
@@ -1319,7 +1330,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       const normBreakdown = (rows: any[]) => rows.map(r => ({ name: r.name, count: toInt(r.count) }));
       const normIPs = (rows: any[]) => rows.map(r => ({ ip: r.ip, visits: toInt(r.visits) }));
 
-      return reply.send({
+      const responsePayload = {
         filters: { filterBots, filterSpam },
         folder: { path: folderPath, includeDescendants: descend, scope, shareToken: shareOnly ? shareToken || null : null },
         availableShares: availableShares.rows.map(r => ({ share_token: r.share_token, label: r.label })),
@@ -1497,7 +1508,10 @@ export async function adminRoutes(fastify: FastifyInstance) {
             hitRatio: cacheHitRatio
           }
         }
-      });
+      };
+
+      redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 600).catch(() => {});
+      return reply.send(responsePayload);
     } catch (e: any) {
       request.log.error(e);
       return reply.status(500).send({ error: e.message });

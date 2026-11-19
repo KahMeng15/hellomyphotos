@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import { metadataQueue } from '../../queue/metadataQueue';
 import { thumbnailQueue } from '../../queue/thumbnailQueue';
 import { videoQueue } from '../../queue/videoQueue';
+import { redis } from '../../config/redis';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
@@ -567,70 +568,114 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     if (!fullPath.startsWith(resolvedMediaRoot)) {
       return reply.status(400).send({ error: 'Invalid folder path' });
     }
-    let directories: { name: string, cover_id: string | null, blurhash: string | null }[] = [];
+    const dirsCacheKey = `share:dirs:${token}:${targetPath}`;
+    let directories: { name: string, cover_id: string | null, blurhash: string | null, cover_bounding_box?: any, cover_img_width?: number | null, cover_img_height?: number | null }[] = [];
+    let dirsCached = false;
     try {
-      if (fs.existsSync(fullPath)) {
-        const items = await fs.promises.readdir(fullPath, { withFileTypes: true });
-        
-        const dirNames = items.filter(item => item.isDirectory()).map(item => item.name);
-        
-        directories = await Promise.all(dirNames.map(async (name) => {
-          const subPath = share.folder_path ? `${share.folder_path}/${name}` : name;
-          
-          const customCoverRes = await query(`
-            SELECT m.id, m.blurhash,
-              COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
-              COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
-              (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
-            FROM folder_settings fs
-            JOIN media_files m ON m.id = COALESCE(fs.cover_media_id, fs.auto_cover_media_id)
-            WHERE fs.folder_path = $1
-          `, [subPath]);
-
-          if (customCoverRes.rows.length > 0) {
-            return {
-              name,
-              cover_id: customCoverRes.rows[0].id,
-              blurhash: customCoverRes.rows[0].blurhash,
-              cover_bounding_box: customCoverRes.rows[0].bounding_box || null,
-              cover_img_width: customCoverRes.rows[0].img_width || null,
-              cover_img_height: customCoverRes.rows[0].img_height || null
-            };
-          }
-
-          const coverResult = await query(`
-            SELECT m.id, m.blurhash,
-              COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
-              COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
-              (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
-            FROM media_files m 
-            WHERE m.folder_path = $1 OR m.folder_path LIKE $1 || '/%'
-            ORDER BY (m.blurhash IS NOT NULL) DESC, m.id ASC
-            LIMIT 1
-          `, [subPath]);
-          
-          if (coverResult.rows.length > 0) {
-            query(`
-              INSERT INTO folder_settings (folder_path, auto_cover_media_id)
-              VALUES ($1, $2)
-              ON CONFLICT (folder_path) DO UPDATE SET auto_cover_media_id = EXCLUDED.auto_cover_media_id
-            `, [subPath, coverResult.rows[0].id]).catch(() => {});
-          }
-
-          return {
-            name,
-            cover_id: coverResult.rows[0]?.id || null,
-            blurhash: coverResult.rows[0]?.blurhash || null,
-            cover_bounding_box: coverResult.rows[0]?.bounding_box || null,
-            cover_img_width: coverResult.rows[0]?.img_width || null,
-            cover_img_height: coverResult.rows[0]?.img_height || null
-          };
-        }));
-        
-        directories.sort((a, b) => a.name.localeCompare(b.name));
+      const cached = await redis.get(dirsCacheKey);
+      if (cached) {
+        directories = JSON.parse(cached);
+        dirsCached = true;
       }
     } catch (e) {
-      console.error('Failed to read directory:', fullPath, e);
+      // Redis error fallback
+    }
+
+    if (!dirsCached) {
+      try {
+        if (fs.existsSync(fullPath)) {
+          const items = await fs.promises.readdir(fullPath, { withFileTypes: true });
+          
+          const dirNames = items.filter(item => item.isDirectory()).map(item => item.name);
+          
+          if (dirNames.length > 0) {
+            const subPaths = dirNames.map(name => targetPath ? `${targetPath}/${name}` : name);
+            const coverMap = new Map<string, any>();
+
+            // 1. Batch query all custom / pre-calculated covers
+            try {
+              const coversRes = await query(`
+                SELECT fs.folder_path, m.id, m.blurhash,
+                  COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+                  COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+                  (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
+                FROM folder_settings fs
+                JOIN media_files m ON m.id = COALESCE(fs.cover_media_id, fs.auto_cover_media_id)
+                WHERE fs.folder_path = ANY($1::text[])
+              `, [subPaths]);
+
+              for (const row of coversRes.rows) {
+                coverMap.set(row.folder_path, {
+                  id: row.id,
+                  blurhash: row.blurhash,
+                  bounding_box: row.bounding_box,
+                  img_width: row.img_width,
+                  img_height: row.img_height
+                });
+              }
+            } catch (batchErr: any) {
+              console.error('Failed to batch query folder covers for share', batchErr);
+            }
+
+            // 2. Batch query fallback covers for subfolders missing covers
+            const missingSubPaths = subPaths.filter(sp => !coverMap.has(sp));
+            if (missingSubPaths.length > 0) {
+              try {
+                const fallbackRes = await query(`
+                  SELECT sub.p AS folder_path, c.id, c.blurhash, c.img_width, c.img_height, c.bounding_box
+                  FROM unnest($1::text[]) AS sub(p)
+                  CROSS JOIN LATERAL (
+                    SELECT m.id, m.blurhash,
+                      COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+                      COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+                      (SELECT bounding_box FROM face_embeddings WHERE media_id = m.id ORDER BY created_at DESC LIMIT 1) as bounding_box
+                    FROM media_files m
+                    WHERE m.folder_path = sub.p OR m.folder_path LIKE sub.p || '/%'
+                    ORDER BY (m.blurhash IS NOT NULL) DESC, m.id ASC
+                    LIMIT 1
+                  ) c
+                `, [missingSubPaths]);
+
+                for (const row of fallbackRes.rows) {
+                  coverMap.set(row.folder_path, {
+                    id: row.id,
+                    blurhash: row.blurhash,
+                    bounding_box: row.bounding_box,
+                    img_width: row.img_width,
+                    img_height: row.img_height
+                  });
+                  query(`
+                    INSERT INTO folder_settings (folder_path, auto_cover_media_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (folder_path) DO UPDATE SET auto_cover_media_id = EXCLUDED.auto_cover_media_id
+                  `, [row.folder_path, row.id]).catch(() => {});
+                }
+              } catch (fallbackErr: any) {
+                console.error('Failed to batch query fallback covers for share', fallbackErr);
+              }
+            }
+
+            directories = dirNames.map((name, idx) => {
+              const sp = subPaths[idx];
+              const c = coverMap.get(sp);
+              return {
+                name,
+                cover_id: c?.id || null,
+                blurhash: c?.blurhash || null,
+                cover_bounding_box: c?.bounding_box || null,
+                cover_img_width: c?.img_width || null,
+                cover_img_height: c?.img_height || null
+              };
+            });
+            directories.sort((a, b) => a.name.localeCompare(b.name));
+          }
+
+          // Cache in Redis for 10 minutes (600s)
+          redis.set(dirsCacheKey, JSON.stringify(directories), 'EX', 600).catch(() => {});
+        }
+      } catch (e) {
+        console.error('Failed to read directory:', fullPath, e);
+      }
     }
 
     let folderCoverId = null;
@@ -841,6 +886,10 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
     
     await query(`DELETE FROM shared_folders WHERE share_token = $1`, [token]);
+    try {
+      const keys = await redis.keys(`share:dirs:${token}:*`);
+      if (keys.length > 0) await redis.del(...keys);
+    } catch (e) {}
     
     return reply.send({ success: true });
   });
@@ -930,6 +979,11 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       WHERE share_token = $${idx}
       RETURNING *
     `, values);
+
+    try {
+      const keys = await redis.keys(`share:dirs:${token}:*`);
+      if (keys.length > 0) await redis.del(...keys);
+    } catch (e) {}
 
     return reply.send({ success: true, share: updateRes.rows[0] });
   });

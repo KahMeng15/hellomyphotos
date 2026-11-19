@@ -50,6 +50,11 @@ const start = async () => {
         await app.listen({ port: PORT, host: '0.0.0.0' });
         app.log.info(`Server listening on port ${PORT}`);
         logger.info(`Server started on port ${PORT}`);
+
+        // Initialize CacheTracker in the background
+        import('./modules/media/cacheTracker.service').then(({ CacheTrackerService }) => {
+          CacheTrackerService.ensureInitialized().catch(() => {});
+        }).catch(() => {});
       } else {
         logger.info(`API disabled via DISABLE_API=true. Running worker orchestrator only.`);
       }

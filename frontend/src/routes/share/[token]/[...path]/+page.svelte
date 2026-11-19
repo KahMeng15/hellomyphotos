@@ -1027,7 +1027,7 @@ import { slide } from 'svelte/transition';
           {#if dir.cover_id}
             <BlurhashImage 
               hash={dir.blurhash || ''} 
-              src={`${getThumbnailUrl(dir.cover_id, data.token)}${dir.blurhash ? (getThumbnailUrl(dir.cover_id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(dir.blurhash) : ''}`} 
+              src={`${getThumbnailUrl(dir.cover_id, data.token)}${dir.blurhash ? (getThumbnailUrl(dir.cover_id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(dir.blurhash) : ''}${data.share?.watermark_template_id ? '&wv=' + data.share.watermark_template_id : (data.share?.watermark_enabled ? '&wv=1' : '')}`} 
               alt={dir.name}
               objectFit="cover"
               square={true}
@@ -1156,7 +1156,7 @@ import { slide } from 'svelte/transition';
     {#each sortedFiles as file, i}
       <BlurhashImage 
         hash={file.blurhash || ''} 
-        src={`${getThumbnailUrl(file.id, data.token)}${file.blurhash ? (getThumbnailUrl(file.id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(file.blurhash) : ''}`} 
+        src={`${getThumbnailUrl(file.id, data.token)}${file.blurhash ? (getThumbnailUrl(file.id, data.token).includes('?') ? '&' : '?') + 'cb=' + encodeURIComponent(file.blurhash) : ''}${data.share?.watermark_template_id ? '&wv=' + data.share.watermark_template_id : (data.share?.watermark_enabled ? '&wv=1' : '')}`} 
         alt={file.file_name} 
         fileName={isSearching && file.relative_path ? file.relative_path : file.file_name}
         showFileName={showFileNames || isSearching}

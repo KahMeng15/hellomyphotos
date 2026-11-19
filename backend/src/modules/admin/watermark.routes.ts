@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { requireAuth } from '../../utils/auth';
 import { query } from '../../config/db';
 import { WatermarkService, WatermarkTemplate } from '../media/watermark.service';
+import { CacheTrackerService } from '../media/cacheTracker.service';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
@@ -141,6 +142,7 @@ export async function watermarkRoutes(fastify: FastifyInstance) {
       const destPath = path.join(WATERMARK_DIR, safeName);
 
       await fs.promises.writeFile(destPath, buffer);
+      CacheTrackerService.recordWrite('watermarks', buffer.length).catch(() => {});
 
       return reply.send({
         success: true,

@@ -11,6 +11,8 @@ import { videoQueue } from '../../queue/videoQueue';
 import { query } from '../../config/db';
 import { requireAuth, hasFolderAccess, canBrowseFolder } from '../../utils/auth';
 import { logger } from '../../utils/logger';
+import { WatermarkService } from '../media/watermark.service';
+import { CacheTrackerService } from '../media/cacheTracker.service';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
 
@@ -69,6 +71,8 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         await redis.del(`folder_dirs_v2:${p}`).catch(() => {});
         const parent = p.includes('/') ? p.substring(0, p.lastIndexOf('/')) : '';
         await redis.del(`folder_dirs_v2:${parent}`).catch(() => {});
+        const shareKeys = await redis.keys('share:dirs:*');
+        if (shareKeys.length > 0) await redis.del(...shareKeys).catch(() => {});
       } catch (cacheErr) {
         // non-critical
       }
@@ -185,8 +189,8 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       try {
         const p480 = path.join(CACHE_ROOT, '480p', `${row.id}.webp`);
         const p1080 = path.join(CACHE_ROOT, '1080p', `${row.id}.webp`);
-        if (fs.existsSync(p480)) fs.unlinkSync(p480);
-        if (fs.existsSync(p1080)) fs.unlinkSync(p1080);
+        CacheTrackerService.unlinkFileSync(p480);
+        CacheTrackerService.unlinkFileSync(p1080);
       } catch (e) {
         console.warn('Failed to delete cache files', e);
       }
@@ -232,9 +236,9 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         const p480 = path.join(CACHE_ROOT, '480p', `${row.id}.webp`);
         const pMp4 = path.join(CACHE_ROOT, 'transcoded', 'mp4', `${row.id}.mp4`);
         const pWebm = path.join(CACHE_ROOT, 'transcoded', 'webm', `${row.id}.webm`);
-        if (fs.existsSync(p480)) fs.unlinkSync(p480);
-        if (fs.existsSync(pMp4)) fs.unlinkSync(pMp4);
-        if (fs.existsSync(pWebm)) fs.unlinkSync(pWebm);
+        CacheTrackerService.unlinkFileSync(p480);
+        CacheTrackerService.unlinkFileSync(pMp4);
+        CacheTrackerService.unlinkFileSync(pWebm);
       } catch (e) {
         console.warn('Failed to delete cache files', e);
       }
@@ -244,6 +248,25 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     }
 
     return reply.send({ success: true, count: result.rows.length });
+  });
+
+  fastify.post<{ Body: { folder: string } }>('/api/folder/regenerate-watermarks', { preHandler: requireAuth }, async (request, reply) => {
+    const { folder } = request.body;
+
+    if (request.user?.role === 'viewer') {
+      return reply.status(403).send({ error: 'Forbidden: Viewers cannot trigger watermark regeneration' });
+    }
+    if (!hasFolderAccess(request.user!, folder)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+
+    try {
+      const result = await WatermarkService.regenerateFolderWatermarks(folder || '');
+      return reply.send(result);
+    } catch (err: any) {
+      logger.error('Failed to regenerate folder watermarks:', err);
+      return reply.status(500).send({ error: err.message || 'Failed to regenerate watermarks' });
+    }
   });
 
   fastify.post<{ Body: { folder: string } }>('/api/folder/rescan', { preHandler: requireAuth }, async (request, reply) => {

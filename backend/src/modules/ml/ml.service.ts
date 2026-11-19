@@ -3,6 +3,7 @@ import path from 'path';
 import sharp from 'sharp';
 import { query } from '../../config/db';
 import { SmartSearchService } from './smartSearch.service';
+import { CacheTrackerService } from '../media/cacheTracker.service';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
@@ -213,11 +214,15 @@ export class MLService {
     crop.width = Math.max(1, Math.min(crop.width, imgW - crop.left));
     crop.height = Math.max(1, Math.min(crop.height, imgH - crop.top));
 
-    await sharp(sourcePath)
+    const info = await sharp(sourcePath)
       .extract(crop)
       .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover' })
       .webp({ quality: 80 })
       .toFile(outPath);
+
+    if (info?.size) {
+      CacheTrackerService.recordWrite('faces', info.size).catch(() => {});
+    }
 
     return true;
   }
