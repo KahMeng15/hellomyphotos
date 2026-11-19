@@ -136,6 +136,15 @@
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
+  function getFlagEmoji(countryCode?: string | null) {
+    if (!countryCode || countryCode.length !== 2) return '';
+    const codePoints = countryCode
+      .toUpperCase()
+      .split('')
+      .map((char) => 127397 + char.charCodeAt(0));
+    return String.fromCodePoint(...codePoints) + ' ';
+  }
+
   // --- Link helpers (open folders & media in the app) ---
   function encodePath(p: string) {
     return (p || '').split('/').map(s => encodeURIComponent(s)).join('/');
@@ -180,9 +189,17 @@
     return 'Lifetime (All Time)';
   });
 
+  const GRANULARITY_KEYS: Record<Granularity, string> = {
+    hour: 'hourly',
+    day: 'daily',
+    month: 'monthly',
+    lifetime: 'lifetime'
+  };
+
   function extractSeries(metricGroup: any, range: Granularity, valKey: 'count' | 'bytes' = 'count') {
     if (!metricGroup) return [];
-    const list = metricGroup[range] || [];
+    const key = GRANULARITY_KEYS[range] || range;
+    const list = metricGroup[key] || metricGroup[range] || [];
     return list.map((r: any) => ({ day: r.day, v: r[valKey] ?? r.count ?? r.bytes ?? 0 }));
   }
 
@@ -779,11 +796,35 @@
           <ExpandableList items={data.topIPs} limit={10}>
             {#snippet children(rows)}
               <table>
-                <thead><tr><th>IP Address</th><th>Visits</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>IP Address</th>
+                    <th>Location</th>
+                    <th>ISP / Org</th>
+                    <th class="text-right">Visits</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {#each rows as row}
                     <tr>
                       <td><code class="ip">{row.ip}</code></td>
+                      <td class="truncate loc-cell" title="{row.city ? row.city + ', ' : ''}{row.country || ''}">
+                        {#if row.countryCode}
+                          <span class="flag">{getFlagEmoji(row.countryCode)}</span>
+                        {/if}
+                        {#if row.city || row.country}
+                          {row.city ? `${row.city}, ` : ''}{row.country}
+                        {:else}
+                          <span class="muted">—</span>
+                        {/if}
+                      </td>
+                      <td class="truncate isp-cell" title={row.isp || ''}>
+                        {#if row.isp}
+                          {row.isp}
+                        {:else}
+                          <span class="muted">—</span>
+                        {/if}
+                      </td>
                       <td class="text-right"><strong>{row.visits}</strong></td>
                     </tr>
                   {/each}
@@ -976,6 +1017,7 @@
     border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 12px;
     padding: 1.5rem;
+    overflow-x: auto;
   }
   .card h3 { margin: 0 0 1.5rem 0; display: flex; align-items: center; gap: 0.5rem; font-size: 1.1rem; }
   .hint { font-size: 0.75rem; color: #71717a; font-weight: 400; background: rgba(255,255,255,0.06); padding: 0.15rem 0.5rem; border-radius: 999px; }
@@ -987,7 +1029,10 @@
   td { padding: 0.75rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
   .text-right { text-align: right; }
   .muted { color: #71717a; font-size: 0.85rem; }
-  .truncate { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; }
+  .truncate { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; }
+  .loc-cell { max-width: 140px; }
+  .isp-cell { max-width: 140px; }
+  .flag { margin-right: 0.25rem; font-style: normal; }
   .folder { max-width: 220px; }
   .ip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; background: rgba(255,255,255,0.05); padding: 0.15rem 0.4rem; border-radius: 6px; }
   .link-cell { color: #93c5fd; text-decoration: none; }

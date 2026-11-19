@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { redis } from '../../config/redis';
 import { query } from '../../config/db';
 import { parseUserAgent } from '../../utils/userAgent';
+import { resolveVisitReferrer } from '../../utils/referrer';
 
 const IP_HASH_SALT = process.env.ANALYTICS_IP_SALT || 'hellomyphotos_analytics';
 const VISITS_QUEUE_KEY = 'analytics_visits:queue';
@@ -53,6 +54,13 @@ export class AnalyticsService {
     try {
       const ua = parseUserAgent(record.userAgent);
       const ip = record.ip || 'unknown';
+
+      const selfHost = (() => {
+        try { return new URL(process.env.APP_DOMAIN || '').hostname; } catch { return ''; }
+      })();
+      const resolvedReferrer = resolveVisitReferrer(record.referrer, record.path, selfHost);
+      const effectiveReferrer = resolvedReferrer !== null ? resolvedReferrer : (record.referrer || null);
+
       const entry = {
         media_id: record.mediaId || null,
         share_token: record.shareToken || null,
@@ -64,7 +72,7 @@ export class AnalyticsService {
         os: ua.os,
         browser: ua.browser,
         device_type: ua.deviceType,
-        referrer: (record.referrer || '').slice(0, 500) || null,
+        referrer: (effectiveReferrer || '').slice(0, 500) || null,
         path: (record.path || '').slice(0, 500) || null,
         folder_path: (record.folderPath || '').slice(0, 500) || null,
         page_load_ms: typeof record.pageLoadMs === 'number' && Number.isFinite(record.pageLoadMs) ? Math.round(record.pageLoadMs) : null,

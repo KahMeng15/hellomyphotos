@@ -12,6 +12,7 @@ coverage/
 volumes/*
 !volumes/pg_init/
 !volumes/pg_init/**
+*.mmdb
 
 # Backup archives & database dumps
 *.sql.gz

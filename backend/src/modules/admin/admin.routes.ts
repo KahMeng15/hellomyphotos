@@ -18,8 +18,26 @@ import { logger } from '../../utils/logger';
 import { normalizeReferrer, SPAM_DOMAINS, SPAM_SUBSTRINGS } from '../../utils/referrer';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { isShareLockdownActive, setShareLockdown } from '../../utils/lockdown.js';
+import { lookupIp } from '../../utils/geoIp';
 import path from 'path';
 import fs from 'fs';
+
+async function enrichIPs(rows: any[]): Promise<any[]> {
+  return Promise.all(
+    rows.map(async (r) => {
+      const geo = await lookupIp(r.ip);
+      const visits = r.visits ? parseInt(r.visits, 10) || 0 : 0;
+      return {
+        ip: r.ip,
+        visits,
+        city: geo.city,
+        country: geo.country,
+        countryCode: geo.countryCode,
+        isp: geo.isp
+      };
+    })
+  );
+}
 
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
 
@@ -760,7 +778,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits ${visitWhere ? visitWhere + ' AND' : 'WHERE'} created_at > NOW() - INTERVAL '30 days' GROUP BY day ORDER BY day`, visitParams),
         query(`SELECT ip, COUNT(*) as visits FROM analytics_visits ${visitWhere} GROUP BY ip ORDER BY visits DESC LIMIT 100`, visitParams),
         query(`SELECT EXTRACT(HOUR FROM created_at)::int as hour, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY hour ORDER BY hour`, visitParams),
-        query(`SELECT referrer, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY referrer ORDER BY count DESC`, visitParams),
+        query(`SELECT referrer, path, COUNT(*) as count FROM analytics_visits ${visitWhere} GROUP BY referrer, path ORDER BY count DESC`, visitParams),
         query(`SELECT pg_database_size(current_database()) as size`),
         query(`SELECT COALESCE(SUM(bytes_served), 0) as bytes FROM media_analytics${mediaWhere}`),
         query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day, COALESCE(SUM(bytes_served), 0) as bytes FROM media_analytics WHERE created_at > NOW() - INTERVAL '30 days' ${mediaScope} GROUP BY day ORDER BY day`),
@@ -835,7 +853,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       })();
       const refMap = new Map<string, number>();
       for (const r of rawReferrers.rows) {
-        const { name, spam } = normalizeReferrer(r.referrer, selfHost);
+        const { name, spam } = normalizeReferrer(r.referrer, selfHost, r.path);
         if (filterSpam && spam) continue;
         refMap.set(name, (refMap.get(name) || 0) + toInt(r.count));
       }
@@ -909,7 +927,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         browserBreakdown: normBreakdown(browserStats.rows),
         deviceBreakdown: normBreakdown(deviceStats.rows),
         timeline: timeline.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
-        topIPs: normIPs(topIPs.rows),
+        topIPs: await enrichIPs(topIPs.rows),
         topReferrers,
         peakHours: peakHours.rows.map(r => ({ hour: toInt(r.hour), count: toInt(r.count) })),
         bandwidthByDay: bandwidthByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),
@@ -1217,7 +1235,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         run(p => `SELECT to_char(date_trunc('day', a.created_at), 'YYYY-MM-DD') as day, COUNT(*) as count FROM analytics_visits a ${visitorWhereDate(p, '30')} GROUP BY day ORDER BY day`),
         run(p => `SELECT a.ip, COUNT(*) as visits FROM analytics_visits a ${visitorWhere(p)} GROUP BY a.ip ORDER BY visits DESC LIMIT 100`),
         run(p => `SELECT EXTRACT(HOUR FROM a.created_at)::int as hour, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} GROUP BY hour ORDER BY hour`),
-        run(p => `SELECT a.referrer, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} GROUP BY a.referrer ORDER BY count DESC`),
+        run(p => `SELECT a.referrer, a.path, COUNT(*) as count FROM analytics_visits a ${visitorWhere(p)} GROUP BY a.referrer, a.path ORDER BY count DESC`),
         run(p => `SELECT COALESCE(SUM(a.bytes_served), 0) as bytes FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)}`),
         run(p => `SELECT to_char(date_trunc('day', a.created_at), 'YYYY-MM-DD') as day, COALESCE(SUM(a.bytes_served), 0) as bytes FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} AND a.created_at > NOW() - INTERVAL '30 days' GROUP BY day ORDER BY day`),
         run(p => `SELECT m.id, m.file_name, m.folder_path, COALESCE(SUM(a.bytes_served), 0) as bytes, COUNT(*) as views FROM media_analytics a JOIN media_files m ON a.media_id = m.id ${mediaWhere(p)} GROUP BY m.id, m.file_name, m.folder_path ORDER BY bytes DESC LIMIT 500`),
@@ -1286,7 +1304,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       // Normalize referrers into source buckets (Direct, domain, ...) and drop spam
       const refMap = new Map<string, number>();
       for (const r of rawReferrers.rows) {
-        const { name, spam } = normalizeReferrer(r.referrer, selfHost);
+        const { name, spam } = normalizeReferrer(r.referrer, selfHost, r.path);
         if (filterSpam && spam) continue;
         refMap.set(name, (refMap.get(name) || 0) + toInt(r.count));
       }
@@ -1322,7 +1340,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         browserBreakdown: normBreakdown(browserStats.rows),
         deviceBreakdown: normBreakdown(deviceStats.rows),
         timeline: timeline.rows.map(r => ({ day: r.day, count: toInt(r.count) })),
-        topIPs: normIPs(topIPs.rows),
+        topIPs: await enrichIPs(topIPs.rows),
         topReferrers,
         peakHours: peakHours.rows.map(r => ({ hour: toInt(r.hour), count: toInt(r.count) })),
         bandwidthByDay: bandwidthByDay.rows.map(r => ({ day: r.day, bytes: toInt(r.bytes) })),

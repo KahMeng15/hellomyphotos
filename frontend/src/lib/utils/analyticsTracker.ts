@@ -45,6 +45,8 @@ class AnalyticsTracker {
   private scrollListenerAttached: boolean = false;
   private lastResourceIndex: number = 0;
   private cacheCheckTimer: any = null;
+  private initialReferrer: string = '';
+  private initialPageUrl: string = '';
 
   init(options: TrackerInitOptions = {}) {
     if (typeof window === 'undefined') return;
@@ -55,6 +57,15 @@ class AnalyticsTracker {
     if (options.viewMode) this.viewMode = options.viewMode;
 
     const isFirstInit = !this.isInitialized;
+
+    if (isFirstInit) {
+      if (typeof document !== 'undefined') {
+        this.initialReferrer = document.referrer || '';
+      }
+      if (typeof window !== 'undefined') {
+        this.initialPageUrl = window.location.href || '';
+      }
+    }
 
     if (options.folderPath) {
       if (!this.foldersVisited.has(options.folderPath)) {
@@ -397,6 +408,8 @@ class AnalyticsTracker {
 
     const payload = {
       deviceId: getDeviceId(),
+      referrer: this.initialReferrer || (typeof document !== 'undefined' ? document.referrer : '') || null,
+      pageUrl: this.initialPageUrl || (typeof window !== 'undefined' ? window.location.href : null),
       ...data
     };
     const endpoint = `${API_BASE}/api/analytics/telemetry`;

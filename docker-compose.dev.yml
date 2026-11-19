@@ -37,6 +37,7 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
+      - ./volumes/geoip:/app/geoip:ro
       - ./backend:/app
       - /app/node_modules
     healthcheck:
@@ -62,6 +63,7 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
+      - ./volumes/geoip:/app/geoip:ro
       - ./backend:/app
       - /app/node_modules
 

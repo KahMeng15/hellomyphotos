@@ -24,16 +24,20 @@ export const load: PageServerLoad = async ({ params, fetch, url, request }) => {
     }
   }
 
-  // Forward the real User-Agent from the incoming request.
-  // This is critical for social crawlers (WhatsApp, Facebook, etc.) — the backend checks
-  // the UA to skip the Turnstile security challenge. Universal fetch (+page.ts) doesn't
-  // have access to the raw request, so it couldn't forward the UA. Server load can.
+  // Forward User-Agent and Referer from incoming request, plus query string (UTM/ref tags).
+  // This is critical for analytics tracking and for social crawlers (WhatsApp, Facebook, etc.).
   const userAgent = request.headers.get('user-agent') || '';
+  const referer = request.headers.get('referer') || '';
+  const search = url.search || '';
+
+  const forwardHeaders: Record<string, string> = {};
+  if (userAgent) forwardHeaders['user-agent'] = userAgent;
+  if (referer) forwardHeaders['referer'] = referer;
 
   try {
     const res = await fetch(
-      `${API_BASE}/api/shares/${token}${folderPath ? '/' + encodeURIComponent(folderPath) : ''}`,
-      { headers: userAgent ? { 'user-agent': userAgent } : {} }
+      `${API_BASE}/api/shares/${token}${folderPath ? '/' + encodeURIComponent(folderPath) : ''}${search}`,
+      { headers: forwardHeaders }
     );
     const data = await res.json();
     if (!res.ok) {

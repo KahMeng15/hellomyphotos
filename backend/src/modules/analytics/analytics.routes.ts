@@ -47,7 +47,9 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
         cacheBytesSaved,
         cacheHits,
         cacheMisses,
-        metadata
+        metadata,
+        referrer: clientReferrer,
+        pageUrl
       } = body;
 
       const resolvedDeviceId = deviceId || (request as any).deviceId || (request.cookies as any)?.['hmp_device_id'] || null;
@@ -60,8 +62,8 @@ export async function analyticsRoutes(fastify: FastifyInstance) {
         actionType: String(actionType).slice(0, 30),
         ip: getClientIp(request),
         userAgent: request.headers['user-agent'] as string | undefined,
-        referrer: request.headers.referer as string | undefined,
-        path: (request.headers.referer as string | undefined) || request.url,
+        referrer: clientReferrer || (request.headers.referer as string | undefined),
+        path: pageUrl || (request.headers.referer as string | undefined) || request.url,
         pageLoadMs,
         sessionDurationS,
         photoViewMs,
