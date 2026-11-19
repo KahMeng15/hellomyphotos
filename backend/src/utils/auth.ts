@@ -20,6 +20,7 @@ declare module 'fastify' {
 }
 
 import { pool } from '../config/db';
+import { isShareLockdownActive } from './lockdown.js';
 
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
   const authHeader = request.headers.authorization;
@@ -133,22 +134,26 @@ export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyR
   mediaFolder = mediaResult.rows[0].folder_path;
 
   if (shareToken) {
-    const shareResult = await pool.query(
-      'SELECT folder_path, media_id, person_id FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())',
-      [shareToken]
-    );
-    if (shareResult.rows.length > 0) {
-      const { folder_path: shareRoot, media_id: shareMediaId, person_id: sharePersonId } = shareResult.rows[0];
-      if (shareMediaId && shareMediaId === mediaId) {
-        return true;
-      }
-      if (shareRoot && (mediaFolder === shareRoot || mediaFolder.startsWith(shareRoot + '/'))) {
-        return true; // Access granted via folder share link
-      }
-      if (sharePersonId) {
-        const faceRes = await pool.query('SELECT 1 FROM face_embeddings WHERE media_id = $1 AND person_id = $2 LIMIT 1', [mediaId, sharePersonId]);
-        if (faceRes.rows.length > 0) {
+    if (await isShareLockdownActive()) {
+      logBlocked('lockdown_blocked');
+    } else {
+      const shareResult = await pool.query(
+        'SELECT folder_path, media_id, person_id FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())',
+        [shareToken]
+      );
+      if (shareResult.rows.length > 0) {
+        const { folder_path: shareRoot, media_id: shareMediaId, person_id: sharePersonId } = shareResult.rows[0];
+        if (shareMediaId && shareMediaId === mediaId) {
           return true;
+        }
+        if (shareRoot && (mediaFolder === shareRoot || mediaFolder.startsWith(shareRoot + '/'))) {
+          return true; // Access granted via folder share link
+        }
+        if (sharePersonId) {
+          const faceRes = await pool.query('SELECT 1 FROM face_embeddings WHERE media_id = $1 AND person_id = $2 LIMIT 1', [mediaId, sharePersonId]);
+          if (faceRes.rows.length > 0) {
+            return true;
+          }
         }
       }
     }
@@ -187,21 +192,25 @@ export async function verifyFolderAccess(request: FastifyRequest, reply: Fastify
   };
 
   if (shareToken) {
-    const shareResult = await pool.query('SELECT folder_path, allow_download_folder FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())', [shareToken]);
-    if (shareResult.rows.length > 0) {
-      const shareRoot = shareResult.rows[0].folder_path || '';
-      
-      // If we are checking for zip download, enforce allow_download_folder
-      if (request.url.includes('/api/zip/')) {
-        if (!shareResult.rows[0].allow_download_folder) {
-          logBlocked('blocked_access');
-          reply.status(403).send({ error: 'Forbidden: ZIP download not allowed for this share link' });
-          return false;
+    if (await isShareLockdownActive()) {
+      logBlocked('lockdown_blocked');
+    } else {
+      const shareResult = await pool.query('SELECT folder_path, allow_download_folder FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())', [shareToken]);
+      if (shareResult.rows.length > 0) {
+        const shareRoot = shareResult.rows[0].folder_path || '';
+        
+        // If we are checking for zip download, enforce allow_download_folder
+        if (request.url.includes('/api/zip/')) {
+          if (!shareResult.rows[0].allow_download_folder) {
+            logBlocked('blocked_access');
+            reply.status(403).send({ error: 'Forbidden: ZIP download not allowed for this share link' });
+            return false;
+          }
         }
-      }
 
-      if (folderPath === shareRoot || folderPath.startsWith(shareRoot + '/')) {
-        return true; // Access granted via share link
+        if (folderPath === shareRoot || folderPath.startsWith(shareRoot + '/')) {
+          return true; // Access granted via share link
+        }
       }
     }
   }

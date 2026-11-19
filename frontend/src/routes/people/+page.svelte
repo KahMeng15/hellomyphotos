@@ -252,7 +252,16 @@ import { updatePreferences } from '$lib/api/auth';
 </div>
 <div class="dir-grid folder-mode-{viewMode}">
   {#each faces as face, i}
-    <div class="dir-card" style="animation-delay: {i * 40}ms;" role="link" tabindex="0" onclick={(e) => { if ((e.target).closest('button, input')) return; window.location.href = `/people/${face.person_id}`; }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location.href = `/people/${face.person_id}`; } }}>
+    <a 
+      class="dir-card" 
+      style="animation-delay: {i * 40}ms;" 
+      href={`/people/${face.person_id}`}
+      onclick={(e) => { 
+        if ((e.target as HTMLElement).closest('button, input')) {
+          e.preventDefault();
+        } 
+      }}
+    >
       {#if viewMode === 'list'}
         <div class="dir-info" style="justify-content: space-between;">
           <div class="dir-label">
@@ -331,7 +340,7 @@ import { updatePreferences } from '$lib/api/auth';
           <span class="face-count" style="color: #94a3b8; font-size: 0.75rem;">{face.count} photos</span>
         </div>
       {/if}
-    </div>
+    </a>
   {/each}
 </div>
 {#if hasMore}

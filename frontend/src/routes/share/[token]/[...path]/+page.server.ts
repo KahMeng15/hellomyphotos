@@ -47,6 +47,7 @@ export const load: PageServerLoad = async ({ params, fetch, url, request }) => {
         expired: true,
         isDisabled: data.isDisabled,
         isExpired: data.isExpired,
+        isLockdown: data.isLockdown,
         folderName: data.folderName,
         folderPath: data.folderPath,
         token,

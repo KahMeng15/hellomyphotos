@@ -741,10 +741,12 @@ import { slide } from 'svelte/transition';
   <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; min-height: 100vh; padding: 2rem;">
     <div style="max-width: 520px; width: 100%; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 32px 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); text-align: left;">
       <h2 style="font-size: 2rem; font-weight: 600; margin-bottom: 12px; color: #fff; text-align: left;">
-        {data.isDisabled ? 'Share Link Disabled' : 'The link is expired'}
+        {data.isLockdown ? 'Lockdown Mode Active' : data.isDisabled ? 'Share Link Disabled' : 'The link is expired'}
       </h2>
       <p style="color: #a1a1aa; font-size: 1rem; margin-bottom: 24px; line-height: 1.5; text-align: left;">
-        {data.isDisabled 
+        {data.isLockdown
+          ? 'All share links are temporarily disabled due to system lockdown mode initiated by the administrator.'
+          : data.isDisabled 
           ? 'This share link is temporarily disabled. You can request the administrator to reactivate it.' 
           : 'This share link has reached its expiration date and is no longer accessible.'}
       </p>

@@ -16,6 +16,7 @@ const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 import { requireAuth, hasFolderAccess } from '../../utils/auth';
 import { getClientIp } from '../../utils/getIp';
 import { sendPlainTextEmail } from '../../utils/mailer';
+import { isShareLockdownActive } from '../../utils/lockdown.js';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
@@ -75,6 +76,10 @@ export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares/:token/verify', async (request: FastifyRequest, reply: FastifyReply) => {
     const { token } = request.params as any;
     const { 'cf-turnstile-response': turnstileToken } = request.body as any;
+
+    if (await isShareLockdownActive()) {
+      return reply.status(403).send({ error: 'All share links are temporarily disabled due to system lockdown', isLockdown: true });
+    }
 
     if (!process.env.TURNSTILE_SECRET) {
       return reply.send({ success: true });
@@ -160,19 +165,22 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
 
     const share = result.rows[0];
+    const isLockdown = await isShareLockdownActive();
     const isExpired = Boolean(share.expires_at && new Date(share.expires_at) <= new Date());
-    const isDisabled = share.is_active === false;
+    const isDisabled = share.is_active === false || isLockdown;
 
-    if (isDisabled || isExpired) {
+    if (isLockdown || isDisabled || isExpired) {
       const folderPath = share.folder_path || '';
       const folderName = folderPath ? (folderPath.split('/').pop() || folderPath) : (share.person_id ? 'Person Gallery' : 'Shared Album');
       return reply.send({
         expired: true,
         isDisabled,
         isExpired,
+        isLockdown,
         folderName,
         folderPath,
         shareToken: token,
+        message: isLockdown ? 'All share links are temporarily disabled due to system lockdown.' : undefined,
       });
     }
 
@@ -1156,6 +1164,10 @@ export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.get<{ Params: { token: string }, Querystring: { path?: string } }>('/api/shares/:token/og', async (request, reply) => {
     const { token } = request.params;
     const { path: subPath } = request.query;
+
+    if (await isShareLockdownActive()) {
+      return reply.status(403).send({ error: 'Lockdown active' });
+    }
 
     const res = await query(`SELECT folder_path FROM shared_folders WHERE share_token = $1`, [token]);
     if (res.rows.length === 0) return reply.status(404).send({ error: 'Not found' });

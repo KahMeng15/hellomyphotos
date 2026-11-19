@@ -17,6 +17,7 @@ import { ClusterService } from '../ml/cluster.service';
 import { logger } from '../../utils/logger';
 import { normalizeReferrer, SPAM_DOMAINS, SPAM_SUBSTRINGS } from '../../utils/referrer';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { isShareLockdownActive, setShareLockdown } from '../../utils/lockdown.js';
 import path from 'path';
 import fs from 'fs';
 
@@ -1499,19 +1500,149 @@ export async function adminRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // Lockdown Mode Management
+  fastify.get('/api/admin/shares/lockdown', async (request, reply) => {
+    try {
+      const lockdown = await isShareLockdownActive();
+      return reply.send({ lockdown });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  fastify.post('/api/admin/shares/lockdown', async (request, reply) => {
+    try {
+      const { lockdown } = (request.body || {}) as { lockdown?: boolean };
+      const updated = await setShareLockdown(Boolean(lockdown));
+      await query(
+        `INSERT INTO system_logs (level, message, user_id, ip_address, meta)
+         VALUES ('warn', $1, $2, $3, $4::jsonb)`,
+        [
+          `System share lockdown ${updated ? 'ACTIVATED' : 'DEACTIVATED'}`,
+          request.user?.id || null,
+          request.ip,
+          JSON.stringify({ lockdown: updated, timestamp: new Date().toISOString() })
+        ]
+      );
+      return reply.send({ success: true, lockdown: updated });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // Access Requests Management for Admin
+  fastify.get('/api/admin/shares/requests', async (request, reply) => {
+    try {
+      const { q, status } = (request.query || {}) as { q?: string; status?: string };
+      let sql = `
+        SELECT r.*, 
+               s.is_active as share_is_active, 
+               s.expires_at as share_expires_at, 
+               s.folder_path as share_folder_path,
+               s.media_id,
+               s.person_id,
+               m.file_name as media_file_name,
+               p.name as person_name,
+               u.email as creator_email,
+               u.name as creator_name
+        FROM share_access_requests r
+        LEFT JOIN shared_folders s ON r.share_token = s.share_token
+        LEFT JOIN media_files m ON s.media_id = m.id
+        LEFT JOIN people p ON s.person_id = p.id
+        LEFT JOIN users u ON s.created_by = u.id
+      `;
+      const params: any[] = [];
+      const whereClauses: string[] = [];
+      
+      if (status && status !== 'all') {
+        params.push(status);
+        whereClauses.push(`r.status = $${params.length}`);
+      }
+      
+      if (q && q.trim()) {
+        params.push(`%${q.trim()}%`);
+        const pIdx = params.length;
+        whereClauses.push(`(r.name ILIKE $${pIdx} OR r.email ILIKE $${pIdx} OR r.folder_path ILIKE $${pIdx} OR r.note ILIKE $${pIdx} OR r.share_token ILIKE $${pIdx} OR m.file_name ILIKE $${pIdx} OR p.name ILIKE $${pIdx})`);
+      }
+      
+      if (whereClauses.length > 0) {
+        sql += ` WHERE ` + whereClauses.join(' AND ');
+      }
+      
+      sql += ` ORDER BY r.created_at DESC`;
+      const { rows } = await query(sql, params);
+      return reply.send({ requests: rows });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  fastify.delete('/api/admin/shares/requests/:id', async (request, reply) => {
+    const { id } = request.params as any;
+    try {
+      await query('DELETE FROM share_access_requests WHERE id = $1', [id]);
+      return reply.send({ success: true });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
   // Active Shares Management
   fastify.get('/api/admin/shares', async (request, reply) => {
     try {
-      const { rows } = await query(`
+      const { q } = (request.query || {}) as { q?: string };
+      let sql = `
         SELECT s.*, 
                u.email as creator_email,
+               u.name as creator_name,
+               m.file_name as media_file_name,
+               p.name as person_name,
                (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.action_type = 'view_shared_link') as views,
                (SELECT COUNT(*) FROM media_analytics a WHERE a.share_token = s.share_token AND a.action_type = 'download_shared_link') as downloads
         FROM shared_folders s
         LEFT JOIN users u ON s.created_by = u.id
-        ORDER BY s.created_at DESC
-      `);
+        LEFT JOIN media_files m ON s.media_id = m.id
+        LEFT JOIN people p ON s.person_id = p.id
+      `;
+      const params: any[] = [];
+      if (q && q.trim()) {
+        const term = `%${q.trim()}%`;
+        params.push(term);
+        sql += `
+          WHERE s.share_token ILIKE $1 
+             OR s.folder_path ILIKE $1 
+             OR m.file_name ILIKE $1 
+             OR p.name ILIKE $1 
+             OR u.name ILIKE $1 
+             OR u.email ILIKE $1
+        `;
+      }
+      sql += ` ORDER BY s.created_at DESC`;
+      const { rows } = await query(sql, params);
       return reply.send({ shares: rows });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  fastify.post('/api/admin/shares', async (request, reply) => {
+    try {
+      const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, expiresAt } = (request.body || {}) as any;
+      if (!folderPath && !mediaId && !personId) {
+        return reply.status(400).send({ error: 'Missing folderPath, mediaId, or personId' });
+      }
+      const crypto = await import('crypto');
+      const shareToken = crypto.randomBytes(6).toString('base64url');
+      await query(`
+        INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, expires_at, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, watermarkEnabled ?? false, expiresAt || null, request.user!.id]);
+      return reply.send({ success: true, shareToken });
     } catch (e: any) {
       request.log.error(e);
       return reply.status(500).send({ error: e.message });

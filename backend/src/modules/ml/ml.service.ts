@@ -26,10 +26,10 @@ async function getFaceMatchThreshold(): Promise<number> {
   return DEFAULT_CONFIDENCE_THRESHOLD;
 }
 
-const FACE_THUMB_SIZE = 300;
-const FACE_PADDING = 0.5;
+export const FACE_THUMB_SIZE = 300;
+export const FACE_PADDING = 0.5;
 
-function parseBoundingBox(box: any): { left: number; top: number; width: number; height: number } {
+export function parseBoundingBox(box: any): { left: number; top: number; width: number; height: number } {
   if (box && box.x1 !== undefined && box.y1 !== undefined && box.x2 !== undefined && box.y2 !== undefined) {
     const w = box.x2 - box.x1;
     const h = box.y2 - box.y1;
@@ -175,10 +175,59 @@ export class MLService {
     }
   }
 
+  static async cropAndSaveFaceThumbnail(
+    face: { media_id: string; bounding_box: any; img_width?: number | null; img_height?: number | null },
+    fullPath: string,
+    outPath: string
+  ): Promise<boolean> {
+    const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
+    const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
+    let sourcePath = '';
+    if (fs.existsSync(cache1080)) {
+      sourcePath = cache1080;
+    } else if (fs.existsSync(cache480)) {
+      sourcePath = cache480;
+    } else if (fullPath && fs.existsSync(fullPath)) {
+      sourcePath = fullPath;
+    }
+    if (!sourcePath) return false;
+
+    const crop = parseBoundingBox(face.bounding_box);
+    const meta = await sharp(sourcePath).metadata();
+    const imgW = meta.width || 1;
+    const imgH = meta.height || 1;
+
+    const origW = face.img_width || imgW;
+    const origH = face.img_height || imgH;
+    if (origW && origH && (origW !== imgW || origH !== imgH)) {
+      const scaleX = imgW / origW;
+      const scaleY = imgH / origH;
+      crop.left = Math.round(crop.left * scaleX);
+      crop.top = Math.round(crop.top * scaleY);
+      crop.width = Math.round(crop.width * scaleX);
+      crop.height = Math.round(crop.height * scaleY);
+    }
+
+    crop.left = Math.max(0, Math.min(crop.left, imgW - 1));
+    crop.top = Math.max(0, Math.min(crop.top, imgH - 1));
+    crop.width = Math.max(1, Math.min(crop.width, imgW - crop.left));
+    crop.height = Math.max(1, Math.min(crop.height, imgH - crop.top));
+
+    await sharp(sourcePath)
+      .extract(crop)
+      .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover' })
+      .webp({ quality: 80 })
+      .toFile(outPath);
+
+    return true;
+  }
+
   static async generateFaceThumbnails(mediaId: string) {
     try {
       const faces = await query(`
-        SELECT fe.id, fe.person_id, fe.bounding_box, m.folder_path, m.file_name
+        SELECT fe.id, fe.person_id, fe.bounding_box, m.folder_path, m.file_name,
+               COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+               COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height
         FROM face_embeddings fe
         JOIN media_files m ON m.id = fe.media_id
         WHERE fe.media_id = $1 AND fe.person_id IS NOT NULL
@@ -194,33 +243,19 @@ export class MLService {
           SELECT COALESCE(
             (SELECT cover_media_id FROM people WHERE id = $1 AND cover_media_id IS NOT NULL),
             (SELECT fe2.media_id FROM face_embeddings fe2
+              JOIN media_files m2 ON m2.id = fe2.media_id
               WHERE fe2.person_id = $1
               ORDER BY (SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe2.media_id) ASC,
-                (SELECT created_at FROM media_files WHERE id = fe2.media_id) DESC
+                m2.created_at DESC
               LIMIT 1)
           ) AS media_id
         `, [face.person_id]);
         if (best.rows.length === 0 || best.rows[0].media_id !== mediaId) continue;
 
         const fullPath = path.join(mediaRoot, face.folder_path, face.file_name);
-        if (!fs.existsSync(fullPath)) continue;
-
-        const crop = parseBoundingBox(face.bounding_box);
         const outPath = path.join(outDir, `${face.person_id}.webp`);
 
-        const meta = await sharp(fullPath).metadata();
-        const imgW = meta.width || 1;
-        const imgH = meta.height || 1;
-        crop.left = Math.min(crop.left, imgW - 1);
-        crop.top = Math.min(crop.top, imgH - 1);
-        crop.width = Math.min(crop.width, imgW - crop.left);
-        crop.height = Math.min(crop.height, imgH - crop.top);
-
-        await sharp(fullPath)
-          .extract(crop)
-          .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
-          .webp({ quality: 75 })
-          .toFile(outPath);
+        await MLService.cropAndSaveFaceThumbnail(face, fullPath, outPath);
       }
     } catch (err: any) {
       console.error(`[ML] Failed to generate face thumbnails for ${mediaId}:`, err.message);

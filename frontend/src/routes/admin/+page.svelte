@@ -141,7 +141,17 @@
     <div style="display: flex; justify-content: space-between; align-items: center;">
       <div>
         <h3 style="margin: 0 0 0.5rem 0; color: #f4f4f5;">Global Shares Management</h3>
-        <p style="margin: 0; color: #a1a1aa; font-size: 0.9rem;">View, edit, disable, and delete shares generated globally across the app.</p>
+        <p style="margin: 0; color: #a1a1aa; font-size: 0.9rem;">View, edit, disable, lockdown, and delete shares generated globally across the app.</p>
+      </div>
+      <ChevronRight color="#a1a1aa" size={24} />
+    </div>
+  </a>
+
+  <a href="/admin/shares/requests" class="card link-card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(234, 88, 12, 0.1)); border-color: rgba(245, 158, 11, 0.3);">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h3 style="margin: 0 0 0.5rem 0; color: #f4f4f5;">Share Access Requests</h3>
+        <p style="margin: 0; color: #a1a1aa; font-size: 0.9rem;">Review and grant access requests submitted by visitors on expired or disabled share links.</p>
       </div>
       <ChevronRight color="#a1a1aa" size={24} />
     </div>

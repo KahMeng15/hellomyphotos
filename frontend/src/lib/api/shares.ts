@@ -134,3 +134,93 @@ export async function searchShareContent(
     directories: data.directories || []
   };
 }
+
+export async function getAdminLockdown(): Promise<boolean> {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API_BASE}/api/admin/shares/lockdown`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error('Failed to fetch lockdown status');
+  const data = await res.json();
+  return Boolean(data.lockdown);
+}
+
+export async function setAdminLockdown(lockdown: boolean): Promise<boolean> {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API_BASE}/api/admin/shares/lockdown`, {
+    method: 'POST',
+    headers: { 
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ lockdown })
+  });
+  if (!res.ok) throw new Error('Failed to update lockdown status');
+  const data = await res.json();
+  return Boolean(data.lockdown);
+}
+
+export async function getAdminShares(q?: string): Promise<any[]> {
+  const token = localStorage.getItem('token');
+  const url = q && q.trim() 
+    ? `${API_BASE}/api/admin/shares?q=${encodeURIComponent(q.trim())}` 
+    : `${API_BASE}/api/admin/shares`;
+  const res = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error('Failed to fetch admin shares');
+  const data = await res.json();
+  return data.shares || [];
+}
+
+export async function updateAdminShare(token: string, payload: {
+  is_active?: boolean;
+  expires_at?: string | null;
+  allow_download_images?: boolean;
+  allow_download_folder?: boolean;
+  watermark_enabled?: boolean;
+}): Promise<void> {
+  const jwt = localStorage.getItem('token');
+  const res = await fetch(`${API_BASE}/api/admin/shares/${token}`, {
+    method: 'PUT',
+    headers: { 
+      'Authorization': `Bearer ${jwt}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) throw new Error('Failed to update share');
+}
+
+export async function deleteAdminShare(token: string): Promise<void> {
+  const jwt = localStorage.getItem('token');
+  const res = await fetch(`${API_BASE}/api/admin/shares/${token}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${jwt}` }
+  });
+  if (!res.ok) throw new Error('Failed to delete share');
+}
+
+export async function getAdminAccessRequests(status?: string, q?: string): Promise<any[]> {
+  const token = localStorage.getItem('token');
+  const params = new URLSearchParams();
+  if (status && status !== 'all') params.set('status', status);
+  if (q && q.trim()) params.set('q', q.trim());
+  const url = `${API_BASE}/api/admin/shares/requests${params.toString() ? '?' + params.toString() : ''}`;
+  const res = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error('Failed to fetch access requests');
+  const data = await res.json();
+  return data.requests || [];
+}
+
+export async function deleteAdminAccessRequest(id: string): Promise<void> {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API_BASE}/api/admin/shares/requests/${id}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error('Failed to delete access request');
+}
+

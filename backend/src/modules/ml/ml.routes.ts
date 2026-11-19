@@ -5,13 +5,12 @@ import sharp from 'sharp';
 import { query } from '../../config/db';
 import { requireAuth, verifyMediaAccess } from '../../utils/auth';
 import { SmartSearchService } from './smartSearch.service';
+import { MLService, FACE_THUMB_SIZE, FACE_PADDING, parseBoundingBox } from './ml.service';
 import { faceThumbnailQueue } from '../../queue/faceThumbnailQueue';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || path.resolve(process.cwd(), '../volumes/media_ro'));
-const FACE_THUMB_SIZE = 300;
-const FACE_PADDING = 0.5;
 
 class Semaphore {
   private tasks: (() => void)[] = [];
@@ -50,45 +49,7 @@ async function generateFaceThumbnailAsync(personId: string, face: any, fullPath:
     await faceThumbSemaphore.acquire();
     if (fs.existsSync(resolvedCache)) return;
     
-    // Prefer the 480p/1080p thumbnail where face detection was performed
-    const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
-    const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
-    let sourcePath = '';
-    if (fs.existsSync(cache480)) {
-      sourcePath = cache480;
-    } else if (fs.existsSync(cache1080)) {
-      sourcePath = cache1080;
-    } else if (fs.existsSync(fullPath)) {
-      sourcePath = fullPath;
-    }
-    if (!sourcePath) return;
-
-    const crop = parseBoundingBox(face.bounding_box);
-    const meta = await sharp(sourcePath).metadata();
-    const imgW = meta.width || 1;
-    const imgH = meta.height || 1;
-
-    const origW = face.img_width || imgW;
-    const origH = face.img_height || imgH;
-    if (origW && origH && (origW !== imgW || origH !== imgH)) {
-      const scaleX = imgW / origW;
-      const scaleY = imgH / origH;
-      crop.left = Math.round(crop.left * scaleX);
-      crop.top = Math.round(crop.top * scaleY);
-      crop.width = Math.round(crop.width * scaleX);
-      crop.height = Math.round(crop.height * scaleY);
-    }
-
-    crop.left = Math.max(0, Math.min(crop.left, imgW - 1));
-    crop.top = Math.max(0, Math.min(crop.top, imgH - 1));
-    crop.width = Math.max(1, Math.min(crop.width, imgW - crop.left));
-    crop.height = Math.max(1, Math.min(crop.height, imgH - crop.top));
-    
-    await sharp(sourcePath)
-      .extract(crop)
-      .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover', withoutEnlargement: true })
-      .webp({ quality: 75 })
-      .toFile(resolvedCache);
+    await MLService.cropAndSaveFaceThumbnail(face, fullPath, resolvedCache);
   } catch (err: any) {
     console.error('[Face Thumbnail Async] Failed for %s:', personId, err.message);
   } finally {
@@ -101,32 +62,6 @@ function sendDefaultAvatar(reply: any) {
   reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
   reply.header('Content-Type', 'image/svg+xml');
   return reply.send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300"><rect width="300" height="300" fill="#f0f0f0"/><circle cx="150" cy="120" r="60" fill="#bdbdbd"/><path d="M50 300 Q 150 180 250 300" fill="#bdbdbd"/></svg>`);
-}
-
-function parseBoundingBox(box: any): { left: number; top: number; width: number; height: number } {
-  if (box && box.x1 !== undefined && box.y1 !== undefined && box.x2 !== undefined && box.y2 !== undefined) {
-    const w = box.x2 - box.x1;
-    const h = box.y2 - box.y1;
-    const padW = w * FACE_PADDING;
-    const padH = h * FACE_PADDING;
-    return {
-      left: Math.max(0, Math.floor(box.x1 - padW)),
-      top: Math.max(0, Math.floor(box.y1 - padH)),
-      width: Math.ceil(w + padW * 2),
-      height: Math.ceil(h + padH * 2),
-    };
-  }
-  if (box && box.x !== undefined && box.y !== undefined && box.w !== undefined && box.h !== undefined) {
-    const padW = box.w * FACE_PADDING;
-    const padH = box.h * FACE_PADDING;
-    return {
-      left: Math.max(0, Math.floor(box.x - padW)),
-      top: Math.max(0, Math.floor(box.y - padH)),
-      width: Math.ceil(box.w + padW * 2),
-      height: Math.ceil(box.h + padH * 2),
-    };
-  }
-  return { left: 0, top: 0, width: 100, height: 100 };
 }
 
 export async function mlRoutes(fastify: FastifyInstance) {
@@ -164,10 +99,12 @@ export async function mlRoutes(fastify: FastifyInstance) {
           fe.bounding_box
         FROM face_embeddings fe
         LEFT JOIN people p ON p.id = fe.person_id
+        JOIN media_files m ON m.id = fe.media_id
         WHERE fe.person_id IS NOT NULL
         ORDER BY fe.person_id,
                  CASE WHEN fe.media_id = p.cover_media_id THEN 0 ELSE 1 END,
-                 fe.created_at DESC
+                 (SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe.media_id) ASC,
+                 m.created_at DESC
       )
       SELECT 
         pc.person_id as id,
@@ -404,7 +341,8 @@ export async function mlRoutes(fastify: FastifyInstance) {
         FROM face_embeddings fe
         JOIN media_files m ON m.id = fe.media_id
         WHERE fe.person_id = $1
-        ORDER BY m.created_at DESC
+        ORDER BY (SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe.media_id) ASC,
+                 m.created_at DESC
         LIMIT 1
       `, [id]);
 
