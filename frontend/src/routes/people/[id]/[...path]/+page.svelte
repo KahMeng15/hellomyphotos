@@ -11,7 +11,7 @@
   import type { PageData } from './$types';
   import { onMount, onDestroy } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
-  import { env } from '$env/dynamic/public';
+  import * as env from '$app/env/public';
   import { ArrowDownUp, ChevronLeft, LayoutGrid, Share2, Check, Copy, Trash2, Clock, User, Folder, Power, Pencil } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
 

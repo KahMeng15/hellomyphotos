@@ -12,7 +12,7 @@ import { slide } from 'svelte/transition';
   import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
-  import { env } from '$env/dynamic/public';
+  import * as env from '$app/env/public';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';

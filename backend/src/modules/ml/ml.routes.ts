@@ -238,7 +238,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
       `, [id]);
 
       if (result.rows.length === 0) {
-        return reply.status(404).send({ error: 'No media found for this person' });
+        return reply.send({ coverMediaId: null, coverBoundingBox: null, originalWidth: null, originalHeight: null });
       }
       coverMediaId = result.rows[0].id;
     }

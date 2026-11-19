@@ -55,6 +55,13 @@ const start = async () => {
         import('./modules/media/cacheTracker.service').then(({ CacheTrackerService }) => {
           CacheTrackerService.ensureInitialized().catch(() => {});
         }).catch(() => {});
+
+        // Initialize GeoIP database & auto-updater in the background
+        import('./utils/geoIp').then(({ initGeoIp }) => {
+          initGeoIp().catch(err => {
+            logger.error('[GeoIP] Failed to initialize GeoIP', { error: err?.message });
+          });
+        }).catch(() => {});
       } else {
         logger.info(`API disabled via DISABLE_API=true. Running worker orchestrator only.`);
       }

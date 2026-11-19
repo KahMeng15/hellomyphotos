@@ -35,7 +35,7 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
-      - ./volumes/geoip:/app/geoip:ro
+      - ./volumes/geoip:/app/geoip:rw
     group_add:
       - video
     healthcheck:
@@ -65,7 +65,7 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
-      - ./volumes/geoip:/app/geoip:ro
+      - ./volumes/geoip:/app/geoip:rw
     group_add:
       - video
 

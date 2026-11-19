@@ -39,7 +39,8 @@
     TrendingUp,
     Layers,
     ArrowDownToLine,
-    Zap
+    Zap,
+    RefreshCw
   } from '@lucide/svelte';
 
   const folderPath = $derived(page.params.path || '');
@@ -99,6 +100,27 @@
       });
       if (res.ok) await loadAnalytics();
     } catch {}
+  }
+
+  let updatingGeoIp = $state(false);
+  async function refreshGeoIp() {
+    if (updatingGeoIp) return;
+    updatingGeoIp = true;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/geoip/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+        credentials: 'include'
+      });
+      if (res.ok) {
+        await loadAnalytics();
+      }
+    } catch (e) {
+      console.error('Failed to update GeoIP databases', e);
+    } finally {
+      updatingGeoIp = false;
+    }
   }
 
   onMount(() => {
@@ -789,7 +811,18 @@
     <!-- Top IPs + blocked attempts -->
     <div class="tables-grid">
       <div class="card">
-        <h3><Fingerprint size={18} /> Top IP Addresses</h3>
+        <div class="table-header-row">
+          <h3><Fingerprint size={18} /> Top IP Addresses</h3>
+          <button
+            class="geoip-update-btn"
+            onclick={refreshGeoIp}
+            disabled={updatingGeoIp}
+            title="Update MaxMind GeoIP database & re-resolve visitor locations"
+          >
+            <RefreshCw size={12} class={updatingGeoIp ? 'spin' : ''} />
+            <span>{updatingGeoIp ? 'Updating DB...' : 'Update GeoIP'}</span>
+          </button>
+        </div>
         {#if data.topIPs.length === 0}
           <p class="muted">No visitor data yet.</p>
         {:else}
@@ -798,32 +831,36 @@
               <table>
                 <thead>
                   <tr>
-                    <th>IP Address</th>
-                    <th>Location</th>
-                    <th>ISP / Org</th>
-                    <th class="text-right">Visits</th>
+                    <th style="width: 26%;">IP Address</th>
+                    <th style="width: 32%;">Location</th>
+                    <th style="width: 30%;">ISP / Org</th>
+                    <th style="width: 12%;" class="text-right">Visits</th>
                   </tr>
                 </thead>
                 <tbody>
                   {#each rows as row}
                     <tr>
                       <td><code class="ip">{row.ip}</code></td>
-                      <td class="truncate loc-cell" title="{row.city ? row.city + ', ' : ''}{row.country || ''}">
-                        {#if row.countryCode}
-                          <span class="flag">{getFlagEmoji(row.countryCode)}</span>
-                        {/if}
-                        {#if row.city || row.country}
-                          {row.city ? `${row.city}, ` : ''}{row.country}
-                        {:else}
-                          <span class="muted">—</span>
-                        {/if}
+                      <td>
+                        <span class="cell-text loc-cell" title="{row.city ? row.city + ', ' : ''}{row.country || ''}">
+                          {#if row.countryCode}
+                            <span class="flag">{getFlagEmoji(row.countryCode)}</span>
+                          {/if}
+                          {#if row.city || row.country}
+                            {row.city ? `${row.city}, ` : ''}{row.country}
+                          {:else}
+                            <span class="muted">—</span>
+                          {/if}
+                        </span>
                       </td>
-                      <td class="truncate isp-cell" title={row.isp || ''}>
-                        {#if row.isp}
-                          {row.isp}
-                        {:else}
-                          <span class="muted">—</span>
-                        {/if}
+                      <td>
+                        <span class="cell-text isp-cell" title={row.isp || ''}>
+                          {#if row.isp}
+                            {row.isp}
+                          {:else}
+                            <span class="muted">—</span>
+                          {/if}
+                        </span>
                       </td>
                       <td class="text-right"><strong>{row.visits}</strong></td>
                     </tr>
@@ -1026,12 +1063,13 @@
 
   table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
   th { text-align: left; padding: 0.75rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); color: #a1a1aa; font-weight: 500; }
-  td { padding: 0.75rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  td { padding: 0.75rem 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: middle; }
   .text-right { text-align: right; }
   .muted { color: #71717a; font-size: 0.85rem; }
   .truncate { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; }
-  .loc-cell { max-width: 140px; }
-  .isp-cell { max-width: 140px; }
+  .cell-text { display: inline-block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+  .loc-cell { max-width: 170px; }
+  .isp-cell { max-width: 170px; }
   .flag { margin-right: 0.25rem; font-style: normal; }
   .folder { max-width: 220px; }
   .ip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; background: rgba(255,255,255,0.05); padding: 0.15rem 0.4rem; border-radius: 6px; }
@@ -1117,6 +1155,35 @@
     font-family: monospace;
     font-size: 0.85rem;
     color: rgba(255, 255, 255, 0.95);
+  }
+
+  .table-header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; gap: 0.5rem; }
+  .table-header-row h3 { margin: 0 !important; }
+  .geoip-update-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #a1a1aa;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .geoip-update-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    color: #f4f4f5;
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+  .geoip-update-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  :global(.spin) {
+    animation: spin 1s linear infinite !important;
   }
 
   .spinner {

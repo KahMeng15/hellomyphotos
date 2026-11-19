@@ -18,7 +18,7 @@ import { logger } from '../../utils/logger';
 import { normalizeReferrer, SPAM_DOMAINS, SPAM_SUBSTRINGS } from '../../utils/referrer';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { isShareLockdownActive, setShareLockdown } from '../../utils/lockdown.js';
-import { lookupIp } from '../../utils/geoIp';
+import { lookupIp, getGeoIpStatus, checkAndUpdateGeoIp, clearStaleGeoCache } from '../../utils/geoIp';
 import { CacheTrackerService } from '../media/cacheTracker.service';
 import path from 'path';
 import fs from 'fs';
@@ -359,8 +359,13 @@ export async function adminRoutes(fastify: FastifyInstance) {
   fastify.post('/api/admin/rescan-faces', async (request, reply) => {
     if (!(await acquireResetLock(reply))) return;
     try {
-      // 1. Wipe out existing face embeddings
-      await query(`TRUNCATE TABLE face_embeddings`);
+      // 1. Wipe out existing face embeddings and people
+      await query(`TRUNCATE TABLE face_embeddings CASCADE`);
+      await query(`TRUNCATE TABLE people CASCADE`);
+      try {
+        const keys = await redis.keys('faces:list:*');
+        if (keys.length > 0) await redis.del(...keys);
+      } catch {}
 
       // 2. Clear orphaned face thumbnail cache on disk
       const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
@@ -644,6 +649,26 @@ export async function adminRoutes(fastify: FastifyInstance) {
       return reply.send({ success: true, ...stats });
     } catch (e: any) {
       return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // GeoIP database status
+  fastify.get('/api/admin/geoip/status', async (request, reply) => {
+    return reply.send(getGeoIpStatus());
+  });
+
+  // Manually trigger GeoIP database update/download and clear stale cache
+  fastify.post('/api/admin/geoip/update', async (request, reply) => {
+    try {
+      const updated = await checkAndUpdateGeoIp(true);
+      await clearStaleGeoCache();
+      return reply.send({
+        success: true,
+        updated,
+        status: getGeoIpStatus()
+      });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err?.message || 'GeoIP update failed' });
     }
   });
 

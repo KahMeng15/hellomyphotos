@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
-  import { env } from '$env/dynamic/public';
+  import * as env from '$app/env/public';
   import { API_BASE } from '$lib/api/media';
   import { 
     ChevronLeft, Trash2, Link as LinkIcon, Folder, Image, User, Copy, Check, 

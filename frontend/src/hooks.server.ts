@@ -7,7 +7,17 @@ export const handle: Handle = async ({ event, resolve }) => {
     const targetUrl = new URL(event.url.pathname + event.url.search, BACKEND_URL);
 
     const headers = new Headers();
-    for (const name of ['content-type', 'authorization', 'cookie', 'x-admin-password', 'user-agent', 'referer', 'range']) {
+    for (const name of [
+      'content-type',
+      'authorization',
+      'cookie',
+      'x-admin-password',
+      'user-agent',
+      'referer',
+      'range',
+      'cf-connecting-ip',
+      'x-real-ip'
+    ]) {
       const value = event.request.headers.get(name);
       if (value) headers.set(name, value);
     }
