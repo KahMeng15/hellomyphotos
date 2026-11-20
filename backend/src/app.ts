@@ -11,7 +11,6 @@ import { authRoutes } from './modules/auth/auth.routes';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
-import helmet from '@fastify/helmet';
 import './queue';
 
 import { logger } from './utils/logger';
@@ -41,9 +40,12 @@ app.addHook('onResponse', async (request, reply) => {
 });
 
 // HTTP Security Headers
-app.register(helmet, {
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: false
+app.addHook('onSend', async (request, reply) => {
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'SAMEORIGIN');
+  reply.header('X-XSS-Protection', '0');
+  reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
 });
 
 // Enable CORS with strict origin validation to prevent arbitrary cross-origin credential theft

@@ -3,7 +3,8 @@
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
   import { toast } from '$lib/stores/toast';
   import { API_BASE } from '$lib/api/media';
-  import { User, Mail, Shield, Lock, Save, KeyRound, Server } from '@lucide/svelte';
+  import { User, Mail, Shield, Lock, Save, KeyRound, Server, Keyboard } from '@lucide/svelte';
+  import { shortcutsModalOpen } from '$lib/stores/shortcuts';
 
   let name = $state('');
   let email = $state('');
@@ -213,6 +214,25 @@
               <KeyRound size={16} /> Update Password
             </button>
           </form>
+        </div>
+      </div>
+
+      <!-- Keyboard Shortcuts -->
+      <div class="card modal glass-panel" style="margin-top: 1.5rem;">
+        <div class="modal-header">
+          <div class="header-title">
+            <Keyboard size={20} style="color: #60a5fa;" />
+            <h3>Keyboard Shortcuts</h3>
+          </div>
+        </div>
+        <div class="modal-body">
+          <p style="color: #a1a1aa; font-size: 0.9rem; margin-top: 0; margin-bottom: 1rem; line-height: 1.5;">
+            Master rapid navigation across your photo library, albums, lightbox media controls, and modals using keyboard shortcuts.
+          </p>
+          <button type="button" class="btn" style="background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: white; display: inline-flex; align-items: center; gap: 8px; font-weight: 500;" onclick={() => shortcutsModalOpen.set(true)}>
+            <Keyboard size={16} /> View Keyboard Shortcuts
+            <kbd style="margin-left: 6px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2); padding: 2px 7px; border-radius: 4px; font-size: 0.75rem; font-family: ui-monospace, monospace; color: #fff;">?</kbd>
+          </button>
         </div>
       </div>
     </div>
