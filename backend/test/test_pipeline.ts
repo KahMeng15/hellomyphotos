@@ -2,14 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import sharp from 'sharp';
-import { query } from './config/db';
-import { MetadataService } from './modules/media/metadata.service';
-import { MediaService } from './modules/media/media.service';
-import { VideoService } from './modules/media/video.service';
-import { SmartSearchService } from './modules/ml/smartSearch.service';
-import { MLService } from './modules/ml/ml.service';
-import { ClusterService } from './modules/ml/cluster.service';
-import { getExecutionMode, setExecutionMode } from './queue/mode';
+import { query } from '../src/config/db';
+import { MetadataService } from '../src/modules/media/metadata.service';
+import { MediaService } from '../src/modules/media/media.service';
+import { VideoService } from '../src/modules/media/video.service';
+import { SmartSearchService } from '../src/modules/ml/smartSearch.service';
+import { MLService } from '../src/modules/ml/ml.service';
+import { ClusterService } from '../src/modules/ml/cluster.service';
+import { getExecutionMode, setExecutionMode } from '../src/queue/mode';
 
 const TEST_CACHE_ROOT = process.env.CACHE_ROOT || '/app/cache';
 

@@ -3,20 +3,6 @@ import { redis } from '../../config/redis';
 import { v4 as uuidv4 } from 'uuid';
 
 export class ClusterService {
-  static cosineDistance(a: number[] | Float32Array, b: number[] | Float32Array): number {
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-    if (normA === 0 || normB === 0) return 1;
-    const sim = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-    return Math.max(0, 1 - sim);
-  }
-
   static async reclusterFaces(overrideEps?: number, minSamples: number = 1): Promise<void> {
     let eps = overrideEps;
     if (eps === undefined) {

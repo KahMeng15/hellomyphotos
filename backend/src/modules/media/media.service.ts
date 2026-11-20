@@ -24,6 +24,10 @@ fs.mkdirSync(path.join(CACHE_ROOT, 'transcoded', 'webm'), { recursive: true });
 
 export class MediaService {
   static async processImage(mediaId: string, fullPath: string) {
+    let cleanupTmp = false;
+    const tmpPpmPath = path.join(CACHE_ROOT, `tmp_${mediaId}.ppm`);
+    const tmpPngPath = path.join(CACHE_ROOT, `tmp_${mediaId}.png`);
+
     try {
       if (!fs.existsSync(fullPath)) {
         console.warn(`[MediaService] File does not exist on disk: ${fullPath}`);
@@ -47,10 +51,6 @@ export class MediaService {
       if (isHeic) {
         sharpInput = await fs.promises.readFile(fullPath);
       }
-
-      let cleanupTmp = false;
-      const tmpPpmPath = path.join(CACHE_ROOT, `tmp_${mediaId}.ppm`);
-      const tmpPngPath = path.join(CACHE_ROOT, `tmp_${mediaId}.png`);
 
       const runHeicFallback = async () => {
         console.warn(`[MediaService] Sharp failed on HEIC, decoding primary image with libheif for ${fullPath}`);
@@ -128,16 +128,16 @@ export class MediaService {
         [bHash, mediaId]
       );
 
-      if (cleanupTmp) {
-        if (fs.existsSync(tmpPpmPath)) fs.unlinkSync(tmpPpmPath);
-        if (fs.existsSync(tmpPngPath)) fs.unlinkSync(tmpPngPath);
-      }
-
       return { blurhash: bHash, has1080p: true, has480p: true };
 
     } catch (err: any) {
       console.error(`[MediaService] Failed to process image ${fullPath}:`, err.message);
       throw err;
+    } finally {
+      if (cleanupTmp) {
+        try { if (fs.existsSync(tmpPpmPath)) fs.unlinkSync(tmpPpmPath); } catch {}
+        try { if (fs.existsSync(tmpPngPath)) fs.unlinkSync(tmpPngPath); } catch {}
+      }
     }
   }
 

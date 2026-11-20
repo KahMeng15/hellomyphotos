@@ -12,7 +12,7 @@ import { slide } from 'svelte/transition';
   import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
-  import * as env from '$app/env/public';
+  import { env } from '$env/dynamic/public';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
@@ -653,9 +653,9 @@ import { slide } from 'svelte/transition';
   }
 
   type FolderViewMode = 'small-grid' | 'medium-grid' | 'large-grid' | 'list';
-  let sortMode: SortMode = $state(data.defaultSortMode || 'oldest');
-  let viewMode: ViewMode = $state(data.defaultViewMode || 'small-fit');
-  let folderViewMode: FolderViewMode = $state(data.defaultFolderViewMode || 'small-grid');
+  let sortMode: SortMode = $state((data as any).defaultSortMode || 'oldest');
+  let viewMode: ViewMode = $state((data as any).defaultViewMode || 'small-fit');
+  let folderViewMode: FolderViewMode = $state((data as any).defaultFolderViewMode || 'small-grid');
   let showFileNames = $state(false);
 
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
@@ -947,9 +947,9 @@ import { slide } from 'svelte/transition';
   }
 
   onMount(() => {
-    sortMode = loadPref<SortMode>('folderSortMode', data.defaultSortMode || 'newest');
-    viewMode = loadPref<ViewMode>('folderViewMode', data.defaultViewMode || 'small-fit');
-    folderViewMode = loadPref<FolderViewMode>('folderFolderViewMode', data.defaultFolderViewMode || 'small-grid');
+    sortMode = loadPref<SortMode>('folderSortMode', (data as any).defaultSortMode || 'newest');
+    viewMode = loadPref<ViewMode>('folderViewMode', (data as any).defaultViewMode || 'small-fit');
+    folderViewMode = loadPref<FolderViewMode>('folderFolderViewMode', (data as any).defaultFolderViewMode || 'small-grid');
     showFileNames = loadPref<boolean>('showFileNames', false);
 
     if (data.isProcessing) {

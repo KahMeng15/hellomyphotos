@@ -28,8 +28,8 @@
     }
   }
 
-  let sortMode: SortMode = $state(data.defaultSortMode || 'oldest');
-  let viewMode: ViewMode = $state(data.defaultViewMode || 'small-fit');
+  let sortMode: SortMode = $state((data as any).defaultSortMode || 'oldest');
+  let viewMode: ViewMode = $state((data as any).defaultViewMode || 'small-fit');
   
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
@@ -99,8 +99,8 @@
   let pollInterval: ReturnType<typeof setInterval>;
 
   onMount(() => {
-    sortMode = loadPref<SortMode>('timelineSortMode', data.defaultSortMode || 'newest');
-    viewMode = loadPref<ViewMode>('timelineViewMode', data.defaultViewMode || 'small-fit');
+    sortMode = loadPref<SortMode>('timelineSortMode', (data as any).defaultSortMode || 'newest');
+    viewMode = loadPref<ViewMode>('timelineViewMode', (data as any).defaultViewMode || 'small-fit');
 
     let pollCount = 0;
     const MAX_POLLS = 10;

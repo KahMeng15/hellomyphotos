@@ -8,6 +8,7 @@ export interface MediaFile {
   exif_json?: any;
   aspectRatio?: number;
   folder_cover_id?: string | null;
+  bounding_box?: any;
   is_transcoded?: boolean;
   img_width?: number | null;
   img_height?: number | null;

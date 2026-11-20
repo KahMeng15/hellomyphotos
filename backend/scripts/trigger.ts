@@ -1,5 +1,5 @@
-import { query } from './config/db';
-import { videoQueue } from './queue/videoQueue';
+import { query } from '../src/config/db';
+import { videoQueue } from '../src/queue/videoQueue';
 import path from 'path';
 
 (async () => {

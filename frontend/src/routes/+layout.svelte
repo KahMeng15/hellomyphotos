@@ -13,7 +13,7 @@
   import { pwaInfo } from 'virtual:pwa-info';
   import MandatorySetupModal from '$lib/components/MandatorySetupModal.svelte';
 
-  const { children } = $props<{ children: any }>();
+  let { children }: { children?: any } = $props();
 
   let prevRoute = $state('');
   afterNavigate((nav) => {

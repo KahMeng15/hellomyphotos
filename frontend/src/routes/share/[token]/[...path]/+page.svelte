@@ -72,9 +72,9 @@ import { slide } from 'svelte/transition';
     }
   }
 
-  let sortMode: SortMode = $state(data.defaultShareSortMode || 'oldest');
-  let viewMode: ViewMode = $state(data.defaultShareViewMode || 'small-fit');
-  let folderViewMode: FolderViewMode = $state(data.defaultShareFolderViewMode || 'small-grid');
+  let sortMode: SortMode = $state((data as any).defaultShareSortMode || 'oldest');
+  let viewMode: ViewMode = $state((data as any).defaultShareViewMode || 'small-fit');
+  let folderViewMode: FolderViewMode = $state((data as any).defaultShareFolderViewMode || 'small-grid');
   let showFileNames = $state(false);
 
   let showZipProgressModal = $state(false);
@@ -134,7 +134,7 @@ import { slide } from 'svelte/transition';
     try {
       reqSubmitting = true;
       reqError = '';
-      await submitAccessRequest(data.token, {
+      await submitAccessRequest(data.token || '', {
         name: reqName.trim() || undefined,
         email: reqEmail.trim() || undefined,
         note: reqNote.trim() || undefined,
@@ -517,9 +517,9 @@ import { slide } from 'svelte/transition';
       }
     });
 
-    sortMode = loadPref<SortMode>('shareSortMode', data.defaultShareSortMode || 'newest');
-    viewMode = loadPref<ViewMode>('shareViewMode', data.defaultShareViewMode || 'small-fit');
-    folderViewMode = loadPref<FolderViewMode>('shareFolderViewMode', data.defaultShareFolderViewMode || 'small-grid');
+    sortMode = loadPref<SortMode>('shareSortMode', (data as any).defaultShareSortMode || 'newest');
+    viewMode = loadPref<ViewMode>('shareViewMode', (data as any).defaultShareViewMode || 'small-fit');
+    folderViewMode = loadPref<FolderViewMode>('shareFolderViewMode', (data as any).defaultShareFolderViewMode || 'small-grid');
     showFileNames = loadPref<boolean>('showFileNames', false);
 
     tracker.init({

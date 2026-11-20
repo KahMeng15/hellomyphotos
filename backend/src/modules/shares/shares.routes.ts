@@ -17,7 +17,7 @@ const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 import { requireAuth, hasFolderAccess } from '../../utils/auth';
 import { getClientIp } from '../../utils/getIp';
 import { sendPlainTextEmail } from '../../utils/mailer';
-import { isShareLockdownActive } from '../../utils/lockdown.js';
+import { isShareLockdownActive } from '../../utils/lockdown';
 import { WatermarkService } from '../media/watermark.service';
 
 export async function sharesRoutes(fastify: FastifyInstance) {

@@ -6,6 +6,7 @@ class TokenBucket {
   private rate: number = 0;
   private tokens: number = 0;
   private lastRefill: number = Date.now();
+  public lastActive: number = Date.now();
 
   constructor(rate: number = 0) {
     this.rate = rate;
@@ -20,6 +21,7 @@ class TokenBucket {
   }
 
   async consume(bytes: number): Promise<void> {
+    this.lastActive = Date.now();
     if (this.rate <= 0) return;
 
     const now = Date.now();
@@ -42,10 +44,15 @@ const authGlobalBucket = new TokenBucket(0);
 const publicGlobalBucket = new TokenBucket(0);
 const userBuckets = new Map<string, TokenBucket>();
 
-// Clean up unused buckets periodically to prevent memory leaks
+// Clean up unused buckets periodically to prevent memory leaks (evict buckets inactive for > 10 minutes)
 setInterval(() => {
-  // Not fully implemented for brevity, but map can be purged
-}, 60000);
+  const now = Date.now();
+  for (const [key, bucket] of userBuckets.entries()) {
+    if (now - bucket.lastActive > 10 * 60 * 1000) {
+      userBuckets.delete(key);
+    }
+  }
+}, 60000).unref();
 
 export class BandwidthThrottler extends Transform {
   private ip: string;

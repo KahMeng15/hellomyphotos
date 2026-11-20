@@ -104,64 +104,72 @@
   <div class="grid">
     <!-- Profile & Access -->
     <div class="column">
-      <div class="card glass-panel">
-        <div class="card-header">
-          <User size={20} class="text-blue" />
-          <h3>Profile Info</h3>
+      <div class="card modal glass-panel">
+        <div class="modal-header">
+          <div class="header-title">
+            <User size={20} class="text-blue" />
+            <h3>Profile Info</h3>
+          </div>
         </div>
-        <form onsubmit={handleProfileSave} class="form">
-          <div class="form-group">
-            <label for="name">Full Name</label>
-            <div class="input-wrap">
-              <User size={16} class="input-icon" />
-              <input type="text" id="name" bind:value={name} required placeholder="John Doe" />
+        <div class="modal-body">
+          <form onsubmit={handleProfileSave} class="form">
+            <div class="form-group">
+              <label for="name">Full Name</label>
+              <div class="input-wrap">
+                <User size={16} class="input-icon" />
+                <input type="text" id="name" bind:value={name} required placeholder="John Doe" />
+              </div>
             </div>
-          </div>
-          <div class="form-group">
-            <label for="email">Email Address</label>
-            <div class="input-wrap">
-              <Mail size={16} class="input-icon" />
-              <input type="email" id="email" bind:value={email} required placeholder="john@example.com" />
+            <div class="form-group">
+              <label for="email">Email Address</label>
+              <div class="input-wrap">
+                <Mail size={16} class="input-icon" />
+                <input type="email" id="email" bind:value={email} required placeholder="john@example.com" />
+              </div>
             </div>
-          </div>
-          <div class="form-divider"></div>
-          <div class="form-group">
-            <label for="profilePassword">Verify Current Password</label>
-            <div class="input-wrap">
-              <Lock size={16} class="input-icon" />
-              <input type="password" id="profilePassword" bind:value={profilePassword} required placeholder="••••••••" />
+            <div class="form-divider"></div>
+            <div class="form-group">
+              <label for="profilePassword">Verify Current Password</label>
+              <div class="input-wrap">
+                <Lock size={16} class="input-icon" />
+                <input type="password" id="profilePassword" bind:value={profilePassword} required placeholder="••••••••" />
+              </div>
             </div>
-          </div>
-          <button type="submit" class="btn primary-btn" disabled={savingProfile}>
-            {#if savingProfile}<span class="spinner-sm"></span>{/if}
-            <Save size={16} /> Save Changes
-          </button>
-        </form>
+            <button type="submit" class="btn primary-btn" disabled={savingProfile}>
+              {#if savingProfile}<span class="spinner-sm"></span>{/if}
+              <Save size={16} /> Save Changes
+            </button>
+          </form>
+        </div>
       </div>
 
-      <div class="card glass-panel access-card">
-        <div class="card-header">
-          <Shield size={20} class="text-purple" />
-          <h3>Access & Scope</h3>
+      <div class="card modal glass-panel access-card">
+        <div class="modal-header">
+          <div class="header-title">
+            <Shield size={20} class="text-purple" />
+            <h3>Access & Scope</h3>
+          </div>
         </div>
-        <div class="info-row folders-row">
-          <span class="label">Role</span>
-          <span class="badge {role === 'admin' || role === 'super_admin' ? 'badge-admin' : 'badge-user'}">
-            {role.replace('_', ' ').toUpperCase()}
-          </span>
-        </div>
-        <div class="info-row folders-row">
-          <span class="label">Allowed Folders</span>
-          <div class="folders-list">
-            {#if folders.includes('*')}
-              <span class="folder-badge all-access"><Server size={14} /> Full System Access</span>
-            {:else if folders.length === 0}
-              <span class="muted">No folder access</span>
-            {:else}
-              {#each folders as folder}
-                <span class="folder-badge">{folder}</span>
-              {/each}
-            {/if}
+        <div class="modal-body">
+          <div class="info-row">
+            <span class="label">Role</span>
+            <span class="badge {role === 'admin' || role === 'super_admin' ? 'badge-admin' : 'badge-user'}">
+              {role.replace('_', ' ').toUpperCase()}
+            </span>
+          </div>
+          <div class="info-row folders-row">
+            <span class="label">Allowed Folders</span>
+            <div class="folders-list">
+              {#if folders.includes('*')}
+                <span class="folder-badge all-access"><Server size={14} /> Full System Access</span>
+              {:else if folders.length === 0}
+                <span class="muted">No folder access</span>
+              {:else}
+                {#each folders as folder}
+                  <span class="folder-badge">{folder}</span>
+                {/each}
+              {/if}
+            </div>
           </div>
         </div>
       </div>
@@ -169,39 +177,43 @@
 
     <!-- Security -->
     <div class="column">
-      <div class="card glass-panel">
-        <div class="card-header">
-          <KeyRound size={20} class="text-emerald" />
-          <h3>Security</h3>
+      <div class="card modal glass-panel">
+        <div class="modal-header">
+          <div class="header-title">
+            <KeyRound size={20} class="text-emerald" />
+            <h3>Security</h3>
+          </div>
         </div>
-        <form onsubmit={handlePasswordSave} class="form">
-          <div class="form-group">
-            <label for="currentPassword">Current Password</label>
-            <div class="input-wrap">
-              <Lock size={16} class="input-icon" />
-              <input type="password" id="currentPassword" bind:value={currentPassword} required placeholder="••••••••" />
+        <div class="modal-body">
+          <form onsubmit={handlePasswordSave} class="form">
+            <div class="form-group">
+              <label for="currentPassword">Current Password</label>
+              <div class="input-wrap">
+                <Lock size={16} class="input-icon" />
+                <input type="password" id="currentPassword" bind:value={currentPassword} required placeholder="••••••••" />
+              </div>
             </div>
-          </div>
-          <div class="form-divider"></div>
-          <div class="form-group">
-            <label for="newPassword">New Password</label>
-            <div class="input-wrap">
-              <Lock size={16} class="input-icon" />
-              <input type="password" id="newPassword" bind:value={newPassword} required placeholder="••••••••" />
+            <div class="form-divider"></div>
+            <div class="form-group">
+              <label for="newPassword">New Password</label>
+              <div class="input-wrap">
+                <Lock size={16} class="input-icon" />
+                <input type="password" id="newPassword" bind:value={newPassword} required placeholder="••••••••" />
+              </div>
             </div>
-          </div>
-          <div class="form-group">
-            <label for="confirmPassword">Confirm New Password</label>
-            <div class="input-wrap">
-              <Lock size={16} class="input-icon" />
-              <input type="password" id="confirmPassword" bind:value={confirmPassword} required placeholder="••••••••" />
+            <div class="form-group">
+              <label for="confirmPassword">Confirm New Password</label>
+              <div class="input-wrap">
+                <Lock size={16} class="input-icon" />
+                <input type="password" id="confirmPassword" bind:value={confirmPassword} required placeholder="••••••••" />
+              </div>
             </div>
-          </div>
-          <button type="submit" class="btn danger-btn" disabled={savingPassword}>
-            {#if savingPassword}<span class="spinner-sm"></span>{/if}
-            <KeyRound size={16} /> Update Password
-          </button>
-        </form>
+            <button type="submit" class="btn danger-btn" disabled={savingPassword}>
+              {#if savingPassword}<span class="spinner-sm"></span>{/if}
+              <KeyRound size={16} /> Update Password
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   </div>
@@ -209,65 +221,51 @@
 
 <style>
   .settings-container {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 2rem 1rem;
+    width: 100%;
     color: #f4f4f5;
   }
 
   .header {
-    margin-bottom: 2.5rem;
+    margin-bottom: 2rem;
   }
   .header h2 {
-    font-size: 2.25rem;
-    font-weight: 700;
+    font-size: 2rem;
     margin: 0 0 0.5rem 0;
-    letter-spacing: -0.02em;
-    background: linear-gradient(to right, #fff, #a1a1aa);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
   }
   .header p {
     color: #a1a1aa;
     margin: 0;
-    font-size: 1.1rem;
   }
 
   .grid {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 2rem;
+    gap: 1.5rem;
+    width: 100%;
   }
-  @media (min-width: 768px) {
-    .grid { grid-template-columns: 1fr 1fr; }
+  @media (min-width: 900px) {
+    .grid {
+      grid-template-columns: 1fr 1fr;
+    }
   }
 
   .column {
     display: flex;
     flex-direction: column;
-    gap: 2rem;
+    gap: 1.5rem;
+    width: 100%;
   }
 
-  .card {
-    padding: 2rem;
-    border-radius: 16px;
-    background: rgba(20, 20, 25, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  .card.modal {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
   }
 
-  .card-header {
+  .header-title {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 1.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    padding-bottom: 1rem;
-  }
-  .card-header h3 {
-    margin: 0;
-    font-size: 1.25rem;
-    font-weight: 600;
   }
 
   .text-blue { color: #3b82f6; }
@@ -286,9 +284,8 @@
     gap: 0.5rem;
   }
   .form-group label {
-    font-size: 0.9rem;
-    color: #d4d4d8;
-    font-weight: 500;
+    font-size: 0.85rem;
+    color: #a1a1aa;
   }
 
   .input-wrap {
@@ -303,9 +300,9 @@
   }
   .input-wrap input {
     width: 100%;
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
     padding: 0.75rem 1rem 0.75rem 2.5rem;
     color: #fff;
     font-family: inherit;
@@ -321,7 +318,7 @@
 
   .form-divider {
     height: 1px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--glass-border);
     margin: 0.5rem 0;
   }
 
@@ -331,8 +328,8 @@
     justify-content: center;
     gap: 8px;
     padding: 0.75rem 1.5rem;
-    border-radius: 8px;
-    font-weight: 600;
+    border-radius: 6px;
+    font-weight: 500;
     cursor: pointer;
     border: none;
     transition: all 0.2s;
@@ -344,18 +341,22 @@
     cursor: not-allowed;
   }
   .primary-btn {
-    background: #3b82f6;
-    color: white;
+    background: var(--text-color);
+    color: var(--bg-color);
   }
-  .primary-btn:hover:not(:disabled) { background: #2563eb; }
+  .primary-btn:hover:not(:disabled) {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+  }
   
   .danger-btn {
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.2);
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
   }
   .danger-btn:hover:not(:disabled) {
-    background: rgba(239, 68, 68, 0.2);
+    background: rgba(239, 68, 68, 0.25);
+    transform: translateY(-1px);
   }
 
   .info-row {
@@ -372,12 +373,12 @@
   .folders-row {
     flex-direction: column;
     align-items: flex-start;
-    gap: 1rem;
+    gap: 0.75rem;
   }
   
   .label {
     color: #a1a1aa;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
   }
 
   .badge {
@@ -409,8 +410,8 @@
     gap: 6px;
     padding: 6px 12px;
     background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
     font-size: 0.85rem;
     color: #e4e4e7;
   }
@@ -448,16 +449,6 @@
   .banner-icon {
     flex-shrink: 0;
     color: #ef4444;
-  }
-
-  @media (max-width: 768px) {
-    .grid {
-      grid-template-columns: 1fr;
-    }
-    
-    .settings-container {
-      padding: 1rem;
-    }
   }
 
   .muted { color: #71717a; font-style: italic; }

@@ -20,7 +20,7 @@ declare module 'fastify' {
 }
 
 import { pool } from '../config/db';
-import { isShareLockdownActive } from './lockdown.js';
+import { isShareLockdownActive } from './lockdown';
 
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
   const authHeader = request.headers.authorization;

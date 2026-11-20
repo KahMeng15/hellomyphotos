@@ -97,7 +97,12 @@ export class AnalyticsService {
     }
   }
 
+  private static isFlushing = false;
+
   static async flushToPostgres() {
+    if (this.isFlushing) return;
+    this.isFlushing = true;
+
     try {
       // Flush aggregated media view counters
       const keys = await redis.keys('analytics:*');
@@ -115,12 +120,21 @@ export class AnalyticsService {
           const bytes = parseInt(data.bytes || '0', 10);
 
           if (count > 0) {
-            // Bulk insert (in a real system you'd batch these queries)
-            for (let i = 0; i < count; i++) {
-              await query(`
-                INSERT INTO media_analytics (media_id, share_token, action_type, bytes_served, ip_hash)
-                VALUES ($1, $2, $3, $4, 'batch')
-              `, [mediaId, shareToken, actionType, Math.floor(bytes / count)]);
+            const avgBytes = Math.floor(bytes / count);
+            const batchSize = 200;
+            for (let i = 0; i < count; i += batchSize) {
+              const currentBatch = Math.min(batchSize, count - i);
+              const placeholders: string[] = [];
+              const params: any[] = [];
+              for (let j = 0; j < currentBatch; j++) {
+                const base = j * 5;
+                params.push(mediaId, shareToken, actionType, avgBytes, 'batch');
+                placeholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`);
+              }
+              await query(
+                `INSERT INTO media_analytics (media_id, share_token, action_type, bytes_served, ip_hash) VALUES ${placeholders.join(', ')}`,
+                params
+              );
             }
             // Delete from Redis once flushed
             await redis.del(key);
@@ -128,41 +142,55 @@ export class AnalyticsService {
         }
       }
 
-      // Flush buffered visit events in a single multi-row insert
-      const queued = await redis.lrange(VISITS_QUEUE_KEY, 0, -1);
-      if (queued.length > 0) {
-        await redis.del(VISITS_QUEUE_KEY);
-        const rows = queued
-          .map(q => { try { return JSON.parse(q); } catch { return null; } })
-          .filter(Boolean);
+      // Flush buffered visit events safely using an atomic rename
+      const tempQueueKey = `${VISITS_QUEUE_KEY}:processing:${Date.now()}`;
+      let hasRenamed = false;
+      try {
+        await redis.rename(VISITS_QUEUE_KEY, tempQueueKey);
+        hasRenamed = true;
+      } catch {
+        // Key didn't exist or rename failed
+        hasRenamed = false;
+      }
 
-        const columns = [
-          'media_id', 'share_token', 'device_id', 'action_type', 'ip', 'ip_hash', 'user_agent',
-          'os', 'browser', 'device_type', 'referrer', 'path', 'folder_path',
-          'page_load_ms', 'session_duration_s', 'photo_view_ms', 'sort_mode', 'view_mode',
-          'features_used', 'download_time_ms', 'network_type', 'screen_res', 'scroll_depth_pct',
-          'folders_visited', 'cache_bytes_saved', 'cache_hits', 'cache_misses', 'metadata'
-        ];
-        const perRow = columns.length;
+      if (hasRenamed) {
+        const queued = await redis.lrange(tempQueueKey, 0, -1);
+        if (queued.length > 0) {
+          const rows = queued
+            .map(q => { try { return JSON.parse(q); } catch { return null; } })
+            .filter(Boolean);
 
-        // Chunk to stay well under Postgres' 65535 parameter limit
-        for (let i = 0; i < rows.length; i += 200) {
-          const chunk = rows.slice(i, i + 200);
-          const params: any[] = [];
-          const placeholders: string[] = [];
-          chunk.forEach((row, idx) => {
-            const base = idx * perRow;
-            columns.forEach((col, j) => params.push(row[col] ?? null));
-            placeholders.push(`(${columns.map((_, j) => `$${base + j + 1}`).join(', ')})`);
-          });
-          await query(
-            `INSERT INTO analytics_visits (${columns.join(', ')}) VALUES ${placeholders.join(', ')}`,
-            params
-          );
+          const columns = [
+            'media_id', 'share_token', 'device_id', 'action_type', 'ip', 'ip_hash', 'user_agent',
+            'os', 'browser', 'device_type', 'referrer', 'path', 'folder_path',
+            'page_load_ms', 'session_duration_s', 'photo_view_ms', 'sort_mode', 'view_mode',
+            'features_used', 'download_time_ms', 'network_type', 'screen_res', 'scroll_depth_pct',
+            'folders_visited', 'cache_bytes_saved', 'cache_hits', 'cache_misses', 'metadata'
+          ];
+          const perRow = columns.length;
+
+          // Chunk to stay well under Postgres' 65535 parameter limit
+          for (let i = 0; i < rows.length; i += 200) {
+            const chunk = rows.slice(i, i + 200);
+            const params: any[] = [];
+            const placeholders: string[] = [];
+            chunk.forEach((row, idx) => {
+              const base = idx * perRow;
+              columns.forEach((col, j) => params.push(row[col] ?? null));
+              placeholders.push(`(${columns.map((_, j) => `$${base + j + 1}`).join(', ')})`);
+            });
+            await query(
+              `INSERT INTO analytics_visits (${columns.join(', ')}) VALUES ${placeholders.join(', ')}`,
+              params
+            );
+          }
         }
+        await redis.del(tempQueueKey);
       }
     } catch (error) {
       console.error('[Analytics] Failed to flush to postgres', error);
+    } finally {
+      this.isFlushing = false;
     }
   }
 }
