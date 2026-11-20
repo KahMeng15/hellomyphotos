@@ -12,7 +12,6 @@ import { slide } from 'svelte/transition';
   import { invalidateAll, goto } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
-  import { env } from '$env/dynamic/public';
   import type { PageData } from './$types';
   import Modal from '$lib/components/Modal.svelte';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
@@ -455,7 +454,7 @@ import { slide } from 'svelte/transition';
   }
 
   async function copyShareLink(token: string) {
-    const domain = env.PUBLIC_APP_DOMAIN || window.location.origin;
+    const domain = (import.meta.env.PUBLIC_APP_DOMAIN as string) || window.location.origin;
     const url = `${domain}/share/${token}`;
     const success = await copyToClipboard(url);
     if (success) {
@@ -1458,7 +1457,7 @@ import { slide } from 'svelte/transition';
         <div style="background: rgba(0,255,100,0.1); border: 1px solid rgba(0,255,100,0.3); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
           <p style="color: #4ade80; margin-bottom: 8px; font-weight: 500;">Share link created successfully!</p>
           <div style="display: flex; gap: 8px;">
-            <input type="text" readonly value="{env.PUBLIC_APP_DOMAIN || window.location.origin}/share/{newlyCreatedShareToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
+            <input type="text" readonly value="{(import.meta.env.PUBLIC_APP_DOMAIN as string) || window.location.origin}/share/{newlyCreatedShareToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px;" />
             <button class="icon-btn" style="display: flex; align-items: center; justify-content: center;" onclick={() => copyShareLink(newlyCreatedShareToken!)}>
               {#if copiedToken === newlyCreatedShareToken}
                 <Check size={18} color="#10b981" />

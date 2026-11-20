@@ -10,4 +10,13 @@ declare global {
 	}
 }
 
+interface ImportMetaEnv {
+	readonly VITE_API_URL?: string;
+	readonly PUBLIC_APP_DOMAIN?: string;
+}
+
+interface ImportMeta {
+	readonly env: ImportMetaEnv;
+}
+
 export {};

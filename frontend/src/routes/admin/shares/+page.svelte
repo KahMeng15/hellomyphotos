@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { copyToClipboard } from '$lib/utils/clipboard';
-  import { env } from '$env/dynamic/public';
   import { API_BASE } from '$lib/api/media';
   import { 
     ChevronLeft, Trash2, Link as LinkIcon, Folder, Image, User, Copy, Check, 
@@ -112,7 +111,7 @@
   }
 
   async function copyLink(token: string) {
-    const domain = env.PUBLIC_APP_DOMAIN || window.location.origin;
+    const domain = (import.meta.env.PUBLIC_APP_DOMAIN as string) || window.location.origin;
     const url = `${domain}/share/${token}`;
     const success = await copyToClipboard(url);
     if (success) {
@@ -468,7 +467,7 @@
     <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
       <p style="color: #34d399; margin: 0 0 8px 0; font-weight: 500;">Share link created successfully!</p>
       <div style="display: flex; gap: 8px;">
-        <input type="text" readonly value="{env.PUBLIC_APP_DOMAIN || window.location.origin}/share/{newlyCreatedToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 6px; font-family: monospace; font-size: 0.85rem;" />
+        <input type="text" readonly value="{(import.meta.env.PUBLIC_APP_DOMAIN as string) || window.location.origin}/share/{newlyCreatedToken}" style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 6px; font-family: monospace; font-size: 0.85rem;" />
         <button class="icon-btn" style="display: flex; align-items: center; justify-content: center; width: 42px; background: rgba(255,255,255,0.08);" onclick={() => copyLink(newlyCreatedToken!)}>
           {#if copiedToken === newlyCreatedToken}
             <Check size={18} color="#10b981" />
