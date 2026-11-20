@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { redis } from '../../config/redis';
+import { redis, scanKeys } from '../../config/redis';
 import { query } from '../../config/db';
 import { parseUserAgent } from '../../utils/userAgent';
 import { resolveVisitReferrer } from '../../utils/referrer';
@@ -105,7 +105,7 @@ export class AnalyticsService {
 
     try {
       // Flush aggregated media view counters
-      const keys = await redis.keys('analytics:*');
+      const keys = await scanKeys('analytics:*');
       if (keys.length > 0) {
         for (const key of keys) {
           const parts = key.split(':'); // ['analytics', actionType, mediaId, shareToken]

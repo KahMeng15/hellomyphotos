@@ -8,13 +8,13 @@ import sharp from 'sharp';
 import { metadataQueue } from '../../queue/metadataQueue';
 import { thumbnailQueue } from '../../queue/thumbnailQueue';
 import { videoQueue } from '../../queue/videoQueue';
-import { redis } from '../../config/redis';
+import { redis, deleteKeysByPattern } from '../../config/redis';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 
-import { requireAuth, hasFolderAccess } from '../../utils/auth';
+import { requireAuth, hasFolderAccess, invalidateShareCache } from '../../utils/auth';
 import { getClientIp } from '../../utils/getIp';
 import { sendPlainTextEmail } from '../../utils/mailer';
 import { isShareLockdownActive } from '../../utils/lockdown';
@@ -907,9 +907,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
     
     await query(`DELETE FROM shared_folders WHERE share_token = $1`, [token]);
+    invalidateShareCache(token);
     try {
-      const keys = await redis.keys(`share:dirs:${token}:*`);
-      if (keys.length > 0) await redis.del(...keys);
+      await deleteKeysByPattern(`share:dirs:${token}:*`);
     } catch (e) {}
     
     return reply.send({ success: true });
@@ -1001,9 +1001,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       RETURNING *
     `, values);
 
+    invalidateShareCache(token);
     try {
-      const keys = await redis.keys(`share:dirs:${token}:*`);
-      if (keys.length > 0) await redis.del(...keys);
+      await deleteKeysByPattern(`share:dirs:${token}:*`);
     } catch (e) {}
 
     return reply.send({ success: true, share: updateRes.rows[0] });

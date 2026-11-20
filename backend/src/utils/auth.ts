@@ -119,6 +119,76 @@ export function canBrowseFolder(user: AuthUser, folderPath: string): boolean {
   });
 }
 
+interface MediaFolderCacheEntry {
+  folder_path: string;
+  expiresAt: number;
+}
+const mediaFolderCache = new Map<string, MediaFolderCacheEntry>();
+const MEDIA_FOLDER_TTL_MS = 60_000;
+
+interface ShareTokenCacheEntry {
+  data: { folder_path: string | null; media_id: string | null; person_id: string | null; allow_download_folder?: boolean } | null;
+  expiresAt: number;
+}
+const shareTokenCache = new Map<string, ShareTokenCacheEntry>();
+const SHARE_TOKEN_TTL_MS = 30_000;
+
+export function invalidateShareCache(shareToken?: string) {
+  if (shareToken) {
+    shareTokenCache.delete(shareToken);
+  } else {
+    shareTokenCache.clear();
+  }
+}
+
+export function invalidateMediaFolderCache(mediaId?: string) {
+  if (mediaId) {
+    mediaFolderCache.delete(mediaId);
+  } else {
+    mediaFolderCache.clear();
+  }
+}
+
+async function getMediaFolder(mediaId: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = mediaFolderCache.get(mediaId);
+  if (cached && cached.expiresAt > now) {
+    return cached.folder_path;
+  }
+  const mediaResult = await pool.query('SELECT folder_path FROM media_files WHERE id = $1', [mediaId]);
+  if (mediaResult.rows.length === 0) return null;
+  const folder_path = mediaResult.rows[0].folder_path;
+
+  if (mediaFolderCache.size > 10_000) {
+    const iter = mediaFolderCache.keys();
+    for (let i = 0; i < 2000; i++) {
+      const next = iter.next();
+      if (next.done) break;
+      mediaFolderCache.delete(next.value);
+    }
+  }
+  mediaFolderCache.set(mediaId, { folder_path, expiresAt: now + MEDIA_FOLDER_TTL_MS });
+  return folder_path;
+}
+
+async function getCachedShare(shareToken: string) {
+  const now = Date.now();
+  const cached = shareTokenCache.get(shareToken);
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+  const shareResult = await pool.query(
+    'SELECT folder_path, media_id, person_id, allow_download_folder FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())',
+    [shareToken]
+  );
+  const data = shareResult.rows.length > 0 ? shareResult.rows[0] : null;
+  if (shareTokenCache.size > 2000) {
+    shareTokenCache.clear();
+  }
+  shareTokenCache.set(shareToken, { data, expiresAt: now + SHARE_TOKEN_TTL_MS });
+  return data;
+}
+
 export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyReply, mediaId: string) {
   // 1. Check share token first
   const { shareToken } = request.query as { shareToken?: string };
@@ -136,25 +206,20 @@ export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyR
     });
   };
 
-  let mediaFolder = null;
-  const mediaResult = await pool.query('SELECT folder_path FROM media_files WHERE id = $1', [mediaId]);
-  if (mediaResult.rows.length === 0) {
+  const mediaFolder = await getMediaFolder(mediaId);
+  if (mediaFolder === null) {
     logBlocked('not_found');
     reply.status(404).send({ error: 'Media not found' });
     return false; // Not allowed
   }
-  mediaFolder = mediaResult.rows[0].folder_path;
 
   if (shareToken) {
     if (await isShareLockdownActive()) {
       logBlocked('lockdown_blocked');
     } else {
-      const shareResult = await pool.query(
-        'SELECT folder_path, media_id, person_id FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())',
-        [shareToken]
-      );
-      if (shareResult.rows.length > 0) {
-        const { folder_path: shareRoot, media_id: shareMediaId, person_id: sharePersonId } = shareResult.rows[0];
+      const shareRecord = await getCachedShare(shareToken);
+      if (shareRecord) {
+        const { folder_path: shareRoot, media_id: shareMediaId, person_id: sharePersonId } = shareRecord;
         if (shareMediaId && shareMediaId === mediaId) {
           return true;
         }
@@ -207,13 +272,13 @@ export async function verifyFolderAccess(request: FastifyRequest, reply: Fastify
     if (await isShareLockdownActive()) {
       logBlocked('lockdown_blocked');
     } else {
-      const shareResult = await pool.query('SELECT folder_path, allow_download_folder FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())', [shareToken]);
-      if (shareResult.rows.length > 0) {
-        const shareRoot = shareResult.rows[0].folder_path || '';
+      const shareRecord = await getCachedShare(shareToken);
+      if (shareRecord) {
+        const shareRoot = shareRecord.folder_path || '';
         
         // If we are checking for zip download, enforce allow_download_folder
         if (request.url.includes('/api/zip/')) {
-          if (!shareResult.rows[0].allow_download_folder) {
+          if (!shareRecord.allow_download_folder) {
             logBlocked('blocked_access');
             reply.status(403).send({ error: 'Forbidden: ZIP download not allowed for this share link' });
             return false;

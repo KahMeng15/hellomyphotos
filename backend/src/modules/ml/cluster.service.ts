@@ -1,5 +1,5 @@
 import { query } from '../../config/db';
-import { redis } from '../../config/redis';
+import { redis, deleteKeysByPattern } from '../../config/redis';
 import { v4 as uuidv4 } from 'uuid';
 
 export class ClusterService {
@@ -118,8 +118,7 @@ export class ClusterService {
 
     // Invalidate face cache in Redis
     try {
-      const keys = await redis.keys('faces:list:*');
-      if (keys.length > 0) await redis.del(...keys);
+      await deleteKeysByPattern('faces:list:*');
     } catch {}
 
     console.log('[Clustering] Face clustering complete!');

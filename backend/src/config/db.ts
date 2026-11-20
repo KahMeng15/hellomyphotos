@@ -8,6 +8,9 @@ export const pool = new Pool({
   user: process.env.DB_USER || 'hellomyphotos',
   password: process.env.DB_PASS || 'hellomyphotos_secret',
   database: process.env.DB_NAME || 'hellomyphotos',
+  max: parseInt(process.env.DB_POOL_MAX || '25', 10),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
 });
 
 // Prevent unhandled error events from crashing the process when idle connections drop or Postgres restarts
@@ -330,6 +333,16 @@ const SCHEMA_STATEMENTS = [
      cover_face_id = COALESCE(people.cover_face_id, EXCLUDED.cover_face_id),
      cover_media_id = COALESCE(people.cover_media_id, EXCLUDED.cover_media_id),
      updated_at = EXCLUDED.updated_at`,
+
+  // ---- Performance Optimization: Media & Analytics Indexes ----
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_files_created ON media_files(created_at DESC)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_files_folder_created ON media_files(folder_path, created_at DESC)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_files_exif_gin ON media_files USING gin (exif_json)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_analytics_media_id ON media_analytics(media_id)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_analytics_share_token ON media_analytics(share_token)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_analytics_created ON media_analytics(created_at)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_shared_folders_token ON shared_folders(share_token)`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_shared_folders_active_expires ON shared_folders(is_active, expires_at)`,
 ];
 
 // Statements not yet successfully applied. Succeeded ones are dropped so they

@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { requireAuth } from '../../utils/auth';
 import { FastifyInstance } from 'fastify';
-import { redis } from '../../config/redis';
+import { redis, deleteKeysByPattern } from '../../config/redis';
 import { ScannerService } from '../scanner/scanner.service';
 import { queues as allQueues } from '../../queue';
 import { mlQueue } from '../../queue/mlQueue';
@@ -363,8 +363,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       await query(`TRUNCATE TABLE face_embeddings CASCADE`);
       await query(`TRUNCATE TABLE people CASCADE`);
       try {
-        const keys = await redis.keys('faces:list:*');
-        if (keys.length > 0) await redis.del(...keys);
+        await deleteKeysByPattern('faces:list:*');
       } catch {}
 
       // 2. Clear orphaned face thumbnail cache on disk
@@ -429,10 +428,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       await query(`TRUNCATE TABLE people CASCADE`);
 
       // Clear Redis analytics cache so the cron job doesn't try to flush stats for wiped media files (which causes a foreign key error)
-      const analyticsKeys = await redis.keys('analytics:*');
-      if (analyticsKeys.length > 0) {
-        await redis.del(...analyticsKeys);
-      }
+      await deleteKeysByPattern('analytics:*');
 
       const cacheRoot = path.resolve(process.env.CACHE_ROOT || path.resolve(process.cwd(), '../volumes/cache_rw'));
       // M-5 Fix: Use async fs.promises.rm to avoid blocking the event loop on large cache dirs.
@@ -1766,8 +1762,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       `, [targetPersonId]);
       await query(`DELETE FROM people WHERE id = ANY($1)`, [sourcePersonIds]);
       try {
-        const keys = await redis.keys('faces:list:*');
-        if (keys.length > 0) await redis.del(...keys);
+        await deleteKeysByPattern('faces:list:*');
       } catch {}
       
       return reply.send({ success: true, message: `Merged ${sourcePersonIds.length} face clusters into ${targetPersonId}` });

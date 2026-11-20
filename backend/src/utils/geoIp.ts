@@ -4,7 +4,7 @@ import zlib from 'zlib';
 import { pipeline } from 'stream/promises';
 import { Readable } from 'stream';
 import maxmind, { type CityResponse, type AsnResponse, type Reader } from 'maxmind';
-import { redis } from '../config/redis';
+import { redis, deleteKeysByPattern } from '../config/redis';
 
 export interface IpGeoInfo {
   ip: string;
@@ -204,12 +204,9 @@ export async function downloadDatabase(edition: 'City' | 'ASN'): Promise<boolean
 
 export async function clearStaleGeoCache(): Promise<void> {
   try {
-    const keys = await redis.keys('geo:*');
-    if (keys.length > 0) {
-      for (let i = 0; i < keys.length; i += 100) {
-        await redis.del(...keys.slice(i, i + 100));
-      }
-      console.log(`[GeoIP] Cleared ${keys.length} cached geo entries from Redis.`);
+    const deletedCount = await deleteKeysByPattern('geo:*');
+    if (deletedCount > 0) {
+      console.log(`[GeoIP] Cleared ${deletedCount} cached geo entries from Redis.`);
     }
   } catch (err: any) {
     console.error('[GeoIP] Failed to clear Redis geo cache:', err.message);

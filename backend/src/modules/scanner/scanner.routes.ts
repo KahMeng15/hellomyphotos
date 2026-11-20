@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
-import { redis } from '../../config/redis';
+import { redis, deleteKeysByPattern } from '../../config/redis';
 import { scannerQueue } from '../../queue/scannerQueue';
 import { mediaQueue } from '../../queue/mediaQueue';
 import { metadataQueue } from '../../queue/metadataQueue';
@@ -71,8 +71,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         await redis.del(`folder_dirs_v2:${p}`).catch(() => {});
         const parent = p.includes('/') ? p.substring(0, p.lastIndexOf('/')) : '';
         await redis.del(`folder_dirs_v2:${parent}`).catch(() => {});
-        const shareKeys = await redis.keys('share:dirs:*');
-        if (shareKeys.length > 0) await redis.del(...shareKeys).catch(() => {});
+        await deleteKeysByPattern('share:dirs:*').catch(() => {});
       } catch (cacheErr) {
         // non-critical
       }

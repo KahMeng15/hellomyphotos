@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import { query } from '../../config/db';
-import { redis } from '../../config/redis';
+import { redis, deleteKeysByPattern } from '../../config/redis';
 import { requireAuth, verifyMediaAccess } from '../../utils/auth';
 import { SmartSearchService } from './smartSearch.service';
 import { MLService, FACE_THUMB_SIZE, FACE_PADDING, parseBoundingBox } from './ml.service';
@@ -178,8 +178,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
     `, [id, name]);
 
     try {
-      const keys = await redis.keys('faces:list:*');
-      if (keys.length > 0) await redis.del(...keys);
+      await deleteKeysByPattern('faces:list:*');
     } catch {}
 
     return reply.send({ success: true, name });
@@ -302,8 +301,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
     `, [safeId, mediaId]);
 
     try {
-      const keys = await redis.keys('faces:list:*');
-      if (keys.length > 0) await redis.del(...keys);
+      await deleteKeysByPattern('faces:list:*');
     } catch {}
 
     // Delete cached face thumbnail so it regenerates from the new cover photo

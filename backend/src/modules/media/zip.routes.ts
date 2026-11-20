@@ -74,21 +74,19 @@ function scheduleJobDeletion(jobId: string, delayMs = 5 * 60 * 1000) {
   }, delayMs);
 }
 
-function cleanupStaleZips() {
+async function cleanupStaleZips() {
   try {
-    if (fs.existsSync(TEMP_ZIP_DIR)) {
-      const files = fs.readdirSync(TEMP_ZIP_DIR);
-      const now = Date.now();
-      for (const file of files) {
-        const fp = path.join(TEMP_ZIP_DIR, file);
-        try {
-          const stat = fs.statSync(fp);
-          // Delete if older than 15 minutes
-          if (now - stat.mtimeMs > 15 * 60 * 1000) {
-            fs.unlinkSync(fp);
-          }
-        } catch {}
-      }
+    const files = await fs.promises.readdir(TEMP_ZIP_DIR);
+    const now = Date.now();
+    for (const file of files) {
+      const fp = path.join(TEMP_ZIP_DIR, file);
+      try {
+        const stat = await fs.promises.stat(fp);
+        // Delete if older than 15 minutes
+        if (now - stat.mtimeMs > 15 * 60 * 1000) {
+          await fs.promises.unlink(fp);
+        }
+      } catch {}
     }
   } catch (e) {}
 }
@@ -152,22 +150,27 @@ export async function zipRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'No files found in this folder.' });
     }
 
-    const existingFiles: Array<any> = [];
-    for (const file of result.rows) {
-      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
-      if (fs.existsSync(fullPath)) {
-        const stat = fs.statSync(fullPath);
-        existingFiles.push({
-          ...file,
-          fullPath,
-          fileName: file.file_name,
-          folderPath: file.folder_path,
-          mimeType: file.mime_type,
-          sizeBytes: stat.size,
-          mtimeMs: stat.mtimeMs
-        });
-      }
-    }
+    const existingFiles: Array<any> = (
+      await Promise.all(
+        result.rows.map(async (file) => {
+          const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+          try {
+            const stat = await fs.promises.stat(fullPath);
+            return {
+              ...file,
+              fullPath,
+              fileName: file.file_name,
+              folderPath: file.folder_path,
+              mimeType: file.mime_type,
+              sizeBytes: stat.size,
+              mtimeMs: stat.mtimeMs,
+            };
+          } catch {
+            return null;
+          }
+        })
+      )
+    ).filter(Boolean);
 
     if (existingFiles.length === 0) {
       return reply.status(404).send({ error: 'No files found on disk for this folder.' });
@@ -313,17 +316,13 @@ export async function zipRoutes(fastify: FastifyInstance) {
             reject(err);
           });
 
-          output.on('finish', () => {
+          output.on('finish', async () => {
             try {
-              if (fs.existsSync(part.filePath)) {
-                const stat = fs.statSync(part.filePath);
-                part.sizeBytes = stat.size;
-                part.status = 'ready';
-                resolve();
-              } else {
-                reject(new Error(`Temporary zip part ${part.filePath} not found on finish.`));
-              }
-            } catch (e) {
+              const stat = await fs.promises.stat(part.filePath);
+              part.sizeBytes = stat.size;
+              part.status = 'ready';
+              resolve();
+            } catch (e: any) {
               reject(e);
             }
           });
@@ -451,7 +450,7 @@ export async function zipRoutes(fastify: FastifyInstance) {
     });
 
     const isAuth = (request as any).user != null;
-    const stat = fs.statSync(targetPart.filePath);
+    const stat = await fs.promises.stat(targetPart.filePath);
     reply.header('Content-Type', 'application/zip');
     reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(targetPart.filename)}"`);
     reply.header('Content-Length', stat.size);
@@ -535,21 +534,26 @@ export async function zipRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'No files found in this folder.' });
     }
 
-    const existingFiles: Array<any> = [];
-    for (const file of result.rows) {
-      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
-      if (fs.existsSync(fullPath)) {
-        const stat = fs.statSync(fullPath);
-        existingFiles.push({
-          ...file,
-          fullPath,
-          fileName: file.file_name,
-          folderPath: file.folder_path,
-          mimeType: file.mime_type,
-          sizeBytes: stat.size
-        });
-      }
-    }
+    const existingFiles: Array<any> = (
+      await Promise.all(
+        result.rows.map(async (file) => {
+          const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+          try {
+            const stat = await fs.promises.stat(fullPath);
+            return {
+              ...file,
+              fullPath,
+              fileName: file.file_name,
+              folderPath: file.folder_path,
+              mimeType: file.mime_type,
+              sizeBytes: stat.size
+            };
+          } catch {
+            return null;
+          }
+        })
+      )
+    ).filter(Boolean);
 
     if (existingFiles.length === 0) {
       return reply.status(404).send({ error: 'No files found on disk for this folder.' });
