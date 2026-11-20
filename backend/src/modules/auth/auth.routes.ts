@@ -4,11 +4,10 @@ import jwt from 'jsonwebtoken';
 import { pool } from '../../config/db';
 import { redis } from '../../config/redis';
 import { logger } from '../../utils/logger';
-import { requireAuth } from '../../utils/auth';
+import { requireAuth, JWT_SECRET } from '../../utils/auth';
 import { getClientIp } from '../../utils/getIp';
 import { AnalyticsService } from '../analytics/analytics.service';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_please_change';
 const APP_DOMAIN = process.env.APP_DOMAIN || '';
 let cookieDomain: string | undefined = undefined;
 if (APP_DOMAIN) {
@@ -184,7 +183,8 @@ export async function authRoutes(fastify: FastifyInstance) {
       email: user.email,
       name: user.name,
       role: user.role,
-        folders: user.role === 'admin' || user.role === 'super_admin' ? ['*'] : folders
+      folders: user.role === 'admin' || user.role === 'super_admin' ? ['*'] : folders,
+      tokenVersion: user.token_version || 1
     }, JWT_SECRET, { expiresIn: '7d' });
 
     // Set cookie
@@ -323,7 +323,31 @@ export async function authRoutes(fastify: FastifyInstance) {
     }
 
     const hash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, request.user!.id]);
+    const updateRes = await pool.query(
+      'UPDATE users SET password_hash = $1, token_version = COALESCE(token_version, 1) + 1 WHERE id = $2 RETURNING token_version',
+      [hash, request.user!.id]
+    );
+
+    const newTokenVersion = updateRes.rows[0]?.token_version || 1;
+
+    // Re-issue cookie for the active session with updated tokenVersion
+    const newToken = jwt.sign({
+      id: request.user!.id,
+      email: request.user!.email,
+      name: request.user!.name,
+      role: request.user!.role,
+      folders: request.user!.folders,
+      tokenVersion: newTokenVersion
+    }, JWT_SECRET, { expiresIn: '7d' });
+
+    reply.setCookie('token', newToken, {
+      path: '/',
+      domain: cookieDomain,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60
+    });
 
     logger.info(`User ${request.user!.id} changed their password`);
     return { success: true };

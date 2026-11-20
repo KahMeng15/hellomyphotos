@@ -11,6 +11,7 @@ import { authRoutes } from './modules/auth/auth.routes';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
+import helmet from '@fastify/helmet';
 import './queue';
 
 import { logger } from './utils/logger';
@@ -39,17 +40,47 @@ app.addHook('onResponse', async (request, reply) => {
   });
 });
 
-// Enable CORS for frontend client-side requests
-const allowedOrigin = process.env.APP_DOMAIN || true;
+// HTTP Security Headers
+app.register(helmet, {
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false
+});
+
+// Enable CORS with strict origin validation to prevent arbitrary cross-origin credential theft
+const appDomain = process.env.APP_DOMAIN ? process.env.APP_DOMAIN.replace(/\/+$/, '') : null;
 app.register(cors, {
-  origin: allowedOrigin,
+  origin: (origin, cb) => {
+    // Allow non-browser requests or same-origin server-to-server requests
+    if (!origin) return cb(null, true);
+
+    if (appDomain) {
+      if (origin === appDomain || origin === `${appDomain}:80` || origin === `${appDomain}:443`) {
+        return cb(null, true);
+      }
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      // In development, allow localhost/127.0.0.1 on any port
+      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return cb(null, true);
+      }
+    }
+
+    return cb(null, false);
+  },
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-password'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
 });
 
+const COOKIE_SECRET = process.env.COOKIE_SECRET || (
+  process.env.NODE_ENV === 'production'
+    ? (() => { throw new Error('FATAL: A secure COOKIE_SECRET environment variable must be configured in production.'); })()
+    : 'super_secret_cookie_key'
+);
+
 app.register(cookie, {
-  secret: process.env.COOKIE_SECRET || 'super_secret_cookie_key',
+  secret: COOKIE_SECRET,
 });
 
 import { DEVICE_COOKIE_NAME, getClientDeviceId } from './utils/getDeviceId';

@@ -2,7 +2,11 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import jwt from 'jsonwebtoken';
 import { AnalyticsService } from '../modules/analytics/analytics.service';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_please_change';
+export const JWT_SECRET = process.env.JWT_SECRET || (
+  process.env.NODE_ENV === 'production'
+    ? (() => { throw new Error('FATAL: A secure JWT_SECRET environment variable must be configured in production.'); })()
+    : 'super_secret_jwt_key_please_change'
+);
 
 export interface AuthUser {
   id: string;
@@ -10,6 +14,7 @@ export interface AuthUser {
   name?: string;
   role: 'super_admin' | 'admin' | 'user' | 'viewer';
   folders: string[]; // '*' for all, or specific paths
+  tokenVersion?: number;
 }
 
 // Add user to FastifyRequest interface
@@ -33,7 +38,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
     const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
     
     // Fetch fresh user data from DB
-    const { rows } = await pool.query('SELECT role, email, password_hash FROM users WHERE id = $1', [decoded.id]);
+    const { rows } = await pool.query('SELECT role, email, password_hash, token_version FROM users WHERE id = $1', [decoded.id]);
     if (rows.length === 0) {
       return reply.status(401).send({ error: 'Unauthorized: User not found' });
     }
@@ -41,6 +46,13 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
     const role = rows[0].role;
     const email = rows[0].email;
     const pwdHash = rows[0].password_hash;
+    const dbTokenVersion = rows[0].token_version ?? 1;
+    const jwtTokenVersion = decoded.tokenVersion ?? 1;
+
+    if (jwtTokenVersion !== dbTokenVersion) {
+      return reply.status(401).send({ error: 'Unauthorized: Session invalidated, please log in again' });
+    }
+
     const defaultHash = '$2b$10$6RA2zF7AVoZaXO/Wj126ROvtJnVNecG4dvJRW9Sinw1HHUV1SlWYa';
 
     // Force default admin to change credentials

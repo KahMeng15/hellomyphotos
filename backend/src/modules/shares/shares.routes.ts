@@ -41,7 +41,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder or media' });
     }
     
-    const shareToken = crypto.randomBytes(6).toString('base64url');
+    const shareToken = crypto.randomBytes(16).toString('base64url');
     const isWatermarked = watermarkEnabled ?? Boolean(watermarkTemplateId);
     
     await query(`
@@ -193,11 +193,29 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const userAgent = (request.headers['user-agent'] || '').toLowerCase();
     const isSocialCrawler = /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|linkedinbot|slackbot|discordbot|applebot|bingbot|googlebot|pinterest/i.test(userAgent);
 
-    if (process.env.TURNSTILE_SECRET && !isSocialCrawler) {
-      const tsCookie = request.cookies[`ts_${token}`];
-      if (!tsCookie) {
-        return reply.status(403).send({ error: 'turnstile_required' });
+    const tsCookie = request.cookies[`ts_${token}`];
+    if (process.env.TURNSTILE_SECRET && !tsCookie) {
+      if (isSocialCrawler) {
+        // Return minimal Open Graph metadata only, without exposing private gallery contents
+        const folderPath = share.folder_path || '';
+        const folderName = folderPath ? (folderPath.split('/').pop() || folderPath) : (share.person_id ? 'Person Gallery' : 'Shared Album');
+        let coverId = share.media_id || null;
+        if (!coverId && folderPath) {
+          const fsRes = await query('SELECT cover_media_id, auto_cover_media_id, description FROM folder_settings WHERE folder_path = $1', [folderPath]);
+          if (fsRes.rows.length > 0) {
+            coverId = fsRes.rows[0].cover_media_id || fsRes.rows[0].auto_cover_media_id || null;
+          }
+        }
+        return reply.send({
+          share: { id: share.id, folder_path: share.folder_path, expires_at: share.expires_at },
+          files: [],
+          directories: [],
+          folderCoverId: coverId,
+          folderName,
+          crawlerPreview: true
+        });
       }
+      return reply.status(403).send({ error: 'turnstile_required' });
     }
     
     // Normalize subPath: tolerate share URLs that include the share's own base folder

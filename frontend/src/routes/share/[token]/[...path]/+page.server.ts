@@ -33,6 +33,8 @@ export const load: PageServerLoad = async ({ params, fetch, url, request }) => {
   const forwardHeaders: Record<string, string> = {};
   if (userAgent) forwardHeaders['user-agent'] = userAgent;
   if (referer) forwardHeaders['referer'] = referer;
+  const cookie = request.headers.get('cookie');
+  if (cookie) forwardHeaders['cookie'] = cookie;
 
   try {
     const res = await fetch(

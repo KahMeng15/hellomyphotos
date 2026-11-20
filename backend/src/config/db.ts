@@ -46,6 +46,7 @@ const SCHEMA_STATEMENTS = [
   EXCEPTION WHEN duplicate_object THEN
     NULL;
   END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='token_version') THEN ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1; END IF; END $$;`,
   `CREATE TABLE IF NOT EXISTS user_folder_access (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     folder_path TEXT NOT NULL,
