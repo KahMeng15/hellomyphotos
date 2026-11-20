@@ -461,6 +461,62 @@
     }
   }
 
+  function isTyping(e: Event): boolean {
+    const target = e.target as HTMLElement | null;
+    if (!target) return false;
+    const tag = target.tagName.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+  }
+
+  function cyclePersonViewMode() {
+    const modes: ViewMode[] = ['small-fit', 'large-fit', 'small-square', 'large-square'];
+    const idx = modes.indexOf(viewMode);
+    viewMode = modes[(idx + 1) % modes.length];
+    showViewMenu = false;
+  }
+
+  function cyclePersonSortMode() {
+    const modes: SortMode[] = ['newest', 'oldest', 'a-z', 'z-a'];
+    const idx = modes.indexOf(sortMode);
+    sortMode = modes[(idx + 1) % modes.length];
+    showSortMenu = false;
+  }
+
+  function handlePersonDetailKeydown(e: KeyboardEvent) {
+    if (selectedMediaIndex !== null) return;
+    if (isTyping(e)) return;
+
+    if (e.key === 'Escape') {
+      showSortMenu = false;
+      showViewMenu = false;
+      return;
+    }
+
+    if (e.key === 'v' || e.key === 'V') {
+      e.preventDefault();
+      cyclePersonViewMode();
+      return;
+    }
+
+    if ((e.key === 's' || e.key === 'S') && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      cyclePersonSortMode();
+      return;
+    }
+
+    if (e.key === 'S' || (e.shiftKey && (e.key === 's' || e.key === 'S'))) {
+      e.preventDefault();
+      showShareModal = true;
+      return;
+    }
+
+    if (e.key === 'Backspace' || (e.altKey && e.key === 'ArrowUp')) {
+      e.preventDefault();
+      window.location.href = '/people';
+      return;
+    }
+  }
+
   onMount(() => {
     sortMode = loadPref<SortMode>('personSortMode', 'newest');
     viewMode = loadPref<ViewMode>('personViewMode', 'small-fit');
@@ -472,11 +528,13 @@
     windowWidth = window.innerWidth;
     const updateWidth = () => windowWidth = window.innerWidth;
     window.addEventListener('resize', updateWidth);
+    window.addEventListener('keydown', handlePersonDetailKeydown);
     return () => {
       if (mainContent) {
         mainContent.removeEventListener('scroll', handleScroll);
       }
       window.removeEventListener('resize', updateWidth);
+      window.removeEventListener('keydown', handlePersonDetailKeydown);
     };
   });
 
@@ -544,11 +602,11 @@
         <a href="/people" 
            class="icon-btn mobile-only-back" 
            style="opacity: {scrollProgress === 1 ? 1 : 0}; width: {scrollProgress === 1 ? '36px' : '0'}; padding: {scrollProgress === 1 ? '8px' : '0'}; margin-right: {scrollProgress === 1 ? '0' : '-8px'}; overflow: hidden; transition: width 0.2s, opacity 0.2s, margin 0.2s, padding 0.2s; pointer-events: {scrollProgress === 1 ? 'auto' : 'none'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" 
-           title="Back to all people">
+           title="Back to all people (Backspace)">
           <ChevronLeft size={24} />
         </a>
         <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
-          <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort">
+          <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort (S)">
             <ArrowDownUp size={18} />
           </button>
           {#if showSortMenu}
@@ -562,7 +620,7 @@
         </div>
 
         <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
-          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
+          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View (V)">
             <LayoutGrid size={18} />
           </button>
           {#if showViewMenu}
@@ -575,7 +633,7 @@
           {/if}
         </div>
 
-        <button class="icon-btn" onclick={() => showShareModal = true} title="Share">
+        <button class="icon-btn" onclick={() => showShareModal = true} title="Share (Shift+S)">
           <Share2 size={18} />
         </button>
       </div>

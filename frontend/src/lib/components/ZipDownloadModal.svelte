@@ -148,6 +148,23 @@
       status = 'idle';
     }
   });
+
+  function handleModalKeydown(e: KeyboardEvent) {
+    if (!show) return;
+    if (status === 'idle' && e.key === 'Enter') {
+      e.preventDefault();
+      startZipProcess('single');
+    }
+  }
+
+  $effect(() => {
+    if (show) {
+      window.addEventListener('keydown', handleModalKeydown);
+      return () => {
+        window.removeEventListener('keydown', handleModalKeydown);
+      };
+    }
+  });
 </script>
 
 <Modal bind:show={show} id="download-folder" title={status === 'ready' ? (totalParts > 1 ? 'Downloads Ready' : 'Download Ready') : 'Download Folder'}>
@@ -157,8 +174,9 @@
         class="btn" 
         style="display: block; text-align: center; width: 100%; padding: 12px; font-weight: 500; background: var(--text-color); color: var(--bg-color);" 
         onclick={() => startZipProcess('single')}
+        title="Download All in One Zip (Enter)"
       >
-        Download All in One Zip
+        Download All in One Zip (Enter)
       </button>
 
       <div style="display: flex; align-items: center; gap: 10px; margin: 2px 0;">

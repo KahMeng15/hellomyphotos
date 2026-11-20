@@ -158,24 +158,126 @@
     }
   }
 
+  function isTyping(e: Event): boolean {
+    const target = e.target as HTMLElement | null;
+    if (!target) return false;
+    const tag = target.tagName.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+  }
+
+  function setZoom(target: number) {
+    const clamped = Math.min(5, Math.max(1, target));
+    currentZoom = clamped;
+    if (pzInstance) {
+      const centerX = window.innerWidth / 2;
+      const centerY = window.innerHeight / 2;
+      pzInstance.zoomAbs(centerX, centerY, clamped);
+      if (clamped === 1) {
+        pzInstance.moveTo(0, 0);
+      }
+    }
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     onActivity();
     if (e.key === 'Escape') {
       close();
       return;
     }
+
+    if (isTyping(e)) return;
+
     if (e.key === 'ArrowRight') {
       if (e.repeat) {
         const now = Date.now();
         if (now - lastNavTime < 150) return;
       }
       handleNext();
+      return;
     } else if (e.key === 'ArrowLeft') {
       if (e.repeat) {
         const now = Date.now();
         if (now - lastNavTime < 150) return;
       }
       handlePrev();
+      return;
+    }
+
+    // Download: 'd' or 'D'
+    if ((e.key === 'd' || e.key === 'D') && allowDownload && downloadUrl) {
+      e.preventDefault();
+      download();
+      return;
+    }
+
+    // Share: 's' or 'S'
+    if ((e.key === 's' || e.key === 'S') && !isSharedView) {
+      e.preventDefault();
+      share();
+      return;
+    }
+
+    // Info panel toggle: 'i' or 'I'
+    if (e.key === 'i' || e.key === 'I') {
+      e.preventDefault();
+      toggleInfo();
+      return;
+    }
+
+    // Fullscreen: 'f' or 'F'
+    if (e.key === 'f' || e.key === 'F') {
+      e.preventDefault();
+      toggleFullscreen();
+      return;
+    }
+
+    // Cover image: 'c' or 'C'
+    if ((e.key === 'c' || e.key === 'C') && !isSharedView && onsetcover) {
+      e.preventDefault();
+      makeCoverImage();
+      return;
+    }
+
+    // Zoom shortcuts: '+' / '-' / '0' / 'z'
+    if (e.key === '+' || e.key === '=') {
+      e.preventDefault();
+      setZoom(currentZoom + 0.5);
+      return;
+    }
+    if (e.key === '-' || e.key === '_') {
+      e.preventDefault();
+      setZoom(currentZoom - 0.5);
+      return;
+    }
+    if (e.key === '0') {
+      e.preventDefault();
+      setZoom(1);
+      return;
+    }
+    if (e.key === 'z' || e.key === 'Z') {
+      e.preventDefault();
+      if (currentZoom > 1.05) setZoom(1);
+      else setZoom(2.5);
+      return;
+    }
+
+    // Video play/pause
+    if (e.key === ' ' || e.code === 'Space') {
+      const videoEl = document.querySelector('.lightbox video') as HTMLVideoElement | null;
+      if (videoEl) {
+        e.preventDefault();
+        if (videoEl.paused) videoEl.play();
+        else videoEl.pause();
+        return;
+      }
     }
   }
   
@@ -481,12 +583,12 @@
     <div class="main-area" ontouchstart={handleTouchStart} ontouchend={handleTouchEnd}>
       <div class="top-bar" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'}>
         {#if allowDownload}
-          <a href={downloadUrl} download={media.file_name} class="icon-btn" title="Download" onclick={() => tracker.recordFeature('download')}>
+          <a href={downloadUrl} download={media.file_name} class="icon-btn" title="Download (D)" onclick={() => tracker.recordFeature('download')}>
             <Download size={20} strokeWidth={2} />
           </a>
         {/if}
         {#if !isSharedView}
-          <button class="icon-btn {justShared ? 'success' : ''}" onclick={share} title="Share">
+          <button class="icon-btn {justShared ? 'success' : ''}" onclick={share} title="Share (S)">
             {#if justShared}
               <Check size={20} strokeWidth={2} />
             {:else}
@@ -496,7 +598,7 @@
         {/if}
         {#if !media.mime_type.startsWith('video/')}
           <div style="display: flex; align-items: center; gap: 8px;">
-            <button class="icon-btn {showZoomSlider ? 'active' : ''}" onclick={toggleZoomIcon} title="Zoom">
+            <button class="icon-btn {showZoomSlider ? 'active' : ''}" onclick={toggleZoomIcon} title="Zoom (+ / - / 0 / Z)">
               <ZoomIn size={20} strokeWidth={2} />
             </button>
             {#if showZoomSlider}
@@ -507,22 +609,22 @@
             {/if}
           </div>
         {/if}
-        <button class="icon-btn {showInfo ? 'active' : ''}" onclick={toggleInfo} title="Info">
+        <button class="icon-btn {showInfo ? 'active' : ''}" onclick={toggleInfo} title="Info (I)">
           <Info size={20} strokeWidth={2} />
         </button>
         {#if !isSharedView}
           <div style="position: relative;" use:clickOutside={() => showMenu = false}>
-            <button class="icon-btn" onclick={() => showMenu = !showMenu} title="More">
+            <button class="icon-btn" onclick={() => showMenu = !showMenu} title="More (C to set cover)">
               <MoreHorizontal size={20} strokeWidth={2} />
             </button>
             {#if showMenu}
               <div class="dropdown-menu">
-                <button onclick={makeCoverImage}>Set as Cover Image</button>
+                <button onclick={makeCoverImage}>Set as Cover Image (C)</button>
               </div>
             {/if}
           </div>
         {/if}
-        <button class="icon-btn close-btn" onclick={close} title="Close">
+        <button class="icon-btn close-btn" onclick={close} title="Close (Esc)">
           <X size={24} strokeWidth={2} />
         </button>
       </div>
@@ -535,6 +637,7 @@
         onpointerup={stopHold}
         onpointerleave={stopHold}
         onpointercancel={stopHold}
+        title="Previous (←)"
         aria-label="Previous image"
       >
         <ChevronLeft size={32} strokeWidth={2} />
@@ -597,6 +700,7 @@
         onpointerup={stopHold}
         onpointerleave={stopHold}
         onpointercancel={stopHold}
+        title="Next (→)"
         aria-label="Next image"
       >
         <ChevronRight size={32} strokeWidth={2} />

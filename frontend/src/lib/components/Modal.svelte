@@ -26,10 +26,19 @@
     visible = false;
   }
 
+  function handleWindowKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && closable && visible) {
+      e.stopPropagation();
+      close();
+    }
+  }
+
   $effect(() => {
     if (show) {
       pushModal(id, activate, deactivate);
+      window.addEventListener('keydown', handleWindowKeydown);
       return () => {
+        window.removeEventListener('keydown', handleWindowKeydown);
         popModal(id);
       };
     } else {
@@ -48,7 +57,7 @@
       <div class="modal-header">
         <h3>{title}</h3>
         {#if closable}
-          <button class="modal-close-btn" onclick={close}><X size={20} /></button>
+          <button class="modal-close-btn" onclick={close} title="Close (Esc)" aria-label="Close dialog"><X size={20} /></button>
         {/if}
       </div>
       <div class="modal-body">

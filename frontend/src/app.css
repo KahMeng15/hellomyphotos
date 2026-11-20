@@ -125,3 +125,19 @@ h1, h2, h3, h4, h5, h6 {
 .modal-body {
   padding: 24px;
 }
+
+/* Accessibility Focus Rings for Keyboard Navigation */
+:focus-visible {
+  outline: 2px solid #60a5fa !important;
+  outline-offset: 2px !important;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #60a5fa !important;
+  outline-offset: 2px !important;
+}

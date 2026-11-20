@@ -56,8 +56,48 @@ import { updatePreferences } from '$lib/api/auth';
     return fallback;
   }
 
+  function cyclePeopleViewMode() {
+    const modes: ('small-grid' | 'medium-grid' | 'large-grid' | 'list')[] = ['small-grid', 'medium-grid', 'large-grid', 'list'];
+    const idx = modes.indexOf(viewMode);
+    viewMode = modes[(idx + 1) % modes.length];
+    showViewMenu = false;
+  }
+
+  function cyclePeopleSortMode() {
+    const modes: ('named' | 'a-z' | 'z-a')[] = ['named', 'a-z', 'z-a'];
+    const idx = modes.indexOf(sortMode);
+    sortMode = modes[(idx + 1) % modes.length];
+    fetchFaces(true);
+    showSortMenu = false;
+  }
+
+  function handlePeopleKeydown(e: KeyboardEvent) {
+    if (editingId !== null) return;
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName.toLowerCase() === 'input' || target.tagName.toLowerCase() === 'textarea')) return;
+
+    if (e.key === 'Escape') {
+      showSortMenu = false;
+      showViewMenu = false;
+      return;
+    }
+
+    if (e.key === 'v' || e.key === 'V') {
+      e.preventDefault();
+      cyclePeopleViewMode();
+      return;
+    }
+
+    if ((e.key === 's' || e.key === 'S') && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      cyclePeopleSortMode();
+      return;
+    }
+  }
+
   import { onMount } from 'svelte';
   onMount(() => {
+    window.addEventListener('keydown', handlePeopleKeydown);
     const mainContent = document.querySelector('.main-content');
     if (mainContent) {
       mainContent.addEventListener('scroll', handleScroll);
@@ -152,6 +192,7 @@ import { updatePreferences } from '$lib/api/auth';
   import { onDestroy } from 'svelte';
   onDestroy(() => {
     if (typeof document !== 'undefined') {
+      window.removeEventListener('keydown', handlePeopleKeydown);
       const mainContent = document.querySelector('.main-content');
       if (mainContent) mainContent.removeEventListener('scroll', handleScroll);
     }
@@ -218,7 +259,7 @@ import { updatePreferences } from '$lib/api/auth';
     <div class="header-right">
       <div class="toolbar">
         <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
-          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
+          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View (V)">
             <LayoutGrid size={18} />
           </button>
           {#if showViewMenu}
@@ -232,7 +273,7 @@ import { updatePreferences } from '$lib/api/auth';
         </div>
 
         <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
-          <button class="icon-btn" onclick={() => showSortMenu = !showSortMenu} title="Sort">
+          <button class="icon-btn" onclick={() => showSortMenu = !showSortMenu} title="Sort (S)">
             <ArrowDownUp size={18} />
           </button>
           {#if showSortMenu}

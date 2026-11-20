@@ -7,11 +7,12 @@
   import { logout } from '$lib/api/auth';
   import { BackendError } from '$lib/api/auth';
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
-  import { LogOut } from '@lucide/svelte';
+  import { LogOut, Keyboard } from '@lucide/svelte';
   import { frontendLogger } from '$lib/utils/frontendLogger';
   // @ts-ignore - Ignore virtual module type resolution
   import { pwaInfo } from 'virtual:pwa-info';
   import MandatorySetupModal from '$lib/components/MandatorySetupModal.svelte';
+  import KeyboardShortcutsModal from '$lib/components/KeyboardShortcutsModal.svelte';
 
   let { children }: { children?: any } = $props();
 
@@ -208,6 +209,62 @@
     window.history.forward();
   }
 
+  let showShortcutsModal = $state(false);
+
+  function isTyping(e: Event): boolean {
+    const target = e.target as HTMLElement | null;
+    if (!target) return false;
+    const tag = target.tagName.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+  }
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    if (isTyping(e)) {
+      if (e.key === 'Escape') {
+        (e.target as HTMLElement).blur();
+      }
+      return;
+    }
+
+    // Toggle Keyboard Shortcuts guide: '?'
+    if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+      e.preventDefault();
+      showShortcutsModal = !showShortcutsModal;
+      return;
+    }
+
+    // Toggle Sidebar: '[' or Cmd+B / Ctrl+B
+    if (e.key === '[' || ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'B'))) {
+      e.preventDefault();
+      toggleSidebar(!isSidebarOpen);
+      return;
+    }
+
+    // Focus Search: '/' or Cmd+K / Ctrl+K
+    if (e.key === '/' || ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K'))) {
+      const folderSearch = document.querySelector('.folder-search-input') as HTMLInputElement | null;
+      if (folderSearch) {
+        e.preventDefault();
+        folderSearch.focus();
+        return;
+      }
+      const sidebarSearch = document.querySelector('.search-input') as HTMLInputElement | null;
+      if (sidebarSearch) {
+        e.preventDefault();
+        if (!isSidebarOpen) toggleSidebar(true);
+        sidebarSearch.focus();
+        return;
+      }
+    }
+  }
+
+  onMount(() => {
+    window.addEventListener('keydown', handleGlobalKeydown);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeydown);
+    };
+  });
+
   function handleSearch(e: KeyboardEvent) {
     if (e.key === 'Enter' && searchQuery.trim()) {
       goto(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
@@ -264,7 +321,14 @@
       </nav>
 
       <div class="sidebar-footer">
-        <button class="icon-btn hide-sidebar-btn" onclick={() => toggleSidebar(false)} title="Hide sidebar" style="margin-bottom: 1rem; width: 100%; display: flex; justify-content: flex-end; border: none; background: transparent; cursor: pointer;">
+        <button class="shortcuts-sidebar-btn" onclick={() => showShortcutsModal = true} title="Keyboard Shortcuts (?)" style="margin-bottom: 0.75rem; width: 100%; display: flex; align-items: center; justify-content: space-between; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.04); padding: 6px 10px; border-radius: 6px; cursor: pointer; color: #a1a1aa; font-size: 0.8rem; transition: background 0.2s, color 0.2s;">
+          <span style="display: flex; align-items: center; gap: 6px;">
+            <Keyboard size={15} /> Shortcuts
+          </span>
+          <kbd style="background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 3px; font-size: 0.7rem; font-family: monospace; color: #fff;">?</kbd>
+        </button>
+
+        <button class="icon-btn hide-sidebar-btn" onclick={() => toggleSidebar(false)} title="Hide sidebar ([)" style="margin-bottom: 1rem; width: 100%; display: flex; justify-content: flex-end; border: none; background: transparent; cursor: pointer;">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: #a1a1aa;"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>
         </button>
 
@@ -317,10 +381,12 @@
   </main>
 
   {#if isSidebarOpen === false && page.url.pathname !== '/login' && ($currentUser || page.url.pathname !== '/')}
-    <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => toggleSidebar(true)} title="Open sidebar">
+    <button class="floating-reopen-btn" transition:fly={{ x: -20, duration: 300, delay: 150 }} onclick={() => toggleSidebar(true)} title="Open sidebar ([)">
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg>
     </button>
   {/if}
+
+  <KeyboardShortcutsModal bind:show={showShortcutsModal} />
 
   <Toast />
 </div>

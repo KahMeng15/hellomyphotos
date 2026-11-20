@@ -98,6 +98,50 @@
 
   let pollInterval: ReturnType<typeof setInterval>;
 
+  function isTyping(e: Event): boolean {
+    const target = e.target as HTMLElement | null;
+    if (!target) return false;
+    const tag = target.tagName.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+  }
+
+  function cycleTimelineViewMode() {
+    const modes: ViewMode[] = ['small-fit', 'large-fit', 'small-square', 'large-square'];
+    const idx = modes.indexOf(viewMode);
+    viewMode = modes[(idx + 1) % modes.length];
+    showViewMenu = false;
+  }
+
+  function cycleTimelineSortMode() {
+    const modes: SortMode[] = ['newest', 'oldest', 'a-z', 'z-a'];
+    const idx = modes.indexOf(sortMode);
+    sortMode = modes[(idx + 1) % modes.length];
+    showSortMenu = false;
+  }
+
+  function handleTimelineKeydown(e: KeyboardEvent) {
+    if (selectedMediaIndex !== null) return;
+    if (isTyping(e)) return;
+
+    if (e.key === 'Escape') {
+      showSortMenu = false;
+      showViewMenu = false;
+      return;
+    }
+
+    if (e.key === 'v' || e.key === 'V') {
+      e.preventDefault();
+      cycleTimelineViewMode();
+      return;
+    }
+
+    if ((e.key === 's' || e.key === 'S') && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      cycleTimelineSortMode();
+      return;
+    }
+  }
+
   onMount(() => {
     sortMode = loadPref<SortMode>('timelineSortMode', (data as any).defaultSortMode || 'newest');
     viewMode = loadPref<ViewMode>('timelineViewMode', (data as any).defaultViewMode || 'small-fit');
@@ -132,11 +176,13 @@
     windowWidth = window.innerWidth;
     const updateWidth = () => windowWidth = window.innerWidth;
     window.addEventListener('resize', updateWidth);
+    window.addEventListener('keydown', handleTimelineKeydown);
 
     return () => {
       if (pollInterval) clearInterval(pollInterval);
       window.removeEventListener('resize', updateStickyBottom);
       window.removeEventListener('resize', updateWidth);
+      window.removeEventListener('keydown', handleTimelineKeydown);
     };
   });
 
@@ -153,7 +199,7 @@
     <div class="header-right">
       <div class="toolbar">
         <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
-          <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort">
+          <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort (S)">
             <ArrowDownUp size={18} />
           </button>
           {#if showSortMenu}
@@ -166,7 +212,7 @@
           {/if}
         </div>
         <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
-          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View">
+          <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; }} title="View (V)">
             <LayoutGrid size={18} />
           </button>
           {#if showViewMenu}

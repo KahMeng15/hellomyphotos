@@ -509,6 +509,102 @@ import { slide } from 'svelte/transition';
     };
   }
 
+  function isTyping(e: Event): boolean {
+    const target = e.target as HTMLElement | null;
+    if (!target) return false;
+    const tag = target.tagName.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+  }
+
+  function cycleShareViewMode() {
+    if (isFolderOnly) {
+      const modes: FolderViewMode[] = ['small-grid', 'medium-grid', 'large-grid', 'list'];
+      const idx = modes.indexOf(folderViewMode);
+      selectFolderViewMode(modes[(idx + 1) % modes.length]);
+    } else {
+      const modes: ViewMode[] = ['small-fit', 'large-fit', 'small-square', 'large-square', 'compact-list'];
+      const idx = modes.indexOf(viewMode);
+      selectViewMode(modes[(idx + 1) % modes.length]);
+    }
+    showViewMenu = false;
+    showFolderViewMenu = false;
+  }
+
+  function cycleShareSortMode() {
+    const modes: SortMode[] = ['newest', 'oldest', 'a-z', 'z-a'];
+    const idx = modes.indexOf(sortMode);
+    selectSortMode(modes[(idx + 1) % modes.length]);
+    showSortMenu = false;
+  }
+
+  function navigateToParentShare() {
+    if (!data.folderPath) return;
+    const parts = data.folderPath.split('/').filter(Boolean);
+    parts.pop();
+    const parent = parts.join('/');
+    window.location.href = parent ? `/share/${data.token}/${encodePath(parent)}` : `/share/${data.token}`;
+  }
+
+  function handleShareKeydown(e: KeyboardEvent) {
+    if (lightboxIndex !== null) return;
+
+    if (isTyping(e)) {
+      if (e.key === 'Escape') {
+        if (isSearchOpen) closeSearch();
+        else (e.target as HTMLElement).blur();
+      }
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      if (showSortMenu || showViewMenu || showFolderViewMenu || activeFolderMenu !== null) {
+        showSortMenu = false;
+        showViewMenu = false;
+        showFolderViewMenu = false;
+        activeFolderMenu = null;
+        return;
+      }
+      if (isSearchOpen) {
+        closeSearch();
+        return;
+      }
+    }
+
+    if (e.key === '/' || ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K'))) {
+      e.preventDefault();
+      if (!isSearchOpen) toggleSearch();
+      else searchInputEl?.focus();
+      return;
+    }
+
+    if (e.key === 'v' || e.key === 'V') {
+      e.preventDefault();
+      cycleShareViewMode();
+      return;
+    }
+
+    if ((e.key === 's' || e.key === 'S') && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      cycleShareSortMode();
+      return;
+    }
+
+    if ((e.key === 'D' || (e.shiftKey && (e.key === 'd' || e.key === 'D'))) && data.share?.allow_download_folder && !personName) {
+      e.preventDefault();
+      tracker.recordFeature('download_folder');
+      startFolderZipDownload(data.share.folder_path, data.share.folder_name);
+      return;
+    }
+
+    if (e.key === 'Backspace' || (e.altKey && e.key === 'ArrowUp')) {
+      if (data.folderPath) {
+        e.preventDefault();
+        navigateToParentShare();
+        return;
+      }
+    }
+  }
+
   onMount(() => {
     getTurnstileSitekey().then(k => {
       sitekey = k;
@@ -553,6 +649,7 @@ import { slide } from 'svelte/transition';
     windowWidth = window.innerWidth;
     const updateWidth = () => windowWidth = window.innerWidth;
     window.addEventListener('resize', updateWidth);
+    window.addEventListener('keydown', handleShareKeydown);
 
     return () => {
       if (pollInterval) clearInterval(pollInterval);
@@ -561,6 +658,7 @@ import { slide } from 'svelte/transition';
         mainContent.removeEventListener('scroll', handleScroll);
       }
       window.removeEventListener('resize', updateWidth);
+      window.removeEventListener('keydown', handleShareKeydown);
     };
   });
 
@@ -888,15 +986,15 @@ import { slide } from 'svelte/transition';
           <a href={targetUrl} 
              class="icon-btn mobile-only-back" 
              style="opacity: {scrollProgress === 1 ? 1 : 0}; width: {scrollProgress === 1 ? '36px' : '0'}; padding: {scrollProgress === 1 ? '8px' : '0'}; margin-right: {scrollProgress === 1 ? '0' : '-8px'}; overflow: hidden; transition: width 0.2s, opacity 0.2s, margin 0.2s, padding 0.2s; pointer-events: {scrollProgress === 1 ? 'auto' : 'none'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" 
-             title="Go to parent folder">
+             title="Go to parent folder (Backspace)">
             <ChevronLeft size={24} />
           </a>
         {/if}
-        <button class="icon-btn" class:active={isSearchOpen} onclick={toggleSearch} title="Search">
+        <button class="icon-btn" class:active={isSearchOpen} onclick={toggleSearch} title="Search (/ or ⌘K)">
           <Search size={18} />
         </button>
         <div class="dropdown-container" use:clickOutside={() => showSortMenu = false}>
-          <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort">
+          <button class="icon-btn" onclick={() => { showSortMenu = !showSortMenu; showViewMenu = false; }} title="Sort (S)">
             <ArrowDownUp size={18} />
           </button>
           {#if showSortMenu}
@@ -911,7 +1009,7 @@ import { slide } from 'svelte/transition';
         
         {#if isFolderOnly}
           <div class="dropdown-container" use:clickOutside={() => showFolderViewMenu = false}>
-            <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; showViewMenu = false; }} title="View">
+            <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; showViewMenu = false; }} title="View (V)">
               {#if folderViewMode === 'list'}
                 <List size={18} />
               {:else}
@@ -936,7 +1034,7 @@ import { slide } from 'svelte/transition';
           </div>
         {:else}
           <div class="dropdown-container" use:clickOutside={() => showViewMenu = false}>
-            <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; showFolderViewMenu = false; }} title="View">
+            <button class="icon-btn" onclick={() => { showViewMenu = !showViewMenu; showSortMenu = false; showFolderViewMenu = false; }} title="View (V)">
               {#if viewMode === 'compact-list'}
                 <List size={18} />
               {:else}
@@ -964,7 +1062,7 @@ import { slide } from 'svelte/transition';
         
         <div class="actions">
           {#if !personName && data.share.allow_download_folder}
-            <button class="icon-btn" title="Download ZIP" onclick={() => { tracker.recordFeature('download_folder'); startFolderZipDownload(data.share.folder_path, data.share.folder_name); }}>
+            <button class="icon-btn" title="Download ZIP (Shift+D)" onclick={() => { tracker.recordFeature('download_folder'); startFolderZipDownload(data.share.folder_path, data.share.folder_name); }}>
               <Download size={18} />
             </button>
           {/if}
