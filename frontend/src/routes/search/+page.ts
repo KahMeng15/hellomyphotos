@@ -9,7 +9,7 @@ export const load: PageLoad = async (event) => {
     return { q, results: [] };
   }
   try {
-    const res = await fetch(`${API_BASE}/api/media/search?q=${encodeURIComponent(q)}&limit=50`, { signal });
+    const res = await fetch(`${API_BASE}/api/media/search?q=${encodeURIComponent(q)}&limit=50&offset=0`, { signal });
     if (!res.ok) throw new Error('Search failed');
     const results = await res.json();
     return { q, results };

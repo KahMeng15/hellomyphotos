@@ -19,6 +19,7 @@ import { getClientIp } from '../../utils/getIp';
 import { sendPlainTextEmail } from '../../utils/mailer';
 import { isShareLockdownActive } from '../../utils/lockdown';
 import { WatermarkService } from '../media/watermark.service';
+import { PERSON_COVER_ORDER_CLAUSE } from '../ml/personCover.utils';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
@@ -273,19 +274,14 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       let personCoverMediaId = person?.cover_media_id || null;
       if (!personCoverMediaId) {
         const coverRes = await query(`
-          SELECT m.id, (
-            SELECT bounding_box FROM face_embeddings
-            WHERE media_id = m.id AND person_id = $1
-            ORDER BY created_at DESC LIMIT 1
-          ) AS bounding_box,
-          COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
-          COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height
-          FROM media_files m
-          WHERE EXISTS (SELECT 1 FROM face_embeddings WHERE media_id = m.id AND person_id = $1)
-          AND m.mime_type LIKE 'image/%'
-          ORDER BY CASE WHEN m.exif_json IS NOT NULL AND m.exif_json->>'width' IS NOT NULL THEN 0 ELSE 1 END,
-            (SELECT COUNT(*) FROM face_embeddings WHERE media_id = m.id) ASC,
-            m.created_at DESC
+          SELECT fe.media_id AS id, fe.bounding_box,
+                 COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+                 COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height
+          FROM face_embeddings fe
+          JOIN media_files m ON m.id = fe.media_id
+          WHERE fe.person_id = $1
+            AND m.mime_type LIKE 'image/%'
+          ORDER BY ${PERSON_COVER_ORDER_CLAUSE}
           LIMIT 1
         `, [share.person_id]);
         if (coverRes.rows.length > 0) {
@@ -297,19 +293,29 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       } else {
         // Fetch bounding box + dims for explicit cover
         const explicitRes = await query(`
-          SELECT (
-            SELECT bounding_box FROM face_embeddings
-            WHERE media_id = m.id AND person_id = $1
-            ORDER BY created_at DESC LIMIT 1
-          ) AS bounding_box,
-          COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
-          COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height
-          FROM media_files m WHERE m.id = $2
+          SELECT fe.bounding_box,
+                 COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+                 COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height
+          FROM face_embeddings fe
+          JOIN media_files m ON m.id = fe.media_id
+          WHERE fe.person_id = $1 AND fe.media_id = $2
+          ORDER BY ${PERSON_COVER_ORDER_CLAUSE}
+          LIMIT 1
         `, [share.person_id, personCoverMediaId]);
         if (explicitRes.rows.length > 0) {
           personCoverBoundingBox = explicitRes.rows[0].bounding_box;
           personCoverImgWidth = explicitRes.rows[0].img_width;
           personCoverImgHeight = explicitRes.rows[0].img_height;
+        } else {
+          const mfRes = await query(`
+            SELECT COALESCE(img_width, (exif_json->>'width')::int) AS img_width,
+                   COALESCE(img_height, (exif_json->>'height')::int) AS img_height
+            FROM media_files WHERE id = $1
+          `, [personCoverMediaId]);
+          if (mfRes.rows.length > 0) {
+            personCoverImgWidth = mfRes.rows[0].img_width;
+            personCoverImgHeight = mfRes.rows[0].img_height;
+          }
         }
       }
       // Fallback: read dimensions from file if EXIF is null

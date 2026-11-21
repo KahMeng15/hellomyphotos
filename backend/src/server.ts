@@ -62,6 +62,13 @@ const start = async () => {
             logger.error('[GeoIP] Failed to initialize GeoIP', { error: err?.message });
           });
         }).catch(() => {});
+
+        // Pre-warm CLIP text model for Smart Search in the background
+        import('./modules/ml/smartSearch.service').then(({ SmartSearchService }) => {
+          SmartSearchService.preloadModel().catch(err => {
+            logger.warn('[SmartSearchService] Failed to pre-warm CLIP model', { error: err?.message });
+          });
+        }).catch(() => {});
       } else {
         logger.info(`API disabled via DISABLE_API=true. Running worker orchestrator only.`);
       }

@@ -15,6 +15,13 @@ import { updatePreferences } from '$lib/api/auth';
   let isLoading = $state(false);
   let hasMore = $state(data.initialFaces.length === 50);
 
+  $effect(() => {
+    if (data.initialFaces) {
+      faces = data.initialFaces;
+      hasMore = data.initialFaces.length === 50;
+    }
+  });
+
   let editingId = $state<string | null>(null);
   let editValue = $state('');
   let showSortMenu = $state(false);
@@ -138,7 +145,7 @@ import { updatePreferences } from '$lib/api/auth';
         faces = [];
         hasMore = true;
       }
-      const res = await fetch(`${API_BASE}/api/faces?page=${page}&limit=50&sort=${sortMode}`);
+      const res = await fetch(`${API_BASE}/api/faces?page=${page}&limit=50&sort=${sortMode}`, { credentials: 'include' });
       if (res.ok) {
         const newFaces = await res.json();
         faces = reset ? newFaces : [...faces, ...newFaces];
@@ -335,9 +342,9 @@ import { updatePreferences } from '$lib/api/auth';
             {:else}
               <button class="face-name-btn" style="text-align: left;" onclick={() => startEdit(face.person_id, face.name || '')}>
                 {#if face.name}
-                  <span class="dir-name">{face.name}</span>
+                  <span class="dir-name face-name">{face.name}</span>
                 {:else}
-                  <span class="dir-name" style="color: #64748b; font-style: italic;">Add name...</span>
+                  <span class="dir-name face-name placeholder">Add name...</span>
                 {/if}
               </button>
             {/if}
@@ -372,9 +379,9 @@ import { updatePreferences } from '$lib/api/auth';
           {:else}
             <button class="face-name-btn" onclick={() => startEdit(face.person_id, face.name || '')}>
               {#if face.name}
-                <span class="dir-name" style="max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;">{face.name}</span>
+                <span class="dir-name face-name">{face.name}</span>
               {:else}
-                <span class="dir-name" style="color: #64748b; font-style: italic;">Add name...</span>
+                <span class="dir-name face-name placeholder">Add name...</span>
               {/if}
             </button>
           {/if}
@@ -548,6 +555,7 @@ import { updatePreferences } from '$lib/api/auth';
     line-height: 1.3;
     word-break: break-word;
     flex: 1;
+    color: var(--text-color, #ffffff);
   }
 
   .folder-mode-small-grid .dir-name {
@@ -753,18 +761,18 @@ import { updatePreferences } from '$lib/api/auth';
   
 
   .face-name {
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: #f1f5f9;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
+    font-family: 'Cabinet Grotesk', sans-serif;
+    font-weight: 700;
+    color: var(--text-color, #ffffff);
+    flex: 1;
+    width: 100%;
   }
 
   .face-name.placeholder {
+    font-family: 'Instrument Sans', sans-serif;
     color: #64748b;
     font-style: italic;
+    font-weight: 400;
   }
 
   .face-name-btn {
@@ -773,7 +781,13 @@ import { updatePreferences } from '$lib/api/auth';
     cursor: pointer;
     padding: 0;
     font: inherit;
+    font-family: 'Cabinet Grotesk', sans-serif;
+    font-weight: 700;
+    color: var(--text-color, #ffffff);
     max-width: 100%;
+    text-align: inherit;
+    width: 100%;
+    display: flex;
   }
 
   .face-name-btn:hover .face-name {

@@ -9,6 +9,7 @@ import { SmartSearchService } from './smartSearch.service';
 import { MLService, FACE_THUMB_SIZE, FACE_PADDING, parseBoundingBox } from './ml.service';
 import { faceThumbnailQueue } from '../../queue/faceThumbnailQueue';
 import { CacheTrackerService } from '../media/cacheTracker.service';
+import { PERSON_COVER_ORDER_CLAUSE } from './personCover.utils';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
@@ -121,8 +122,10 @@ export async function mlRoutes(fastify: FastifyInstance) {
         LEFT JOIN LATERAL (
           SELECT fe.media_id, fe.bounding_box
           FROM face_embeddings fe
+          JOIN media_files m ON m.id = fe.media_id
           WHERE fe.person_id = pp.id AND fe_cov.id IS NULL
-          ORDER BY fe.created_at DESC
+            AND m.mime_type LIKE 'image/%'
+          ORDER BY ${PERSON_COVER_ORDER_CLAUSE}
           LIMIT 1
         ) fb ON fe_cov.id IS NULL
       )
@@ -184,6 +187,84 @@ export async function mlRoutes(fastify: FastifyInstance) {
     return reply.send({ success: true, name });
   });
 
+  // Merge person/faces
+  fastify.post('/api/faces/merge', { preHandler: requireAuth }, async (request, reply) => {
+    const body = (request.body || {}) as any;
+    const targetPersonId = body.targetPersonId;
+    const sourcePersonIds = Array.isArray(body.sourcePersonIds) 
+      ? body.sourcePersonIds 
+      : (body.sourcePersonId ? [body.sourcePersonId] : []);
+    const preferredName = body.preferredName;
+
+    if (!targetPersonId || !sourcePersonIds.length) {
+      return reply.status(400).send({ error: 'Missing target or source person IDs' });
+    }
+
+    try {
+      // 1. Move face embeddings
+      await query(
+        `UPDATE face_embeddings SET person_id = $1 WHERE person_id = ANY($2)`,
+        [targetPersonId, sourcePersonIds]
+      );
+
+      // 2. Move shared folders
+      await query(
+        `UPDATE shared_folders SET person_id = $1 WHERE person_id = ANY($2)`,
+        [targetPersonId, sourcePersonIds]
+      );
+
+      // 3. Update target name if specified, or if target is unnamed and a source was named
+      let finalName = '';
+      if (preferredName && typeof preferredName === 'string' && preferredName.trim()) {
+        finalName = preferredName.trim();
+        await query(`UPDATE people SET name = $1, updated_at = NOW() WHERE id = $2`, [finalName, targetPersonId]);
+      } else {
+        const targetRes = await query(`SELECT name FROM people WHERE id = $1`, [targetPersonId]);
+        finalName = targetRes.rows[0]?.name || '';
+        if (!finalName) {
+          const sourceRes = await query(
+            `SELECT name FROM people WHERE id = ANY($1) AND name IS NOT NULL AND name != '' LIMIT 1`,
+            [sourcePersonIds]
+          );
+          if (sourceRes.rows.length > 0 && sourceRes.rows[0].name) {
+            finalName = sourceRes.rows[0].name;
+            await query(`UPDATE people SET name = $1, updated_at = NOW() WHERE id = $2`, [finalName, targetPersonId]);
+          }
+        }
+      }
+
+      // 4. Update face_count on target person
+      await query(`
+        UPDATE people 
+        SET face_count = (SELECT COUNT(*)::int FROM face_embeddings WHERE person_id = $1),
+            updated_at = NOW()
+        WHERE id = $1
+      `, [targetPersonId]);
+
+      // 5. Delete source people
+      await query(`DELETE FROM people WHERE id = ANY($1)`, [sourcePersonIds]);
+
+      // 6. Delete cached face thumbnails for source persons
+      const facesDir = path.join(CACHE_ROOT, 'faces');
+      for (const sId of sourcePersonIds) {
+        try {
+          const thumbPath = path.join(facesDir, `${sId}.webp`);
+          if (fs.existsSync(thumbPath)) await fs.promises.unlink(thumbPath);
+        } catch {}
+      }
+
+      // 7. Invalidate redis caches
+      try {
+        await deleteKeysByPattern('faces:list:*');
+      } catch {}
+
+      return reply.send({ success: true, targetPersonId, name: finalName, message: `Successfully merged faces into ${targetPersonId}` });
+    } catch (e: any) {
+      request.log.error(e);
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
   // Get person details
   fastify.get<{ Params: { id: string } }>('/api/faces/:id', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
@@ -195,17 +276,31 @@ export async function mlRoutes(fastify: FastifyInstance) {
   });
 
   // Get all media files associated with a specific person
-  fastify.get<{ Params: { id: string } }>('/api/faces/:id/media', { preHandler: requireAuth }, async (request, reply) => {
+  fastify.get<{ Params: { id: string }, Querystring: { q?: string } }>('/api/faces/:id/media', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
+    const { q } = (request.query || {}) as { q?: string };
     
-    const result = await query(`
-      SELECT m.*, f.bounding_box, COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id
-      FROM media_files m
-      JOIN face_embeddings f ON m.id = f.media_id
-      LEFT JOIN folder_settings fs ON fs.folder_path = m.folder_path
-      WHERE f.person_id = $1
-      ORDER BY m.created_at DESC
-    `, [id]);
+    let result;
+    if (q && q.trim().length > 0) {
+      const escaped = q.trim().replace(/([%_\\])/g, '\\$1');
+      result = await query(`
+        SELECT m.*, f.bounding_box, COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id
+        FROM media_files m
+        JOIN face_embeddings f ON m.id = f.media_id
+        LEFT JOIN folder_settings fs ON fs.folder_path = m.folder_path
+        WHERE f.person_id = $1 AND (m.file_name ILIKE $2 ESCAPE '\\' OR m.folder_path ILIKE $2 ESCAPE '\\')
+        ORDER BY m.created_at DESC
+      `, [id, `%${escaped}%`]);
+    } else {
+      result = await query(`
+        SELECT m.*, f.bounding_box, COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id
+        FROM media_files m
+        JOIN face_embeddings f ON m.id = f.media_id
+        LEFT JOIN folder_settings fs ON fs.folder_path = m.folder_path
+        WHERE f.person_id = $1
+        ORDER BY m.created_at DESC
+      `, [id]);
+    }
     return reply.send(result.rows);
   });
 
@@ -214,6 +309,11 @@ export async function mlRoutes(fastify: FastifyInstance) {
     const { id } = request.params;
 
     let coverMediaId: string | null = null;
+    let coverBoundingBox: any = null;
+    let coverImgWidth: number | null = null;
+    let coverImgHeight: number | null = null;
+    let folderPath: string | null = null;
+    let fileName: string | null = null;
 
     // Check if person has an explicitly set cover
     const explicit = await query(`SELECT cover_media_id FROM people WHERE id = $1 AND cover_media_id IS NOT NULL`, [id]);
@@ -222,60 +322,80 @@ export async function mlRoutes(fastify: FastifyInstance) {
     }
 
     if (!coverMediaId) {
-      // Fall back to dynamic selection (photo with fewest other faces, prefer with EXIF dimensions)
+      // Fall back to dynamic selection: best solo/fewer faces, HD face, full face not cut off
       const result = await query(`
-        SELECT m.id
-        FROM media_files m
-        WHERE EXISTS (
-          SELECT 1 FROM face_embeddings
-          WHERE media_id = m.id AND person_id = $1
-        )
-        ORDER BY CASE WHEN m.exif_json IS NOT NULL AND m.exif_json->>'width' IS NOT NULL THEN 0 ELSE 1 END,
-          (SELECT COUNT(*) FROM face_embeddings WHERE media_id = m.id) ASC,
-          m.created_at DESC
+        SELECT fe.media_id, fe.bounding_box,
+               COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+               COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+               m.folder_path, m.file_name
+        FROM face_embeddings fe
+        JOIN media_files m ON m.id = fe.media_id
+        WHERE fe.person_id = $1
+          AND m.mime_type LIKE 'image/%'
+        ORDER BY ${PERSON_COVER_ORDER_CLAUSE}
         LIMIT 1
       `, [id]);
 
       if (result.rows.length === 0) {
         return reply.send({ coverMediaId: null, coverBoundingBox: null, originalWidth: null, originalHeight: null });
       }
-      coverMediaId = result.rows[0].id;
+      coverMediaId = result.rows[0].media_id;
+      coverBoundingBox = result.rows[0].bounding_box;
+      coverImgWidth = result.rows[0].img_width;
+      coverImgHeight = result.rows[0].img_height;
+      folderPath = result.rows[0].folder_path;
+      fileName = result.rows[0].file_name;
+    } else {
+      // Fetch bounding box + dims for the explicit cover
+      const mediaResult = await query(`
+        SELECT fe.bounding_box,
+               COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
+               COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
+               m.folder_path, m.file_name
+        FROM face_embeddings fe
+        JOIN media_files m ON m.id = fe.media_id
+        WHERE fe.person_id = $1 AND fe.media_id = $2
+        ORDER BY ${PERSON_COVER_ORDER_CLAUSE}
+        LIMIT 1
+      `, [id, coverMediaId]);
+
+      if (mediaResult.rows.length === 0) {
+        // Person might have cover_media_id with no face embedding, fetch from media_files directly
+        const mfRes = await query(`
+          SELECT COALESCE(img_width, (exif_json->>'width')::int) AS img_width,
+                 COALESCE(img_height, (exif_json->>'height')::int) AS img_height,
+                 folder_path, file_name
+          FROM media_files WHERE id = $1
+        `, [coverMediaId]);
+        if (mfRes.rows.length === 0) {
+          return reply.status(404).send({ error: 'No media found for this person' });
+        }
+        coverImgWidth = mfRes.rows[0].img_width;
+        coverImgHeight = mfRes.rows[0].img_height;
+        folderPath = mfRes.rows[0].folder_path;
+        fileName = mfRes.rows[0].file_name;
+      } else {
+        coverBoundingBox = mediaResult.rows[0].bounding_box;
+        coverImgWidth = mediaResult.rows[0].img_width;
+        coverImgHeight = mediaResult.rows[0].img_height;
+        folderPath = mediaResult.rows[0].folder_path;
+        fileName = mediaResult.rows[0].file_name;
+      }
     }
-
-    // Fetch bounding box + dims for the selected cover
-    const mediaResult = await query(`
-      SELECT (
-        SELECT bounding_box FROM face_embeddings
-        WHERE media_id = m.id AND person_id = $1
-        ORDER BY created_at DESC LIMIT 1
-      ) AS bounding_box,
-      COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
-      COALESCE(m.img_height, (m.exif_json->>'height')::int) AS img_height,
-      m.folder_path, m.file_name
-      FROM media_files m WHERE m.id = $2
-    `, [id, coverMediaId]);
-
-    if (mediaResult.rows.length === 0) {
-      return reply.status(404).send({ error: 'No media found for this person' });
-    }
-
-    const row = mediaResult.rows[0];
-    let imgWidth = row.img_width;
-    let imgHeight = row.img_height;
 
     // Fallback: read dimensions from file if EXIF is null
-    if (!imgWidth || !imgHeight) {
+    if ((!coverImgWidth || !coverImgHeight) && folderPath && fileName) {
       try {
-        const filePath = path.join(MEDIA_ROOT, row.folder_path || '', row.file_name);
+        const filePath = path.join(MEDIA_ROOT, folderPath || '', fileName);
         const meta = await sharp(filePath).metadata();
-        if (meta.width) imgWidth = meta.width;
-        if (meta.height) imgHeight = meta.height;
+        if (meta.width) coverImgWidth = meta.width;
+        if (meta.height) coverImgHeight = meta.height;
       } catch (e) {
         // non-critical
       }
     }
 
-    return reply.send({ mediaId: coverMediaId, boundingBox: row.bounding_box, imgWidth, imgHeight });
+    return reply.send({ mediaId: coverMediaId, boundingBox: coverBoundingBox, imgWidth: coverImgWidth, imgHeight: coverImgHeight });
   });
 
   // Explicitly set the cover image for a person
@@ -318,7 +438,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
   });
 
   // Serve or generate a face thumbnail for a person
-  fastify.get<{ Params: { id: string } }>('/api/faces/:id/thumbnail', { preHandler: requireAuth }, async (request, reply) => {
+  fastify.get<{ Params: { id: string }, Querystring: { refresh?: string } }>('/api/faces/:id/thumbnail', { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params;
     const safeId = path.basename(id).replace(/[^a-zA-Z0-9_-]/g, '');
     if (!safeId || safeId !== id) return reply.status(400).send({ error: 'Invalid ID' });
@@ -329,7 +449,8 @@ export async function mlRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'Invalid ID' });
     }
 
-    if (fs.existsSync(cachedPath)) {
+    const refresh = request.query?.refresh === '1';
+    if (!refresh && fs.existsSync(cachedPath)) {
       const mtime = fs.statSync(cachedPath).mtimeMs;
       const etag = `"${safeId}-${Math.floor(mtime)}"`;
       reply.header('ETag', etag);
@@ -354,7 +475,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
         FROM face_embeddings fe
         JOIN media_files m ON m.id = fe.media_id
         WHERE fe.person_id = $1 AND fe.media_id = $2
-        ORDER BY fe.created_at DESC
+        ORDER BY ${PERSON_COVER_ORDER_CLAUSE}
         LIMIT 1
       `, [id, coverResult.rows[0].cover_media_id]);
       if (mediaResult.rows.length > 0) {
@@ -370,7 +491,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
     }
 
     if (!faceToUse) {
-      // Fall back to best solo photo (fewest other faces)
+      // Fall back to best solo photo, HD face, full face not cut off
       const repResult = await query(`
         SELECT fe.media_id, fe.bounding_box, m.folder_path, m.file_name,
                COALESCE(m.img_width, (m.exif_json->>'width')::int) AS img_width,
@@ -378,8 +499,8 @@ export async function mlRoutes(fastify: FastifyInstance) {
         FROM face_embeddings fe
         JOIN media_files m ON m.id = fe.media_id
         WHERE fe.person_id = $1
-        ORDER BY (SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe.media_id) ASC,
-                 m.created_at DESC
+          AND m.mime_type LIKE 'image/%'
+        ORDER BY ${PERSON_COVER_ORDER_CLAUSE}
         LIMIT 1
       `, [id]);
 
@@ -428,40 +549,43 @@ export async function mlRoutes(fastify: FastifyInstance) {
 
   // Smart Search Endpoint GET /api/media/search?q=...
   fastify.get('/api/media/search', { preHandler: requireAuth }, async (request, reply) => {
-    const { q, query: searchQuery, limit } = request.query as { q?: string; query?: string; limit?: string };
+    const { q, query: searchQuery, limit, offset } = request.query as { q?: string; query?: string; limit?: string; offset?: string };
     const searchText = q || searchQuery;
-    const maxResults = limit ? parseInt(limit, 10) : 20;
+    const maxResults = limit ? Math.min(200, Math.max(1, parseInt(limit, 10))) : 50;
+    const offsetVal = offset ? Math.max(0, parseInt(offset, 10)) : 0;
 
     if (!searchText) {
       return reply.send([]);
     }
 
-    const results = await SmartSearchService.searchMedia(searchText, maxResults);
+    const results = await SmartSearchService.searchMedia(searchText, maxResults, offsetVal);
     return reply.send(results);
   });
 
   // Smart Search Endpoint POST /api/search
   fastify.post('/api/search', { preHandler: requireAuth }, async (request, reply) => {
-    const { q, query: searchQuery, limit } = (request.body || {}) as { q?: string; query?: string; limit?: number };
+    const { q, query: searchQuery, limit, offset } = (request.body || {}) as { q?: string; query?: string; limit?: number; offset?: number };
     const searchText = q || searchQuery;
-    const maxResults = limit || 20;
+    const maxResults = limit ? Math.min(200, Math.max(1, limit)) : 50;
+    const offsetVal = offset ? Math.max(0, offset) : 0;
 
     if (!searchText) {
       return reply.send([]);
     }
 
-    const results = await SmartSearchService.searchMedia(searchText, maxResults);
+    const results = await SmartSearchService.searchMedia(searchText, maxResults, offsetVal);
     return reply.send(results);
   });
 
   // Vector smart search endpoint GET /api/search/smart
   fastify.get('/api/search/smart', { preHandler: requireAuth }, async (request, reply) => {
-    const { mediaId, q, query: searchQuery, limit } = request.query as { mediaId?: string; q?: string; query?: string; limit?: string };
-    const maxResults = limit ? parseInt(limit, 10) : 20;
+    const { mediaId, q, query: searchQuery, limit, offset } = request.query as { mediaId?: string; q?: string; query?: string; limit?: string; offset?: string };
+    const maxResults = limit ? Math.min(200, Math.max(1, parseInt(limit, 10))) : 50;
+    const offsetVal = offset ? Math.max(0, parseInt(offset, 10)) : 0;
     const searchText = q || searchQuery;
 
     if (searchText) {
-      const results = await SmartSearchService.searchMedia(searchText, maxResults);
+      const results = await SmartSearchService.searchMedia(searchText, maxResults, offsetVal);
       return reply.send(results);
     }
 

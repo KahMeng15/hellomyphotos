@@ -211,6 +211,7 @@ import { slide } from 'svelte/transition';
 
   let showSortMenu = $state(false);
   let showViewMenu = $state(false);
+  let activeFolderMenu = $state<string | null>(null);
   let showFolderViewMenu = $state(false);
 
   // Search state
@@ -546,7 +547,7 @@ import { slide } from 'svelte/transition';
   }
 
   function handleShareKeydown(e: KeyboardEvent) {
-    if (lightboxIndex !== null) return;
+    if (selectedMediaIndex !== null) return;
 
     if (isTyping(e)) {
       if (e.key === 'Escape') {
@@ -1318,7 +1319,8 @@ import { slide } from 'svelte/transition';
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,1) 100%);
+    background: linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 35%, rgba(0,0,0,0.3) 65%, rgba(0,0,0,0.95) 100%);
+    pointer-events: none;
     z-index: 1;
   }
   

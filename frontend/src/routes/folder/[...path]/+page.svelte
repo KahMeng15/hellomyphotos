@@ -986,7 +986,7 @@ import { slide } from 'svelte/transition';
   }
 
   function handleGalleryKeydown(e: KeyboardEvent) {
-    if (lightboxIndex !== null) return;
+    if (selectedMediaIndex !== null) return;
 
     if (isTyping(e)) {
       if (e.key === 'Escape') {

@@ -322,10 +322,36 @@ const SCHEMA_STATEMENTS = [
      GROUP BY person_id
    ) agg
    CROSS JOIN LATERAL (
-     SELECT id, media_id
-     FROM face_embeddings
-     WHERE person_id = agg.person_id
-     ORDER BY created_at DESC
+     SELECT fe.id, fe.media_id
+     FROM face_embeddings fe
+     JOIN media_files m ON m.id = fe.media_id
+     WHERE fe.person_id = agg.person_id
+       AND m.mime_type LIKE 'image/%'
+     ORDER BY 
+       CASE 
+         WHEN COALESCE((fe.bounding_box->>'x1')::numeric, (fe.bounding_box->>'x')::numeric, 0) <= 5
+           OR COALESCE((fe.bounding_box->>'y1')::numeric, (fe.bounding_box->>'y')::numeric, 0) <= 5
+           OR (COALESCE(m.img_width, (m.exif_json->>'width')::int, 0) > 0 
+               AND COALESCE((fe.bounding_box->>'x2')::numeric, (fe.bounding_box->>'x')::numeric + (fe.bounding_box->>'w')::numeric, 0) >= COALESCE(m.img_width, (m.exif_json->>'width')::int, 0) - 5)
+           OR (COALESCE(m.img_height, (m.exif_json->>'height')::int, 0) > 0 
+               AND COALESCE((fe.bounding_box->>'y2')::numeric, (fe.bounding_box->>'y')::numeric + (fe.bounding_box->>'h')::numeric, 0) >= COALESCE(m.img_height, (m.exif_json->>'height')::int, 0) - 5)
+         THEN 1 ELSE 0 
+       END ASC,
+       CASE 
+         WHEN (COALESCE((fe.bounding_box->>'x2')::numeric, (fe.bounding_box->>'x')::numeric + (fe.bounding_box->>'w')::numeric, 0) - COALESCE((fe.bounding_box->>'x1')::numeric, (fe.bounding_box->>'x')::numeric, 0)) >= 100
+          AND (COALESCE((fe.bounding_box->>'y2')::numeric, (fe.bounding_box->>'y')::numeric + (fe.bounding_box->>'h')::numeric, 0) - COALESCE((fe.bounding_box->>'y1')::numeric, (fe.bounding_box->>'y')::numeric, 0)) >= 100
+         THEN 0 ELSE 1 
+       END ASC,
+       (SELECT COUNT(*) FROM face_embeddings fe_cnt WHERE fe_cnt.media_id = m.id) ASC,
+       CASE 
+         WHEN COALESCE(m.img_width, (m.exif_json->>'width')::int, 0) >= 1280 
+           OR COALESCE(m.img_height, (m.exif_json->>'height')::int, 0) >= 720 
+         THEN 0 ELSE 1 
+       END ASC,
+       ((COALESCE((fe.bounding_box->>'x2')::numeric, (fe.bounding_box->>'x')::numeric + (fe.bounding_box->>'w')::numeric, 0) - COALESCE((fe.bounding_box->>'x1')::numeric, (fe.bounding_box->>'x')::numeric, 0)) * 
+        (COALESCE((fe.bounding_box->>'y2')::numeric, (fe.bounding_box->>'y')::numeric + (fe.bounding_box->>'h')::numeric, 0) - COALESCE((fe.bounding_box->>'y1')::numeric, (fe.bounding_box->>'y')::numeric, 0))) DESC,
+       (COALESCE(m.img_width, (m.exif_json->>'width')::int, 0) * COALESCE(m.img_height, (m.exif_json->>'height')::int, 0)) DESC,
+       m.created_at DESC
      LIMIT 1
    ) rep
    ON CONFLICT (id) DO UPDATE SET

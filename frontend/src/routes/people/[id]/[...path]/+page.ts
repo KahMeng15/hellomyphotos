@@ -12,9 +12,9 @@ export const load: PageLoad = async (event) => {
   }
   try {
     const [mediaRes, personRes, coverRes] = await Promise.all([
-      fetch(`${API_BASE}/api/faces/${id}/media`, { signal }),
-      fetch(`${API_BASE}/api/faces/${id}`, { signal }),
-      fetch(`${API_BASE}/api/faces/${id}/cover`, { signal })
+      fetch(`${API_BASE}/api/faces/${id}/media`, { credentials: 'include', signal }),
+      fetch(`${API_BASE}/api/faces/${id}`, { credentials: 'include', signal }),
+      fetch(`${API_BASE}/api/faces/${id}/cover`, { credentials: 'include', signal })
     ]);
     
     if (!mediaRes.ok) throw new Error('Failed to fetch person media');

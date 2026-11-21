@@ -171,7 +171,7 @@ async function getMediaFolder(mediaId: string): Promise<string | null> {
   return folder_path;
 }
 
-async function getCachedShare(shareToken: string) {
+export async function getCachedShare(shareToken: string) {
   const now = Date.now();
   const cached = shareTokenCache.get(shareToken);
   if (cached && cached.expiresAt > now) {

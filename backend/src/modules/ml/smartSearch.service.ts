@@ -8,6 +8,7 @@ import {
 import fs from 'fs';
 import path from 'path';
 import { query } from '../../config/db';
+import { redis } from '../../config/redis';
 import { VideoService } from '../media/video.service';
 
 const MODEL_NAME = 'Xenova/clip-vit-base-patch32';
@@ -54,15 +55,50 @@ function normalize(vector: number[]): number[] {
 
 export class SmartSearchService {
   /**
+   * Pre-warms the CLIP text model and tokenizer during server startup so the first
+   * smart search query does not incur a multi-second cold-start delay.
+   */
+  static async preloadModel(): Promise<void> {
+    try {
+      await Promise.all([getTokenizer(), getTextModel()]);
+      console.log('[SmartSearchService] CLIP text model pre-warmed and ready.');
+    } catch (err: any) {
+      console.warn('[SmartSearchService] Failed to pre-warm CLIP model:', err.message);
+    }
+  }
+
+  /**
    * Generates a 512-dimensional CLIP text embedding for a query string.
+   * Query embeddings are cached in Redis for 7 days to eliminate repeated CPU inference.
    */
   static async generateTextEmbedding(text: string): Promise<number[]> {
+    const trimmed = text.trim().toLowerCase();
+    const cacheKey = `clip:text:${trimmed}`;
+
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (err: any) {
+      console.warn('[SmartSearchService] Redis get error for text embedding:', err.message);
+    }
+
     const tokenizer = await getTokenizer();
     const textModel = await getTextModel();
     const textInputs = await tokenizer(text, { padding: true, truncation: true });
     const { text_embeds } = await textModel(textInputs);
     const rawArray = Array.from(text_embeds.data as Float32Array);
-    return normalize(rawArray);
+    const normalized = normalize(rawArray);
+
+    try {
+      // Cache query embedding for 7 days (604800 seconds)
+      await redis.set(cacheKey, JSON.stringify(normalized), 'EX', 604800);
+    } catch (err: any) {
+      console.warn('[SmartSearchService] Redis set error for text embedding:', err.message);
+    }
+
+    return normalized;
   }
 
   /**
@@ -151,21 +187,28 @@ export class SmartSearchService {
 
   /**
    * Performs vector similarity search over media_files ordered by clip_embedding vector cosine distance (<=>).
+   * Supports limit and offset pagination. Uses a CTE subquery so Postgres can perform top-K vector
+   * retrieval before joining folder_settings.
    */
-  static async searchMedia(queryText: string, limit: number = 20): Promise<any[]> {
+  static async searchMedia(queryText: string, limit: number = 50, offset: number = 0): Promise<any[]> {
     const textEmbedding = await this.generateTextEmbedding(queryText);
     const vectorString = `[${textEmbedding.join(',')}]`;
 
     const result = await query(`
-      SELECT m.id, m.folder_path, m.file_name, m.mime_type, m.blurhash, m.created_at,
-             COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id,
-             (m.clip_embedding <=> $1::vector) as distance
-      FROM media_files m
-      LEFT JOIN folder_settings fs ON fs.folder_path = m.folder_path
-      WHERE m.clip_embedding IS NOT NULL
-      ORDER BY m.clip_embedding <=> $1::vector ASC
-      LIMIT $2
-    `, [vectorString, limit]);
+      WITH top_matches AS (
+        SELECT m.id, m.folder_path, m.file_name, m.mime_type, m.blurhash, m.created_at,
+               (m.clip_embedding <=> $1::vector) AS distance
+        FROM media_files m
+        WHERE m.clip_embedding IS NOT NULL
+        ORDER BY m.clip_embedding <=> $1::vector ASC
+        LIMIT $2 OFFSET $3
+      )
+      SELECT t.*,
+             COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id
+      FROM top_matches t
+      LEFT JOIN folder_settings fs ON fs.folder_path = t.folder_path
+      ORDER BY t.distance ASC
+    `, [vectorString, limit, offset]);
 
     return result.rows;
   }

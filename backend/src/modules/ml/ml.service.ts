@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import { query } from '../../config/db';
 import { SmartSearchService } from './smartSearch.service';
 import { CacheTrackerService } from '../media/cacheTracker.service';
+import { getPersonCoverOrderClause, PERSON_COVER_ORDER_CLAUSE } from './personCover.utils';
 
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
@@ -27,33 +28,59 @@ async function getFaceMatchThreshold(): Promise<number> {
   return DEFAULT_CONFIDENCE_THRESHOLD;
 }
 
-export const FACE_THUMB_SIZE = 300;
-export const FACE_PADDING = 0.5;
+export const FACE_THUMB_SIZE = 400;
+export const FACE_PADDING = 0.55;
 
-export function parseBoundingBox(box: any): { left: number; top: number; width: number; height: number } {
+export function parseBoundingBox(
+  box: any,
+  origW?: number | null,
+  origH?: number | null
+): { left: number; top: number; width: number; height: number } {
+  let x1 = 0, y1 = 0, x2 = 100, y2 = 100;
   if (box && box.x1 !== undefined && box.y1 !== undefined && box.x2 !== undefined && box.y2 !== undefined) {
-    const w = box.x2 - box.x1;
-    const h = box.y2 - box.y1;
-    const padW = w * FACE_PADDING;
-    const padH = h * FACE_PADDING;
-    return {
-      left: Math.max(0, Math.floor(box.x1 - padW)),
-      top: Math.max(0, Math.floor(box.y1 - padH)),
-      width: Math.ceil(w + padW * 2),
-      height: Math.ceil(h + padH * 2),
-    };
+    x1 = Number(box.x1);
+    y1 = Number(box.y1);
+    x2 = Number(box.x2);
+    y2 = Number(box.y2);
+  } else if (box && box.x !== undefined && box.y !== undefined && box.w !== undefined && box.h !== undefined) {
+    x1 = Number(box.x);
+    y1 = Number(box.y);
+    x2 = x1 + Number(box.w);
+    y2 = y1 + Number(box.h);
   }
-  if (box && box.x !== undefined && box.y !== undefined && box.w !== undefined && box.h !== undefined) {
-    const padW = box.w * FACE_PADDING;
-    const padH = box.h * FACE_PADDING;
-    return {
-      left: Math.max(0, Math.floor(box.x - padW)),
-      top: Math.max(0, Math.floor(box.y - padH)),
-      width: Math.ceil(box.w + padW * 2),
-      height: Math.ceil(box.h + padH * 2),
-    };
+
+  const rawW = Math.max(1, x2 - x1);
+  const rawH = Math.max(1, y2 - y1);
+  // Human face center: shift slightly up (8% of face height) to include hair and avoid cutting off the top of the head
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2 - rawH * 0.08;
+
+  // Make square crop with padding to include the full head comfortably
+  const boxDim = Math.max(rawW, rawH);
+  const cropSize = Math.ceil(boxDim * (1 + 2 * FACE_PADDING));
+
+  let left = Math.floor(cx - cropSize / 2);
+  let top = Math.floor(cy - cropSize / 2);
+
+  const maxW = origW && origW > 0 ? origW : null;
+  const maxH = origH && origH > 0 ? origH : null;
+
+  if (maxW !== null && maxH !== null) {
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (left + cropSize > maxW) left = Math.max(0, maxW - cropSize);
+    if (top + cropSize > maxH) top = Math.max(0, maxH - cropSize);
+    const finalW = Math.min(cropSize, maxW - left);
+    const finalH = Math.min(cropSize, maxH - top);
+    return { left, top, width: Math.max(1, finalW), height: Math.max(1, finalH) };
   }
-  return { left: 0, top: 0, width: 100, height: 100 };
+
+  return {
+    left: Math.max(0, left),
+    top: Math.max(0, top),
+    width: Math.max(1, cropSize),
+    height: Math.max(1, cropSize),
+  };
 }
 
 export class MLService {
@@ -183,23 +210,31 @@ export class MLService {
   ): Promise<boolean> {
     const cache1080 = path.join(CACHE_ROOT, '1080p', `${face.media_id}.webp`);
     const cache480 = path.join(CACHE_ROOT, '480p', `${face.media_id}.webp`);
+    
+    // Prioritize highest-resolution source: original fullPath if supported image, or 1080p cache, fallback to 480p
     let sourcePath = '';
-    if (fs.existsSync(cache1080)) {
+    const ext = fullPath ? path.extname(fullPath).toLowerCase() : '';
+    const isSupportedImage = ['.jpg', '.jpeg', '.png', '.webp', '.tiff', '.bmp'].includes(ext);
+
+    if (fullPath && isSupportedImage && fs.existsSync(fullPath)) {
+      sourcePath = fullPath;
+    } else if (fs.existsSync(cache1080)) {
       sourcePath = cache1080;
-    } else if (fs.existsSync(cache480)) {
-      sourcePath = cache480;
     } else if (fullPath && fs.existsSync(fullPath)) {
       sourcePath = fullPath;
+    } else if (fs.existsSync(cache480)) {
+      sourcePath = cache480;
     }
     if (!sourcePath) return false;
 
-    const crop = parseBoundingBox(face.bounding_box);
     const meta = await sharp(sourcePath).metadata();
     const imgW = meta.width || 1;
     const imgH = meta.height || 1;
 
     const origW = face.img_width || imgW;
     const origH = face.img_height || imgH;
+    const crop = parseBoundingBox(face.bounding_box, origW, origH);
+
     if (origW && origH && (origW !== imgW || origH !== imgH)) {
       const scaleX = imgW / origW;
       const scaleY = imgH / origH;
@@ -217,7 +252,7 @@ export class MLService {
     const info = await sharp(sourcePath)
       .extract(crop)
       .resize(FACE_THUMB_SIZE, FACE_THUMB_SIZE, { fit: 'cover' })
-      .webp({ quality: 80 })
+      .webp({ quality: 85 })
       .toFile(outPath);
 
     if (info?.size) {
@@ -243,15 +278,15 @@ export class MLService {
       await fs.promises.mkdir(outDir, { recursive: true });
 
       for (const face of faces.rows) {
-        // Only generate if this media is the best for this person (explicit cover or fewest other faces)
+        // Only generate if this media is the best for this person (explicit cover or best solo/HD face)
         const best = await query(`
           SELECT COALESCE(
             (SELECT cover_media_id FROM people WHERE id = $1 AND cover_media_id IS NOT NULL),
             (SELECT fe2.media_id FROM face_embeddings fe2
               JOIN media_files m2 ON m2.id = fe2.media_id
               WHERE fe2.person_id = $1
-              ORDER BY (SELECT COUNT(*) FROM face_embeddings WHERE media_id = fe2.media_id) ASC,
-                m2.created_at DESC
+                AND m2.mime_type LIKE 'image/%'
+              ORDER BY ${getPersonCoverOrderClause('fe2', 'm2')}
               LIMIT 1)
           ) AS media_id
         `, [face.person_id]);

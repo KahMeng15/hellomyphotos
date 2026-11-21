@@ -7,7 +7,7 @@
   import { logout } from '$lib/api/auth';
   import { BackendError } from '$lib/api/auth';
   import { currentUser, loadAuthUser } from '$lib/stores/auth';
-  import { LogOut } from '@lucide/svelte';
+  import { LogOut, Search, Loader2 } from '@lucide/svelte';
   import { frontendLogger } from '$lib/utils/frontendLogger';
   // @ts-ignore - Ignore virtual module type resolution
   import { pwaInfo } from 'virtual:pwa-info';
@@ -22,6 +22,9 @@
     if (nav.to?.url.pathname !== prevRoute) {
       prevRoute = nav.to?.url.pathname || '';
       frontendLogger.info(`Navigated to ${prevRoute}`, prevRoute);
+    }
+    if (nav.to?.url.pathname === '/search') {
+      searchQuery = nav.to.url.searchParams.get('q') || '';
     }
   });
   import Toast from '$lib/components/Toast.svelte';
@@ -305,13 +308,20 @@
       
       {#if $currentUser}
         <div class="search-container">
-          <input 
-            type="text" 
-            placeholder="Smart Search..." 
-            bind:value={searchQuery}
-            onkeydown={handleSearch}
-            class="search-input"
-          />
+          <div class="search-input-wrapper">
+            {#if Boolean(navigating.to) && navigating.to?.url.pathname === '/search'}
+              <Loader2 size={16} class="search-icon search-loading-spinner" />
+            {:else}
+              <Search size={16} class="search-icon" />
+            {/if}
+            <input 
+              type="text" 
+              placeholder="Smart Search..." 
+              bind:value={searchQuery}
+              onkeydown={handleSearch}
+              class="search-input"
+            />
+          </div>
         </div>
       {/if}
 
@@ -472,16 +482,41 @@
   .search-container {
     margin-bottom: 24px;
   }
+
+  .search-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+
+  :global(.search-icon) {
+    position: absolute;
+    left: 12px;
+    color: #a1a1aa;
+    pointer-events: none;
+  }
+
+  :global(.search-loading-spinner) {
+    animation: spin 1s linear infinite;
+    color: var(--accent-color);
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
   
   .search-input {
     width: 100%;
-    padding: 10px 12px;
+    padding: 10px 12px 10px 36px;
     border-radius: 8px;
     background: rgba(15, 23, 42, 0.6);
     border: 1px solid var(--glass-border);
     color: #e4e4e7;
     font-size: 0.9rem;
     box-sizing: border-box;
+    transition: border-color 0.2s;
   }
   
   .search-input:focus {

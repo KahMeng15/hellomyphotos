@@ -1,6 +1,7 @@
 import { query } from '../../config/db';
 import { redis, deleteKeysByPattern } from '../../config/redis';
 import { v4 as uuidv4 } from 'uuid';
+import { PERSON_COVER_ORDER_CLAUSE } from './personCover.utils';
 
 export class ClusterService {
   static async reclusterFaces(overrideEps?: number, minSamples: number = 1): Promise<void> {
@@ -103,10 +104,12 @@ export class ClusterService {
         GROUP BY person_id
       ) agg
       CROSS JOIN LATERAL (
-        SELECT id, media_id
-        FROM face_embeddings
-        WHERE person_id = agg.person_id
-        ORDER BY created_at DESC
+        SELECT fe.id, fe.media_id
+        FROM face_embeddings fe
+        JOIN media_files m ON m.id = fe.media_id
+        WHERE fe.person_id = agg.person_id
+          AND m.mime_type LIKE 'image/%'
+        ORDER BY ${PERSON_COVER_ORDER_CLAUSE}
         LIMIT 1
       ) rep
       ON CONFLICT (id) DO UPDATE SET

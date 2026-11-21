@@ -39,7 +39,7 @@ export function getRawDate(file: { exif_json?: Record<string, unknown> | null; c
 export function formatDate(file: { exif_json?: Record<string, unknown> | null; created_at?: string | null }, serverTimezone?: string): string {
   const d = getRawDate(file);
   if (!isNaN(d.getTime()) && d.getTime() !== 0) {
-    const clientLocale = typeof navigator !== 'undefined' && navigator.language ? navigator.language : undefined;
+    const clientLocale = typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'en-US';
     let clientTimezone: string | undefined;
     try {
       clientTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -47,11 +47,24 @@ export function formatDate(file: { exif_json?: Record<string, unknown> | null; c
       clientTimezone = serverTimezone || undefined;
     }
 
-    return d.toLocaleDateString(clientLocale, {
-      weekday: 'short',
-      month: 'short',
+    const formatter = new Intl.DateTimeFormat(clientLocale, {
       day: 'numeric',
+      month: 'long',
       year: 'numeric',
+      weekday: 'long',
+      timeZone: clientTimezone || serverTimezone
+    });
+    const parts = formatter.formatToParts(d);
+    const partMap = Object.fromEntries(parts.map(p => [p.type, p.value]));
+    if (partMap.day && partMap.month && partMap.year && partMap.weekday) {
+      return `${partMap.day} ${partMap.month} ${partMap.year} (${partMap.weekday})`;
+    }
+
+    return d.toLocaleDateString(clientLocale, {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      weekday: 'long',
       timeZone: clientTimezone || serverTimezone
     });
   }

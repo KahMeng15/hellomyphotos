@@ -14,6 +14,7 @@ export interface MediaFile {
   img_height?: number | null;
   created_at?: string | null;
   relative_path?: string;
+  distance?: number;
 }
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -229,12 +230,13 @@ export interface ZipStatusResponse {
 export async function prepareFolderZip(
   folderPath: string, 
   token?: string,
-  partSize?: 'single' | '2gb' | '4gb' | '8gb'
+  partSize?: 'single' | '2gb' | '4gb' | '8gb',
+  personId?: string
 ): Promise<{ jobId: string; totalFiles: number; totalParts: number; partSize: string; reused?: boolean }> {
   const res = await fetch(`${API_BASE}/api/zip/prepare`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folderPath, shareToken: token, partSize }),
+    body: JSON.stringify({ folderPath, shareToken: token, partSize, personId }),
     credentials: 'include'
   });
   if (!res.ok) {
@@ -242,6 +244,43 @@ export async function prepareFolderZip(
     throw new Error(err.error || 'Failed to prepare ZIP');
   }
   return res.json();
+}
+
+export async function searchPersonMedia(
+  personId: string,
+  queryText: string,
+  fetchFn: typeof fetch = fetch,
+  signal?: AbortSignal
+): Promise<MediaFile[]> {
+  const queryParam = `?q=${encodeURIComponent(queryText)}`;
+  const res = await fetchFn(`${API_BASE}/api/faces/${encodeURIComponent(personId)}/media${queryParam}`, {
+    credentials: 'include',
+    signal
+  });
+  if (!res.ok) throw new Error('Failed to search person media');
+  return res.json();
+}
+
+export async function mergePersons(
+  targetPersonId: string,
+  sourcePersonIds: string[],
+  preferredName?: string
+): Promise<{ success: boolean; targetPersonId: string; name?: string }> {
+  const res = await fetch(`${API_BASE}/api/faces/merge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ targetPersonId, sourcePersonIds, preferredName })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to merge persons');
+  }
+  return res.json();
+}
+
+export function getFaceThumbnailUrl(personId: string): string {
+  return `${API_BASE}/api/faces/${personId}/thumbnail`;
 }
 
 export async function getZipJobStatus(jobId: string, token?: string): Promise<ZipStatusResponse> {
@@ -257,10 +296,6 @@ export function getZipDownloadUrl(jobId: string, token?: string, partIndex?: num
     ? `${API_BASE}/api/zip/download/${jobId}/${partIndex}`
     : `${API_BASE}/api/zip/download/${jobId}`;
   return `${base}${token ? `?shareToken=${token}` : ''}`;
-}
-
-export function getFaceThumbnailUrl(personId: string): string {
-  return `${API_BASE}/api/faces/${personId}/thumbnail`;
 }
 
 export async function renamePerson(personId: string, name: string): Promise<void> {

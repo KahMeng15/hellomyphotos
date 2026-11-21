@@ -7,13 +7,15 @@
     show = $bindable(false),
     folderPath = '',
     folderName = '',
+    personId = '',
     shareToken = '',
     autoStart = false,
     onclose
   }: {
     show: boolean;
-    folderPath: string;
+    folderPath?: string;
     folderName?: string;
+    personId?: string;
     shareToken?: string;
     autoStart?: boolean;
     onclose?: () => void;
@@ -93,7 +95,7 @@
     isDownloadingAll = false;
 
     try {
-      const res = await prepareFolderZip(folderPath, shareToken, chosenSize);
+      const res = await prepareFolderZip(folderPath, shareToken, chosenSize, personId);
       currentJobId = res.jobId;
       totalFiles = res.totalFiles || 0;
       totalParts = res.totalParts || 1;
@@ -167,16 +169,16 @@
   });
 </script>
 
-<Modal bind:show={show} id="download-folder" title={status === 'ready' ? (totalParts > 1 ? 'Downloads Ready' : 'Download Ready') : 'Download Folder'}>
+<Modal bind:show={show} id="download-folder" title={status === 'ready' ? (totalParts > 1 ? 'Downloads Ready' : 'Download Ready') : (personId ? 'Download Photos' : 'Download Folder')}>
   {#if status === 'idle'}
     <div style="display: flex; flex-direction: column; gap: 14px;">
       <button 
         class="btn" 
         style="display: block; text-align: center; width: 100%; padding: 12px; font-weight: 500; background: var(--text-color); color: var(--bg-color);" 
         onclick={() => startZipProcess('single')}
-        title="Download All in One Zip (Enter)"
+        title="Download All in One Zip"
       >
-        Download All in One Zip (Enter)
+        Download All in One Zip
       </button>
 
       <div style="display: flex; align-items: center; gap: 10px; margin: 2px 0;">

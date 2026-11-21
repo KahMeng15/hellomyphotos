@@ -4,7 +4,8 @@ import { query } from '../../config/db';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
-import { verifyFolderAccess } from '../../utils/auth';
+import { verifyFolderAccess, requireAuth, hasFolderAccess, getCachedShare } from '../../utils/auth';
+import { isShareLockdownActive } from '../../utils/lockdown.js';
 import { WatermarkService } from './watermark.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { getThrottleLimits, BandwidthThrottler } from '../../utils/throttle';
@@ -34,6 +35,7 @@ interface ZipPart {
 interface ZipJob {
   id: string;
   folderPath: string;
+  personId?: string;
   baseFilename: string;
   partSize: 'single' | '2gb' | '4gb' | '8gb';
   totalParts: number;
@@ -101,11 +103,38 @@ const PART_SIZE_MAP: Record<string, number> = {
 };
 
 export async function zipRoutes(fastify: FastifyInstance) {
+  // Helper to verify access to a zip job (folder or person based)
+  async function verifyJobAccess(job: ZipJob, request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+    if (job.personId) {
+      const shareToken = (request.query as any)?.shareToken || job.shareToken;
+      if (shareToken) {
+        if (await isShareLockdownActive()) {
+          reply.status(403).send({ error: 'All share links are temporarily disabled due to system lockdown.' });
+          return false;
+        }
+        const shareRecord = await getCachedShare(shareToken);
+        if (!shareRecord || shareRecord.person_id !== job.personId) {
+          reply.status(403).send({ error: 'Forbidden: Invalid share token for this person' });
+          return false;
+        }
+        if (shareRecord.allow_download_folder === false) {
+          reply.status(403).send({ error: 'Forbidden: ZIP download not allowed for this share link' });
+          return false;
+        }
+        return true;
+      }
+      await requireAuth(request, reply);
+      return !reply.sent;
+    }
+    return verifyFolderAccess(request, reply, job.folderPath);
+  }
+
   // 1. Prepare / Pre-zip endpoint
   fastify.post('/api/zip/prepare', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body as any) || {};
     const queryParams = (request.query as any) || {};
     const folderPath = decodeURIComponent(body.folderPath ?? queryParams.folderPath ?? '');
+    const personId = body.personId || queryParams.personId;
     const shareToken = body.shareToken || queryParams.shareToken;
     const watermark = body.watermark || queryParams.watermark;
     const partSize = (body.partSize || queryParams.partSize || 'single') as 'single' | '2gb' | '4gb' | '8gb';
@@ -114,40 +143,86 @@ export async function zipRoutes(fastify: FastifyInstance) {
       (request.query as any).shareToken = shareToken;
     }
 
-    if (!(await verifyFolderAccess(request, reply, folderPath))) return;
+    if (personId) {
+      if (shareToken) {
+        if (await isShareLockdownActive()) {
+          return reply.status(403).send({ error: 'All share links are temporarily disabled due to system lockdown.' });
+        }
+        const shareRecord = await getCachedShare(shareToken);
+        if (!shareRecord || shareRecord.person_id !== personId) {
+          return reply.status(403).send({ error: 'Forbidden: Invalid share token for this person' });
+        }
+        if (shareRecord.allow_download_folder === false) {
+          return reply.status(403).send({ error: 'Forbidden: ZIP download not allowed for this share link' });
+        }
+      } else {
+        await requireAuth(request, reply);
+        if (reply.sent) return;
+      }
+    } else {
+      if (!(await verifyFolderAccess(request, reply, folderPath))) return;
+    }
 
     const effectiveTemplate = await WatermarkService.getEffectiveTemplateForShare(shareToken);
     const shouldWatermark = watermark === 'true' || Boolean(effectiveTemplate?.apply_to_downloads);
 
-    const result = folderPath === ''
-      ? await query(
-          `SELECT id, folder_path, file_name, mime_type, size_bytes, created_at,
-                  exif_json->>'DateTimeOriginal' as captured_at,
-                  exif_json->>'Make' as camera_make,
-                  exif_json->>'Model' as camera_model,
-                  exif_json->>'LensModel' as lens_model,
-                  exif_json->>'ISO' as iso,
-                  exif_json->>'ExposureTime' as shutter_speed,
-                  exif_json->>'FNumber' as f_number,
-                  exif_json->>'Copyright' as copyright
-           FROM media_files ORDER BY folder_path ASC, file_name ASC`
-        )
-      : await query(
-          `SELECT id, folder_path, file_name, mime_type, size_bytes, created_at,
-                  exif_json->>'DateTimeOriginal' as captured_at,
-                  exif_json->>'Make' as camera_make,
-                  exif_json->>'Model' as camera_model,
-                  exif_json->>'LensModel' as lens_model,
-                  exif_json->>'ISO' as iso,
-                  exif_json->>'ExposureTime' as shutter_speed,
-                  exif_json->>'FNumber' as f_number,
-                  exif_json->>'Copyright' as copyright
-           FROM media_files WHERE folder_path = $1 OR folder_path LIKE $1 || '/%' ORDER BY folder_path ASC, file_name ASC`, 
-          [folderPath]
-        );
+    let result;
+    let personName = '';
+    if (personId) {
+      const pRes = await query(`SELECT name FROM people WHERE id = $1`, [personId]);
+      if (pRes.rows.length > 0) {
+        personName = pRes.rows[0].name || '';
+      }
+      result = await query(
+        `SELECT m.id, m.folder_path, m.file_name, m.mime_type, m.size_bytes, m.created_at,
+                m.exif_json->>'DateTimeOriginal' as captured_at,
+                m.exif_json->>'Make' as camera_make,
+                m.exif_json->>'Model' as camera_model,
+                m.exif_json->>'LensModel' as lens_model,
+                m.exif_json->>'ISO' as iso,
+                m.exif_json->>'ExposureTime' as shutter_speed,
+                m.exif_json->>'FNumber' as f_number,
+                m.exif_json->>'Copyright' as copyright
+         FROM media_files m
+         JOIN face_embeddings f ON m.id = f.media_id
+         WHERE f.person_id = $1
+         ORDER BY m.created_at DESC`,
+        [personId]
+      );
+      if (!shareToken && request.user && request.user.role !== 'admin' && request.user.role !== 'super_admin' && !request.user.folders.includes('*')) {
+        result.rows = result.rows.filter((r: any) => hasFolderAccess(request.user!, r.folder_path));
+      }
+    } else {
+      result = folderPath === ''
+        ? await query(
+            `SELECT id, folder_path, file_name, mime_type, size_bytes, created_at,
+                    exif_json->>'DateTimeOriginal' as captured_at,
+                    exif_json->>'Make' as camera_make,
+                    exif_json->>'Model' as camera_model,
+                    exif_json->>'LensModel' as lens_model,
+                    exif_json->>'ISO' as iso,
+                    exif_json->>'ExposureTime' as shutter_speed,
+                    exif_json->>'FNumber' as f_number,
+                    exif_json->>'Copyright' as copyright
+             FROM media_files ORDER BY folder_path ASC, file_name ASC`
+          )
+        : await query(
+            `SELECT id, folder_path, file_name, mime_type, size_bytes, created_at,
+                    exif_json->>'DateTimeOriginal' as captured_at,
+                    exif_json->>'Make' as camera_make,
+                    exif_json->>'Model' as camera_model,
+                    exif_json->>'LensModel' as lens_model,
+                    exif_json->>'ISO' as iso,
+                    exif_json->>'ExposureTime' as shutter_speed,
+                    exif_json->>'FNumber' as f_number,
+                    exif_json->>'Copyright' as copyright
+             FROM media_files WHERE folder_path = $1 OR folder_path LIKE $1 || '/%' ORDER BY folder_path ASC, file_name ASC`, 
+            [folderPath]
+          );
+    }
     
     if (result.rows.length === 0) {
-      return reply.status(404).send({ error: 'No files found in this folder.' });
+      return reply.status(404).send({ error: personId ? 'No photos found for this person.' : 'No files found in this folder.' });
     }
 
     const existingFiles: Array<any> = (
@@ -173,12 +248,14 @@ export async function zipRoutes(fastify: FastifyInstance) {
     ).filter(Boolean);
 
     if (existingFiles.length === 0) {
-      return reply.status(404).send({ error: 'No files found on disk for this folder.' });
+      return reply.status(404).send({ error: personId ? 'No photos found on disk for this person.' : 'No files found on disk for this folder.' });
     }
 
-    // Compute content fingerprint incorporating folder files and partSize
+    // Compute content fingerprint incorporating folder files/person and partSize
     const hash = crypto.createHash('md5');
     hash.update(`partSize:${partSize}\n`);
+    hash.update(`personId:${personId || ''}\n`);
+    hash.update(`folderPath:${folderPath || ''}\n`);
     for (const file of existingFiles) {
       hash.update(`${file.folderPath}/${file.fileName}:${file.sizeBytes}:${file.mtimeMs}\n`);
     }
@@ -186,14 +263,14 @@ export async function zipRoutes(fastify: FastifyInstance) {
 
     // Smart check: Reuse existing temporary zip parts if content & part size haven't changed
     for (const [id, existingJob] of zipJobs.entries()) {
-      if (existingJob.folderPath === folderPath && existingJob.watermark === watermark) {
+      if (existingJob.folderPath === folderPath && existingJob.personId === personId && existingJob.watermark === watermark) {
         if (existingJob.contentFingerprint === currentFingerprint) {
           const allPartsExist = existingJob.parts && existingJob.parts.length > 0 &&
             existingJob.parts.every(p => fs.existsSync(p.filePath));
 
           if (allPartsExist) {
             if (existingJob.status === 'ready') {
-              console.log(`[ZIP] Reusing existing temp zip(s) for "${folderPath}". Resetting 5-minute deletion timer.`);
+              console.log(`[ZIP] Reusing existing temp zip(s) for "${personId || folderPath}". Resetting 5-minute deletion timer.`);
               scheduleJobDeletion(id, 5 * 60 * 1000);
               return reply.send({
                 jobId: id,
@@ -203,7 +280,7 @@ export async function zipRoutes(fastify: FastifyInstance) {
                 reused: true
               });
             } else if (existingJob.status === 'zipping') {
-              console.log(`[ZIP] Reusing in-progress zip job for "${folderPath}".`);
+              console.log(`[ZIP] Reusing in-progress zip job for "${personId || folderPath}".`);
               return reply.send({
                 jobId: id,
                 totalFiles: existingJob.totalFiles,
@@ -247,7 +324,9 @@ export async function zipRoutes(fastify: FastifyInstance) {
     }
 
     const totalParts = partsFiles.length;
-    const baseName = (folderPath ? folderPath.split('/').pop() : 'Home_Photos') || 'Photos';
+    const baseName = personId
+      ? ((personName ? `${personName.trim().replace(/[^a-zA-Z0-9_\-]/g, '_')}_Photos` : 'Person_Photos') || 'Photos')
+      : ((folderPath ? folderPath.split('/').pop() : 'Home_Photos') || 'Photos');
     const totalPadded = String(totalParts).padStart(2, '0');
     const jobId = crypto.randomUUID();
 
@@ -272,6 +351,7 @@ export async function zipRoutes(fastify: FastifyInstance) {
     const job: ZipJob = {
       id: jobId,
       folderPath,
+      personId,
       baseFilename: baseName,
       partSize,
       totalParts,
@@ -331,9 +411,11 @@ export async function zipRoutes(fastify: FastifyInstance) {
             const fileList = partsFiles[pIdx];
             for (let i = 0; i < fileList.length; i++) {
               const file = fileList[i];
-              const relativeName = file.folderPath === folderPath
-                ? file.fileName
-                : path.relative(folderPath, path.join(file.folderPath, file.fileName));
+              const relativeName = personId
+                ? (file.folderPath ? path.join(file.folderPath, file.fileName) : file.fileName)
+                : (file.folderPath === folderPath
+                    ? file.fileName
+                    : path.relative(folderPath, path.join(file.folderPath, file.fileName)));
 
               let sourcePath = file.fullPath;
               let destName = relativeName;
@@ -400,7 +482,7 @@ export async function zipRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'ZIP job not found or expired.' });
     }
 
-    if (!(await verifyFolderAccess(request, reply, job.folderPath))) return;
+    if (!(await verifyJobAccess(job, request, reply))) return;
 
     return reply.send({
       status: job.status,
@@ -430,7 +512,7 @@ export async function zipRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'ZIP job not found or expired.' });
     }
 
-    if (!(await verifyFolderAccess(request, reply, job.folderPath))) return;
+    if (!(await verifyJobAccess(job, request, reply))) return;
 
     const targetPartIndex = partIndexParam ? parseInt(partIndexParam, 10) : 1;
     const targetPart = job.parts.find(p => p.partIndex === targetPartIndex);
@@ -440,7 +522,7 @@ export async function zipRoutes(fastify: FastifyInstance) {
     }
 
     AnalyticsService.logVisit({
-      actionType: 'download_folder',
+      actionType: job.personId ? 'download_person' : 'download_folder',
       folderPath: job.folderPath,
       shareToken: (request.query as any)?.shareToken || job.shareToken,
       ip: request.ip,
