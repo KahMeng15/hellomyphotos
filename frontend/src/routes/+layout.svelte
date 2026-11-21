@@ -45,6 +45,13 @@
 
   $effect(() => {
     const path = page.url.pathname;
+    if ($currentUser && path === '/') {
+      goto('/folder', { replaceState: true });
+    }
+  });
+
+  $effect(() => {
+    const path = page.url.pathname;
     if (path.startsWith('/share/') || path === '/login') {
       isSidebarOpen = false;
     } else {
@@ -288,8 +295,11 @@
 
     <aside class="sidebar {isSidebarOpen === true ? 'force-open' : (isSidebarOpen === false ? 'force-close' : '')}">
       <div class="sidebar-header">
-        <a href="/" style="text-decoration: none;">
-          <h1>hellomyphotos</h1>
+        <a href={$currentUser ? "/folder" : "/"} class="sidebar-logo-link">
+          <h1 class="sidebar-logo">
+            <span>hello</span>
+            <span>myphotos</span>
+          </h1>
         </a>
       </div>
       
@@ -436,14 +446,25 @@
   }
   
   .sidebar-header {
-    margin-bottom: 48px;
+    margin-bottom: 20px;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
   }
+
+  .sidebar-logo-link {
+    text-decoration: none;
+    color: inherit;
+  }
   
-  .sidebar-header h1 {
-    font-size: 1.25rem;
+  .sidebar-header h1,
+  .sidebar-logo {
+    display: flex;
+    flex-direction: column;
+    font-size: 1.85rem;
+    font-weight: 700;
+    line-height: 0.95;
+    letter-spacing: -0.03em;
     color: var(--text-color);
     margin: 0;
   }
