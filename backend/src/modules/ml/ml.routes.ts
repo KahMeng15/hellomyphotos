@@ -615,14 +615,7 @@ export async function mlRoutes(fastify: FastifyInstance) {
       return reply.send([]);
     }
 
-    const result = await query(`
-      SELECT m.id as media_id, m.id, m.file_name, m.folder_path, (m.clip_embedding <=> $1::vector) as distance
-      FROM media_files m
-      WHERE m.clip_embedding IS NOT NULL
-      ORDER BY m.clip_embedding <=> $1::vector ASC
-      LIMIT $2
-    `, [vectorStr, maxResults]);
-
-    return reply.send(result.rows);
+    const results = await SmartSearchService.findSimilarMedia(vectorStr, maxResults);
+    return reply.send(results);
   });
 }

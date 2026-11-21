@@ -25,6 +25,7 @@ CREATE TABLE media_files (
 
 CREATE INDEX idx_media_folder ON media_files(folder_path);
 CREATE INDEX IF NOT EXISTS idx_media_files_clip_embedding ON media_files USING hnsw (clip_embedding vector_cosine_ops);
+ALTER DATABASE hellomyphotos SET hnsw.ef_search = 100;
 
 -- Facial Embeddings
 CREATE TABLE face_embeddings (

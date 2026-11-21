@@ -18,6 +18,13 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle PostgreSQL client:', err.message);
 });
 
+// Ensure a sensible baseline ef_search for pgvector HNSW index scans across all pooled clients
+pool.on('connect', (client) => {
+  client.query('SET hnsw.ef_search = 100').catch(() => {
+    // Ignore during initial migration if pgvector extension is not yet loaded
+  });
+});
+
 let schemaPromise: Promise<void> | null = null;
 
 // DDL statements run one-by-one (NOT in a single transaction). Each statement is
@@ -79,6 +86,11 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_folder ON media_files(folder_path)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_files_clip_embedding ON media_files USING hnsw (clip_embedding vector_cosine_ops)`,
+  `DO $$ BEGIN
+    EXECUTE format('ALTER DATABASE %I SET hnsw.ef_search = 100', current_database());
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END $$;`,
 
   // M-7 Fix: text_pattern_ops index enables efficient LIKE 'prefix%' queries on folder_path.
   // Without this, every folder browse cover-image lookup degrades to a full sequential scan.

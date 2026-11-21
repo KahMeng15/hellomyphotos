@@ -7,7 +7,7 @@ import {
 } from '@xenova/transformers';
 import fs from 'fs';
 import path from 'path';
-import { query } from '../../config/db';
+import { query, pool, ensureSchema } from '../../config/db';
 import { redis } from '../../config/redis';
 import { VideoService } from '../media/video.service';
 
@@ -189,27 +189,74 @@ export class SmartSearchService {
    * Performs vector similarity search over media_files ordered by clip_embedding vector cosine distance (<=>).
    * Supports limit and offset pagination. Uses a CTE subquery so Postgres can perform top-K vector
    * retrieval before joining folder_settings.
+   *
+   * Note: In pgvector HNSW index search, results are capped at hnsw.ef_search candidates (default 40).
+   * We dynamically set LOCAL hnsw.ef_search based on (limit + offset) within the transaction
+   * so pagination beyond 40 results returns all matching items.
    */
   static async searchMedia(queryText: string, limit: number = 50, offset: number = 0): Promise<any[]> {
     const textEmbedding = await this.generateTextEmbedding(queryText);
     const vectorString = `[${textEmbedding.join(',')}]`;
 
-    const result = await query(`
-      WITH top_matches AS (
-        SELECT m.id, m.folder_path, m.file_name, m.mime_type, m.blurhash, m.created_at,
-               (m.clip_embedding <=> $1::vector) AS distance
+    await ensureSchema();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const efSearch = Math.min(2000, Math.max(100, limit + offset + 40));
+      await client.query(`SET LOCAL hnsw.ef_search = ${efSearch}`);
+
+      const result = await client.query(`
+        WITH top_matches AS (
+          SELECT m.id, m.folder_path, m.file_name, m.mime_type, m.blurhash, m.created_at,
+                 (m.clip_embedding <=> $1::vector) AS distance
+          FROM media_files m
+          WHERE m.clip_embedding IS NOT NULL
+          ORDER BY m.clip_embedding <=> $1::vector ASC
+          LIMIT $2 OFFSET $3
+        )
+        SELECT t.*,
+               COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id
+        FROM top_matches t
+        LEFT JOIN folder_settings fs ON fs.folder_path = t.folder_path
+        ORDER BY t.distance ASC
+      `, [vectorString, limit, offset]);
+
+      await client.query('COMMIT');
+      return result.rows;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Performs vector similarity search for an existing embedding vector string.
+   */
+  static async findSimilarMedia(vectorString: string, limit: number = 50): Promise<any[]> {
+    await ensureSchema();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const efSearch = Math.min(2000, Math.max(100, limit + 40));
+      await client.query(`SET LOCAL hnsw.ef_search = ${efSearch}`);
+
+      const result = await client.query(`
+        SELECT m.id as media_id, m.id, m.file_name, m.folder_path, (m.clip_embedding <=> $1::vector) as distance
         FROM media_files m
         WHERE m.clip_embedding IS NOT NULL
         ORDER BY m.clip_embedding <=> $1::vector ASC
-        LIMIT $2 OFFSET $3
-      )
-      SELECT t.*,
-             COALESCE(fs.cover_media_id, fs.auto_cover_media_id) AS folder_cover_id
-      FROM top_matches t
-      LEFT JOIN folder_settings fs ON fs.folder_path = t.folder_path
-      ORDER BY t.distance ASC
-    `, [vectorString, limit, offset]);
+        LIMIT $2
+      `, [vectorString, limit]);
 
-    return result.rows;
+      await client.query('COMMIT');
+      return result.rows;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }

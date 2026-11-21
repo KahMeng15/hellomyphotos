@@ -126,7 +126,8 @@
   const PAGE_SIZE = 50;
   let allFiles = $state<MediaFile[]>([...(data.results || [])]);
   let isLoadingMore = $state(false);
-  let hasMore = $state((data.results || []).length === PAGE_SIZE);
+  // Defensive check: PAGE_SIZE (50) or 40 (pgvector default hnsw.ef_search limit) indicates there may be more results
+  let hasMore = $state((data.results || []).length >= PAGE_SIZE || (data.results || []).length === 40);
   let lastDataQ = data.q;
 
   $effect(() => {
@@ -136,7 +137,7 @@
       if (newQ !== lastDataQ) {
         lastDataQ = newQ;
         allFiles = [...newResults];
-        hasMore = newResults.length === PAGE_SIZE;
+        hasMore = newResults.length >= PAGE_SIZE || newResults.length === 40;
         isLoadingMore = false;
       }
     });
@@ -153,9 +154,16 @@
       if (nextBatch.length > 0) {
         const existing = new Set(allFiles.map(f => f.id));
         const unique = nextBatch.filter(f => !existing.has(f.id));
-        allFiles = [...allFiles, ...unique];
+        if (unique.length > 0) {
+          allFiles = [...allFiles, ...unique];
+          // If the batch returned PAGE_SIZE or 40 items and yielded new unique items, continue pagination
+          hasMore = nextBatch.length >= PAGE_SIZE || nextBatch.length === 40;
+        } else {
+          hasMore = false;
+        }
+      } else {
+        hasMore = false;
       }
-      hasMore = nextBatch.length === PAGE_SIZE;
     } catch (e) {
       console.error('Failed to load more results:', e);
       hasMore = false;
