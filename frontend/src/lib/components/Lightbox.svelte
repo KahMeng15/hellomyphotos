@@ -2,12 +2,13 @@
   import { onMount, onDestroy } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
-  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces, repairMedia, getMediaQueueStatus, API_BASE } from '$lib/api/media';
+  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces, repairMedia, getMediaQueueStatus, fetchAlternates, setHeroPhoto, togglePhotoVisibility, API_BASE } from '$lib/api/media';
   import { createShare } from '$lib/api/shares';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import BlurhashImage from './BlurhashImage.svelte';
+  import Modal from './Modal.svelte';
   import { toast } from '$lib/stores/toast';
-  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut, Clock } from '@lucide/svelte';
+  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut, Clock, Layers, Eye, EyeOff } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { formatDate, getRawDate } from '$lib/utils/date';
   import { tracker } from '$lib/utils/analyticsTracker';
@@ -19,10 +20,13 @@
     token,
     watermarkVersion,
     baseFolderPath, folderCoverId,
+    showHiddenAlternates = true,
+    allowHeroSelection = false,
     onclose,
     onnext,
     onprev,
-    onsetcover
+    onsetcover,
+    onheroupdated
   }: { 
     media: MediaFile, 
     allowDownload?: boolean, 
@@ -31,11 +35,101 @@
     watermarkVersion?: string | number,
     baseFolderPath?: string,
     folderCoverId?: string | null,
+    showHiddenAlternates?: boolean,
+    allowHeroSelection?: boolean,
     onclose?: () => void,
     onnext?: () => void,
     onprev?: () => void,
-    onsetcover?: (id: string) => void
+    onsetcover?: (id: string) => void,
+    onheroupdated?: (heroId: string, isVisible?: boolean) => void
   } = $props();
+
+  let activeMedia = $state(media);
+  $effect(() => {
+    activeMedia = media;
+  });
+
+  let alternates = $state<MediaFile[]>([]);
+  let loadingAlternates = $state(false);
+  let showAlternatesSidebar = $state(false);
+  let isBurstStackMode = $state(false);
+
+  $effect(() => {
+    const targetId = media.id;
+    if (showHiddenAlternates && (media.burst_group_id || (media.burst_count && media.burst_count > 1))) {
+      loadingAlternates = true;
+      fetchAlternates(targetId, token)
+        .then((res) => {
+          alternates = res;
+        })
+        .catch(() => {
+          alternates = [];
+        })
+        .finally(() => {
+          loadingAlternates = false;
+        });
+    } else {
+      alternates = [];
+      showAlternatesSidebar = false;
+      isBurstStackMode = false;
+    }
+  });
+
+  function openBurstSidebar() {
+    showInfo = false;
+    showAlternatesSidebar = true;
+    isBurstStackMode = true;
+  }
+
+  function closeBurstSidebar() {
+    showAlternatesSidebar = false;
+    isBurstStackMode = false;
+  }
+
+  function toggleBurstSidebar() {
+    if (showAlternatesSidebar) {
+      closeBurstSidebar();
+    } else {
+      openBurstSidebar();
+    }
+  }
+
+  async function handlePromoteHero(id: string) {
+    try {
+      await setHeroPhoto(id, token);
+      alternates = alternates.map(a => ({
+        ...a,
+        is_hero: a.id === id
+      }));
+      if (activeMedia.id === id) {
+        activeMedia = { ...activeMedia, is_hero: true };
+      }
+      toast.success('Set as primary hero photo');
+      onheroupdated?.(id);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to set hero photo');
+    }
+  }
+
+  async function handleToggleVisibility(id: string, currentIsHero: boolean) {
+    const targetState = !currentIsHero;
+    try {
+      const res = await togglePhotoVisibility(id, targetState, token);
+      const newStatus = res.is_hero;
+      alternates = alternates.map(a => a.id === id ? { ...a, is_hero: newStatus } : a);
+      if (activeMedia.id === id) {
+        activeMedia = { ...activeMedia, is_hero: newStatus };
+      }
+      toast.success(newStatus ? 'Photo shown in curated view' : 'Photo hidden from curated view');
+      onheroupdated?.(id, newStatus);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to toggle photo visibility');
+    }
+  }
+
+  function switchActiveMedia(alt: MediaFile) {
+    activeMedia = alt;
+  }
 
   const rawDate = $derived(getRawDate(media));
   const mediaW = $derived(media.img_width || media.exif_json?.ExifImageWidth || media.exif_json?.ImageWidth || media.exif_json?.width || 0);
@@ -73,6 +167,7 @@
 
   let showInfo = $state(false);
   let showAdvanced = $state(false);
+  let showLightboxNoticeDetails = $state(false);
   let rawExif = $state<any>(null);
   let loadingExif = $state(false);
 
@@ -81,6 +176,7 @@
       tracker.startPhotoDwell(media.id);
       rawExif = null;
       showAdvanced = false;
+      showLightboxNoticeDetails = false;
     }
     return () => {
       tracker.endPhotoDwell();
@@ -123,6 +219,12 @@
     const now = Date.now();
     if (now - lastNavTime < NAV_THROTTLE_MS) return;
     lastNavTime = now;
+    if (isBurstStackMode && alternates.length > 1) {
+      const curIndex = alternates.findIndex(a => a.id === activeMedia.id);
+      const nextIndex = curIndex >= 0 ? (curIndex + 1) % alternates.length : 0;
+      switchActiveMedia(alternates[nextIndex]);
+      return;
+    }
     if (onnext) onnext();
   }
 
@@ -131,6 +233,12 @@
     const now = Date.now();
     if (now - lastNavTime < NAV_THROTTLE_MS) return;
     lastNavTime = now;
+    if (isBurstStackMode && alternates.length > 1) {
+      const curIndex = alternates.findIndex(a => a.id === activeMedia.id);
+      const prevIndex = curIndex >= 0 ? (curIndex - 1 + alternates.length) % alternates.length : alternates.length - 1;
+      switchActiveMedia(alternates[prevIndex]);
+      return;
+    }
     if (onprev) onprev();
   }
 
@@ -189,6 +297,10 @@
   function handleKeydown(e: KeyboardEvent) {
     onActivity();
     if (e.key === 'Escape') {
+      if (showAlternatesSidebar) {
+        closeBurstSidebar();
+        return;
+      }
       close();
       return;
     }
@@ -333,6 +445,7 @@
   function toggleInfo() {
     showInfo = !showInfo;
     if (showInfo) {
+      showAlternatesSidebar = false;
       tracker.recordFeature('information');
     }
   }
@@ -609,6 +722,19 @@
             {/if}
           </div>
         {/if}
+        {#if showHiddenAlternates && alternates.length > 1}
+          <button 
+            type="button" 
+            class="icon-btn burst-icon-btn" 
+            class:active={showAlternatesSidebar} 
+            onclick={toggleBurstSidebar} 
+            title="Burst stack: {alternates.length} photos"
+            aria-label="View burst sequence photos"
+          >
+            <Layers size={20} strokeWidth={2} />
+            <span class="burst-icon-count">{alternates.length}</span>
+          </button>
+        {/if}
         <button class="icon-btn {showInfo ? 'active' : ''}" onclick={toggleInfo} title="Info (I)">
           <Info size={20} strokeWidth={2} />
         </button>
@@ -644,11 +770,11 @@
       </button>
       
       <div class="content">
-        {#if media.mime_type.startsWith('video/')}
-          {#key media.id}
-            {#if media.is_transcoded === false}
+        {#if activeMedia.mime_type.startsWith('video/')}
+          {#key activeMedia.id}
+            {#if activeMedia.is_transcoded === false}
               <div class="processing-video-container">
-                <img src={getPreviewUrl(media.id, false, token, 'lightbox')} alt={media.file_name} class="media-element" draggable="false" decoding="async" style="opacity: 0.3" />
+                <img src={getPreviewUrl(activeMedia.id, false, token, 'lightbox')} alt={activeMedia.file_name} class="media-element" draggable="false" decoding="async" style="opacity: 0.3" />
                 <div class="processing-overlay">
                   <Clock size={48} strokeWidth={2} />
                   <div class="processing-text">
@@ -671,7 +797,7 @@
                 autoplay 
                 playsinline 
                 class="media-element" 
-                src={getStreamUrl(media.id, token)}
+                src={getStreamUrl(activeMedia.id, token)}
                 onerror={handleVideoError}
               >
                 Your browser does not support the video tag.
@@ -679,10 +805,10 @@
             {/if}
           {/key}
         {:else}
-          {#key media.id}
+          {#key activeMedia.id}
             <img 
-              src={`${getPreviewUrl(media.id, false, token, 'lightbox')}${watermarkVersion ? '&wv=' + watermarkVersion : ''}`} 
-              alt={media.file_name} 
+              src={`${getPreviewUrl(activeMedia.id, false, token, 'lightbox')}${watermarkVersion ? '&wv=' + watermarkVersion : ''}`} 
+              alt={activeMedia.file_name} 
               class="media-element" 
               draggable="false" 
               decoding="async"
@@ -705,6 +831,49 @@
       >
         <ChevronRight size={32} strokeWidth={2} />
       </button>
+
+      {#if isBurstStackMode && alternates.length > 1}
+        <div class="lightbox-burst-badge-container" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'}>
+          <button 
+            type="button" 
+            class="burst-status-badge"
+            onclick={closeBurstSidebar}
+            title="Burst stack navigation active (Next/Prev stay within this burst). Click to exit."
+          >
+            <Layers size={13} />
+            <span>Burst Stack Mode ({alternates.findIndex(a => a.id === activeMedia.id) + 1} of {alternates.length})</span>
+            <span class="exit-hint">Exit (Esc)</span>
+          </button>
+        </div>
+      {/if}
+
+      {#if media.is_staged}
+        <div class="lightbox-staging-notice" style:opacity={isIdle ? 0 : 1} style:pointer-events={isIdle ? 'none' : 'auto'}>
+          <button 
+            type="button" 
+            class="minimized-notice-pill" 
+            onclick={(e) => { e.stopPropagation(); showLightboxNoticeDetails = !showLightboxNoticeDetails; }}
+            title="Click to view staging disclaimer"
+          >
+            <span class="pill-tag">Live Staging Preview</span>
+            <span class="pill-subtext">• Photos are unedited & subject to change</span>
+            <span class="pill-info-icon"><Info size={13} /></span>
+          </button>
+
+          {#if showLightboxNoticeDetails}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <div class="notice-details-popover" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
+              <div class="popover-header">
+                <strong>Realtime Staging Preview</strong>
+                <button type="button" class="popover-close-btn" onclick={() => showLightboxNoticeDetails = false} title="Close disclaimer">
+                  <X size={14} />
+                </button>
+              </div>
+              <p>This photo was synced in realtime via FastUp and has not been filtered or edited yet. It is subject to change. Please return during a later time for final photos.</p>
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
 
     {#if showInfo}
@@ -877,6 +1046,105 @@
               </div>
             {/if}
           </div>
+
+          {#if alternates.length > 1}
+            <div class="info-section">
+              <h4>BURST SEQUENCE ({alternates.length} PHOTOS)</h4>
+              <p style="font-size: 0.8rem; color: #a1a1aa; margin-bottom: 8px;">
+                {alternates.length} shots taken in this burst group.
+              </p>
+              <button 
+                type="button" 
+                class="btn" 
+                style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); color: #f1f5f9; font-size: 0.8rem; padding: 6px 12px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;"
+                onclick={openBurstSidebar}
+              >
+                <Layers size={14} />
+                <span>View Burst Stack ({alternates.length})</span>
+              </button>
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    {#if showAlternatesSidebar}
+      <div class="sidebar burst-sidebar" transition:slide={{ axis: 'x', duration: 300 }}>
+        <div class="sidebar-inner">
+          <div class="burst-sidebar-header">
+            <div>
+              <h3>Burst Stack</h3>
+              <span class="burst-sidebar-subtitle">{alternates.length} photos in sequence</span>
+            </div>
+            <button type="button" class="burst-close-btn" onclick={closeBurstSidebar} title="Close Stack View (Esc)">
+              <X size={18} />
+            </button>
+          </div>
+
+          <div class="burst-stack-list">
+            {#each alternates as alt, idx}
+              <div 
+                class="burst-stack-card" 
+                class:is-active={alt.id === activeMedia.id}
+                class:is-hero={alt.is_hero}
+              >
+                <button 
+                  type="button" 
+                  class="burst-stack-thumb-btn"
+                  onclick={() => switchActiveMedia(alt)}
+                  title="View {alt.file_name}"
+                >
+                  <img src={getThumbnailUrl(alt.id, token)} alt={alt.file_name} loading="lazy" />
+                  <span class="burst-stack-index">#{idx + 1}</span>
+                </button>
+
+                <div class="burst-stack-details">
+                  <div class="burst-stack-title-row">
+                    <span class="burst-stack-filename" title={alt.file_name}>{alt.file_name}</span>
+                  </div>
+
+                  <div class="burst-stack-actions-row">
+                    <button 
+                      type="button" 
+                      class="visibility-toggle-btn {alt.is_hero ? 'is-shown' : 'is-hidden'}"
+                      onclick={() => handleToggleVisibility(alt.id, !!alt.is_hero)}
+                      title={alt.is_hero ? 'Shown in curated view (click to hide)' : 'Hidden in curated view (click to show)'}
+                    >
+                      {#if alt.is_hero}
+                        <Eye size={13} />
+                        <span>Curated</span>
+                      {:else}
+                        <EyeOff size={13} />
+                        <span>Hidden</span>
+                      {/if}
+                    </button>
+
+                    {#if allowHeroSelection && !alt.is_hero}
+                      <button 
+                        type="button" 
+                        class="btn-sm btn-hero" 
+                        onclick={() => handlePromoteHero(alt.id)}
+                        title="Set as Best Pick"
+                      >
+                        Set Best
+                      </button>
+                    {/if}
+
+                    {#if allowDownload}
+                      <a 
+                        href={`${getStreamUrl(alt.id, token)}${token ? '&' : '?'}download=1`} 
+                        download={alt.file_name} 
+                        class="btn-sm btn-download" 
+                        title="Download"
+                      >
+                        <Download size={13} />
+                      </a>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
         </div>
       </div>
     {/if}
@@ -1026,7 +1294,7 @@
     height: 100%;
     background: #000000;
     border-left: 1px solid rgba(255,255,255,0.1);
-    padding: 80px 24px 24px 24px;
+    padding: 24px;
     overflow-y: auto;
     overflow-x: hidden;
     z-index: 1000;
@@ -1277,6 +1545,392 @@
     color: #e2e8f0;
     text-align: right;
     word-break: break-all;
+  }
+
+  /* Minimized Live Staging Notice */
+  .lightbox-staging-notice {
+    position: absolute;
+    bottom: 24px;
+    left: 24px;
+    z-index: 1005;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    transition: opacity 0.4s ease;
+  }
+  .minimized-notice-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    border-radius: 9999px;
+    color: #e2e8f0;
+    font-size: 0.78rem;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    transition: all 0.2s ease;
+  }
+  .minimized-notice-pill:hover {
+    background: rgba(15, 23, 42, 0.9);
+    border-color: rgba(168, 85, 247, 0.7);
+    transform: translateY(-1px);
+  }
+  .pill-tag {
+    font-weight: 600;
+    color: #d8b4fe;
+  }
+  .pill-subtext {
+    color: #94a3b8;
+    font-size: 0.75rem;
+  }
+  .pill-info-icon {
+    display: inline-flex;
+    align-items: center;
+    color: #c084fc;
+    margin-left: 2px;
+  }
+  .notice-details-popover {
+    background: rgba(15, 23, 42, 0.92);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(168, 85, 247, 0.35);
+    border-radius: 12px;
+    padding: 14px 16px;
+    max-width: 340px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    animation: fadeInSlide 0.2s ease-out;
+  }
+  .popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    color: #f3e8ff;
+    font-size: 0.85rem;
+  }
+  .popover-close-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: color 0.15s;
+  }
+  .popover-close-btn:hover {
+    color: white;
+  }
+  .notice-details-popover p {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: #cbd5e1;
+  }
+  @keyframes fadeInSlide {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (max-width: 640px) {
+    .lightbox-staging-notice {
+      bottom: 16px;
+      left: 16px;
+      right: 16px;
+    }
+    .pill-subtext {
+      display: none;
+    }
+  }
+
+  /* Burst Stack Sidebar Styles */
+  .burst-icon-btn {
+    position: relative;
+    color: #f1f5f9;
+  }
+  .burst-icon-btn.active {
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+  }
+  .burst-icon-count {
+    position: absolute;
+    bottom: 2px;
+    right: 2px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    line-height: 1;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: #f1f5f9;
+    padding: 1px 3px;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+
+  .lightbox-burst-badge-container {
+    position: absolute;
+    bottom: 28px;
+    left: 24px;
+    z-index: 1005;
+    pointer-events: auto;
+    transition: opacity 0.2s ease;
+  }
+  .burst-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(15, 23, 42, 0.9);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(56, 189, 248, 0.6);
+    border-radius: 9999px;
+    padding: 6px 14px;
+    color: #f1f5f9;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    transition: all 0.2s ease;
+  }
+  .burst-status-badge:hover {
+    background: rgba(15, 23, 42, 0.98);
+    border-color: #38bdf8;
+    transform: translateY(-1px);
+  }
+  .burst-status-badge .exit-hint {
+    background: rgba(255, 255, 255, 0.15);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    color: #cbd5e1;
+  }
+
+  .burst-sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .burst-sidebar-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: #f8fafc;
+  }
+  .burst-sidebar-subtitle {
+    font-size: 0.75rem;
+    color: #94a3b8;
+  }
+  .burst-close-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s;
+  }
+  .burst-close-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .burst-nav-mode-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 16px;
+    font-size: 0.75rem;
+    color: #7dd3fc;
+  }
+  .exit-nav-pill {
+    background: rgba(56, 189, 248, 0.2);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    color: #e0f2fe;
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .exit-nav-pill:hover {
+    background: rgba(56, 189, 248, 0.35);
+  }
+
+  .burst-stack-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 40px;
+  }
+
+  .burst-stack-card {
+    display: flex;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 8px;
+    transition: all 0.15s;
+  }
+  .burst-stack-card.is-active {
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.08);
+  }
+  .burst-stack-card.is-hero {
+    border-left: 3px solid #38bdf8;
+  }
+
+  .burst-stack-thumb-btn {
+    position: relative;
+    width: 68px;
+    height: 68px;
+    flex-shrink: 0;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #000;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+  .burst-stack-thumb-btn img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.2s;
+  }
+  .burst-stack-thumb-btn:hover img {
+    transform: scale(1.08);
+  }
+  .burst-stack-index {
+    position: absolute;
+    bottom: 2px;
+    left: 2px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #cbd5e1;
+    font-size: 0.6rem;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .card-active-pill {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: #38bdf8;
+    color: #000;
+    font-size: 0.55rem;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  .burst-stack-details {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .burst-stack-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .burst-stack-filename {
+    font-size: 0.75rem;
+    color: #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+  }
+
+  .burst-stack-actions-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .visibility-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: none;
+  }
+  .visibility-toggle-btn.is-shown {
+    background: rgba(34, 197, 94, 0.18);
+    border: 1px solid rgba(34, 197, 94, 0.4);
+    color: #4ade80;
+  }
+  .visibility-toggle-btn.is-shown:hover {
+    background: rgba(34, 197, 94, 0.3);
+  }
+  .visibility-toggle-btn.is-hidden {
+    background: rgba(148, 163, 184, 0.12);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    color: #94a3b8;
+  }
+  .visibility-toggle-btn.is-hidden:hover {
+    background: rgba(148, 163, 184, 0.22);
+    color: #cbd5e1;
+  }
+
+  .btn-hero {
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    color: #7dd3fc;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 3px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-hero:hover {
+    background: rgba(56, 189, 248, 0.25);
+  }
+
+  .btn-download {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: white;
+    padding: 3px 6px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-download:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+
+  @media (max-width: 640px) {
+    .lightbox-burst-badge-container {
+      bottom: 60px;
+      left: 16px;
+      right: 16px;
+    }
   }
 
 </style>

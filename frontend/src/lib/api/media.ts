@@ -10,11 +10,19 @@ export interface MediaFile {
   folder_cover_id?: string | null;
   bounding_box?: any;
   is_transcoded?: boolean;
+  is_staged?: boolean;
+  is_hidden_staging?: boolean;
+  matched_media_id?: string | null;
   img_width?: number | null;
   img_height?: number | null;
   created_at?: string | null;
   relative_path?: string;
   distance?: number;
+  burst_group_id?: string | null;
+  is_hero?: boolean;
+  burst_count?: number;
+  quality_score?: number | null;
+  face_count?: number;
 }
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -307,3 +315,48 @@ export async function renamePerson(personId: string, name: string): Promise<void
   });
   if (!res.ok) throw new Error('Failed to rename person');
 }
+
+export async function fetchAlternates(mediaId: string, shareToken?: string): Promise<MediaFile[]> {
+  const url = shareToken 
+    ? `${API_BASE}/api/shares/${encodeURIComponent(shareToken)}/media/${encodeURIComponent(mediaId)}/alternates`
+    : `${API_BASE}/api/staging/media/${encodeURIComponent(mediaId)}/alternates`;
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to fetch alternate photos');
+  }
+  const data = await res.json();
+  return data.alternates || [];
+}
+
+export async function setHeroPhoto(mediaId: string, shareToken?: string): Promise<void> {
+  const url = shareToken 
+    ? `${API_BASE}/api/shares/${encodeURIComponent(shareToken)}/media/${encodeURIComponent(mediaId)}/set-hero`
+    : `${API_BASE}/api/staging/media/${encodeURIComponent(mediaId)}/set-hero`;
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'include'
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to set hero photo');
+  }
+}
+
+export async function togglePhotoVisibility(mediaId: string, show?: boolean, shareToken?: string): Promise<{ success: boolean; mediaId: string; is_hero: boolean; burstGroupId: string | null }> {
+  const url = shareToken 
+    ? `${API_BASE}/api/shares/${encodeURIComponent(shareToken)}/media/${encodeURIComponent(mediaId)}/toggle-visibility`
+    : `${API_BASE}/api/staging/media/${encodeURIComponent(mediaId)}/toggle-visibility`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ show }),
+    credentials: 'include'
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to update photo visibility');
+  }
+  return res.json();
+}
+

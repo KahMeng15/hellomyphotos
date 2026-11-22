@@ -17,10 +17,12 @@ import { slide } from 'svelte/transition';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
   import { currentUser } from '$lib/stores/auth';
   import { updatePreferences } from '$lib/api/auth';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2 } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2, Sparkles, Layers } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   
   let { data }: { data: PageData } = $props();
+
+  let isStagedFolder = $derived(Boolean((data as any).isStagedFolder || data.files?.some((f: any) => f.is_staged)));
   
   // Settings Modal State
   let folderDescInput = $state('');
@@ -754,13 +756,41 @@ import { slide } from 'svelte/transition';
     showDownloadModal = true;
   }
 
-  let sortedFiles = $derived([...displayedFiles].sort((a, b) => {
+  let folderCurationMode = $state<'curated' | 'all'>('all');
+
+  let hasBurstPhotos = $derived(displayedFiles.some((f: any) => f.burst_group_id || (f.burst_count && f.burst_count > 1)));
+
+  let curatedFiles = $derived(
+    folderCurationMode === 'curated'
+      ? displayedFiles.filter((f: any) => f.is_hero || !f.burst_group_id)
+      : displayedFiles
+  );
+
+  let sortedFiles = $derived([...curatedFiles].sort((a, b) => {
     if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);
     if (sortMode === 'oldest') return getSortDate(a) - getSortDate(b);
     if (sortMode === 'a-z') return a.file_name.localeCompare(b.file_name);
     if (sortMode === 'z-a') return b.file_name.localeCompare(a.file_name);
     return 0;
   }));
+
+  function handleHeroUpdated(updatedHeroId: string, isVisible?: boolean) {
+    if (data.files) {
+      if (typeof isVisible === 'boolean') {
+        data.files = data.files.map((f: any) => f.id === updatedHeroId ? { ...f, is_hero: isVisible } : f);
+      } else {
+        const target = data.files.find((f: any) => f.id === updatedHeroId);
+        if (target && target.burst_group_id) {
+          data.files = data.files.map((f: any) => {
+            if (f.burst_group_id === target.burst_group_id) {
+              return { ...f, is_hero: f.id === updatedHeroId };
+            }
+            return f;
+          });
+        }
+      }
+    }
+  }
 
   let visibleCount = $state(50);
   let visibleFiles = $derived(sortedFiles.slice(0, visibleCount));
@@ -1197,6 +1227,19 @@ import { slide } from 'svelte/transition';
           {/if}
         </div>
         
+        {#if displayedFiles.length > 0}
+          <button 
+            type="button" 
+            class="icon-btn curation-icon-btn" 
+            class:active={folderCurationMode === 'curated'} 
+            onclick={() => folderCurationMode = folderCurationMode === 'curated' ? 'all' : 'curated'} 
+            title={folderCurationMode === 'curated' ? 'Curated view: showing best picks (click for all)' : 'Curate: show best picks only'}
+            aria-label="Toggle curated view"
+          >
+            <Layers size={18} />
+          </button>
+        {/if}
+
         {#if isFolderOnly}
           <div class="dropdown-container" use:clickOutside={() => showFolderViewMenu = false}>
             <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; }} title="View (V)">
@@ -1516,6 +1559,7 @@ import { slide } from 'svelte/transition';
         targetHeight={viewMode.includes('small') ? (windowWidth <= 768 ? 100 : 150) : viewMode.includes('large') ? (windowWidth <= 768 ? 200 : 350) : 250}
         priority={i < 8}
         initialAspectRatio={getAspectRatio(file)}
+        burstCount={folderCurationMode === 'curated' ? file.burst_count : undefined}
       />
     {/each}
   </div>
@@ -1528,6 +1572,9 @@ import { slide } from 'svelte/transition';
 {#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
   <Lightbox folderCoverId={data.folderCoverId} 
     media={sortedFiles[selectedMediaIndex]} 
+    showHiddenAlternates={true}
+    allowHeroSelection={true}
+    onheroupdated={handleHeroUpdated}
     onclose={closeLightbox}
     onnext={nextMedia}
     onprev={prevMedia}
@@ -3060,5 +3107,11 @@ import { slide } from 'svelte/transition';
     .mobile-only-back {
       display: none !important;
     }
+  }
+
+  .curation-icon-btn.active {
+    color: #facc15;
+    background: rgba(234, 179, 8, 0.18);
+    border-color: rgba(234, 179, 8, 0.4);
   }
 </style>

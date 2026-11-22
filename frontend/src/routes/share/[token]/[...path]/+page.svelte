@@ -14,13 +14,34 @@ import { slide } from 'svelte/transition';
   import { page } from '$app/state';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder, AlertCircle, List, Image as ImageIcon, Film, Search, Loader2 } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder, AlertCircle, List, Image as ImageIcon, Film, Search, Loader2, Radio, RefreshCw, Sparkles, Layers } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { getTurnstileSitekey } from '$lib/api/turnstile';
   import { API_BASE } from '$lib/api/media';
   import { tracker } from '$lib/utils/analyticsTracker';
   
   let { data }: { data: PageData } = $props();
+
+  let isStagedFolder = $derived(Boolean((data as any).isStagedFolder || data.files?.some((f: any) => f.is_staged)));
+  let stagingNotice = $derived((data as any).stagingNotice || (isStagedFolder ? {
+    enabled: true,
+    title: 'Realtime Photo Sync in Progress',
+    message: 'Note that the photos in this app are being synced in realtime and are not filtered or edited yet. Please return during a later time for the final images. Any enquiries about these photos, you may contact the photographer.'
+  } : null));
+
+  let isRefreshingPhotos = $state(false);
+
+  async function handleRefreshPhotos() {
+    if (isRefreshingPhotos) return;
+    isRefreshingPhotos = true;
+    try {
+      await invalidateAll();
+    } finally {
+      setTimeout(() => {
+        isRefreshingPhotos = false;
+      }, 600);
+    }
+  }
   
   let verifyingTurnstile = $state(false);
   let turnstileError = $state('');
@@ -323,6 +344,14 @@ import { slide } from 'svelte/transition';
   let displayedDirectories = $derived(!personName ? (isSearching ? searchDirectories : (data.directories || [])) : []);
   let displayedFiles = $derived(isSearching ? searchFiles : (data.files || []));
 
+  let stagingViewMode = $state<'curated' | 'all'>((data.share as any)?.default_staging_view || 'all');
+
+  let curatedFiles = $derived(
+    stagingViewMode === 'curated'
+      ? displayedFiles.filter((f: any) => f.is_hero || !f.burst_group_id)
+      : displayedFiles
+  );
+
   let isFolderOnly = $derived(!personName && displayedFiles.length === 0 && displayedDirectories.length > 0);
 
   let sortedDirectories = $derived(displayedDirectories.slice().sort((a: any, b: any) => {
@@ -331,13 +360,31 @@ import { slide } from 'svelte/transition';
     return 0;
   }));
 
-  let sortedFiles = $derived([...displayedFiles].sort((a, b) => {
+  let sortedFiles = $derived([...curatedFiles].sort((a, b) => {
     if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);
     if (sortMode === 'oldest') return getSortDate(a) - getSortDate(b);
     if (sortMode === 'a-z') return a.file_name.localeCompare(b.file_name);
     if (sortMode === 'z-a') return b.file_name.localeCompare(a.file_name);
     return 0;
   }));
+
+  function handleHeroUpdated(updatedHeroId: string, isVisible?: boolean) {
+    if (data.files) {
+      if (typeof isVisible === 'boolean') {
+        data.files = data.files.map((f: any) => f.id === updatedHeroId ? { ...f, is_hero: isVisible } : f);
+      } else {
+        const target = data.files.find((f: any) => f.id === updatedHeroId);
+        if (target && target.burst_group_id) {
+          data.files = data.files.map((f: any) => {
+            if (f.burst_group_id === target.burst_group_id) {
+              return { ...f, is_hero: f.id === updatedHeroId };
+            }
+            return f;
+          });
+        }
+      }
+    }
+  }
 
   function getShareDirHref(dir: any) {
     if (dir.path_from_share !== undefined) {
@@ -991,6 +1038,11 @@ import { slide } from 'svelte/transition';
             <ChevronLeft size={24} />
           </a>
         {/if}
+        {#if isStagedFolder}
+          <button class="icon-btn" onclick={handleRefreshPhotos} disabled={isRefreshingPhotos} title="Refresh live sync photos">
+            <RefreshCw size={18} class={isRefreshingPhotos ? 'spinning' : ''} />
+          </button>
+        {/if}
         <button class="icon-btn" class:active={isSearchOpen} onclick={toggleSearch} title="Search (/ or ⌘K)">
           <Search size={18} />
         </button>
@@ -1008,6 +1060,19 @@ import { slide } from 'svelte/transition';
           {/if}
         </div>
         
+        {#if (data.share as any)?.allow_view_mode_toggle !== false && displayedFiles.length > 0}
+          <button 
+            type="button" 
+            class="icon-btn curation-icon-btn" 
+            class:active={stagingViewMode === 'curated'} 
+            onclick={() => stagingViewMode = stagingViewMode === 'curated' ? 'all' : 'curated'} 
+            title={stagingViewMode === 'curated' ? 'Curated view: showing best picks (click for all)' : 'Curate: show best picks only'}
+            aria-label="Toggle curated view"
+          >
+            <Layers size={18} />
+          </button>
+        {/if}
+
         {#if isFolderOnly}
           <div class="dropdown-container" use:clickOutside={() => showFolderViewMenu = false}>
             <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; showViewMenu = false; }} title="View (V)">
@@ -1113,6 +1178,28 @@ import { slide } from 'svelte/transition';
     </div>
   {/if}
 </div>
+
+{#if isStagedFolder && stagingNotice && stagingNotice.enabled}
+  <div class="staging-disclaimer-banner">
+    <div class="disclaimer-icon">
+      <Radio size={20} color="#a855f7" />
+    </div>
+    <div class="disclaimer-content">
+      <h4 class="disclaimer-title">{stagingNotice.title || 'Realtime Photo Sync in Progress'}</h4>
+      <p class="disclaimer-text">{stagingNotice.message}</p>
+    </div>
+    <button 
+      type="button" 
+      class="disclaimer-refresh-btn" 
+      onclick={handleRefreshPhotos}
+      disabled={isRefreshingPhotos}
+      title="Refresh photos from live sync"
+    >
+      <RefreshCw size={15} class={isRefreshingPhotos ? 'spinning' : ''} />
+      <span>Refresh</span>
+    </button>
+  </div>
+{/if}
 
 {#key data.folderPath}
 {#if isSearching && !isSearchLoading && sortedDirectories.length === 0 && sortedFiles.length === 0 && viewMode !== 'compact-list'}
@@ -1272,6 +1359,7 @@ import { slide } from 'svelte/transition';
         square={viewMode.includes('square')}
         targetHeight={viewMode.includes('small') ? (windowWidth <= 768 ? 100 : 150) : viewMode.includes('large') ? (windowWidth <= 768 ? 200 : 350) : 250}
         priority={i < 8}
+        burstCount={stagingViewMode === 'curated' ? file.burst_count : undefined}
       />
     {/each}
   </div>
@@ -1279,7 +1367,21 @@ import { slide } from 'svelte/transition';
 {/key}
 
 {#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
-  <Lightbox folderCoverId={data.folderCoverId} media={sortedFiles[selectedMediaIndex]} allowDownload={data.share.allow_download_images} isSharedView={true} token={page.params.token} watermarkVersion={watermarkVersion} baseFolderPath={data.baseFolderPath} onclose={closeLightbox} onnext={nextMedia} onprev={prevMedia} />
+  <Lightbox 
+    folderCoverId={data.folderCoverId} 
+    media={sortedFiles[selectedMediaIndex]} 
+    allowDownload={data.share.allow_download_images} 
+    isSharedView={true} 
+    token={page.params.token} 
+    watermarkVersion={watermarkVersion} 
+    baseFolderPath={data.baseFolderPath} 
+    showHiddenAlternates={(data.share as any)?.show_hidden_alternates ?? true}
+    allowHeroSelection={(data.share as any)?.allow_hero_selection ?? false}
+    onheroupdated={handleHeroUpdated}
+    onclose={closeLightbox} 
+    onnext={nextMedia} 
+    onprev={prevMedia} 
+  />
 {/if}
 
 <ZipDownloadModal 
@@ -1985,5 +2087,87 @@ import { slide } from 'svelte/transition';
     .mobile-only-back {
       display: none !important;
     }
+  }
+
+  /* Live FastUp Staging Disclaimer Banner */
+  .staging-disclaimer-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 0 0 20px 0;
+    padding: 14px 18px;
+    background: linear-gradient(135deg, rgba(168, 85, 247, 0.1) 0%, rgba(59, 130, 246, 0.06) 100%);
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    border-radius: 12px;
+    backdrop-filter: blur(12px);
+  }
+  .disclaimer-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    background: rgba(168, 85, 247, 0.15);
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+  .disclaimer-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .disclaimer-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #f3e8ff;
+  }
+  .disclaimer-text {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: #d1d5db;
+  }
+  .disclaimer-refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    margin-left: auto;
+    background: rgba(168, 85, 247, 0.2);
+    border: 1px solid rgba(168, 85, 247, 0.45);
+    border-radius: 8px;
+    color: #f3e8ff;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+    align-self: center;
+    transition: all 0.2s ease;
+  }
+  .disclaimer-refresh-btn:hover {
+    background: rgba(168, 85, 247, 0.35);
+    border-color: rgba(168, 85, 247, 0.7);
+    color: white;
+  }
+  .disclaimer-refresh-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  @media (max-width: 640px) {
+    .staging-disclaimer-banner {
+      flex-wrap: wrap;
+    }
+    .disclaimer-refresh-btn {
+      margin-left: 0;
+      margin-top: 8px;
+      width: 100%;
+      justify-content: center;
+    }
+  }
+
+  .curation-icon-btn.active {
+    color: #facc15;
+    background: rgba(234, 179, 8, 0.18);
+    border-color: rgba(234, 179, 8, 0.4);
   }
 </style>

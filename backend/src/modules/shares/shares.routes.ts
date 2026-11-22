@@ -11,6 +11,7 @@ import { videoQueue } from '../../queue/videoQueue';
 import { redis, deleteKeysByPattern } from '../../config/redis';
 
 const MEDIA_ROOT = process.env.MEDIA_ROOT || path.join(process.cwd(), 'media');
+import { resolveMediaFullPath } from '../../utils/mediaPath';
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 
@@ -20,6 +21,8 @@ import { sendPlainTextEmail } from '../../utils/mailer';
 import { isShareLockdownActive } from '../../utils/lockdown';
 import { WatermarkService } from '../media/watermark.service';
 import { PERSON_COVER_ORDER_CLAUSE } from '../ml/personCover.utils';
+import { FastUpService } from '../staging/fastup.service';
+import { StagingService } from '../staging/staging.service';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
@@ -61,7 +64,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
           `, [folderPath]);
           
           for (const f of files.rows) {
-            const fullPath = path.join(MEDIA_ROOT, f.folder_path, f.file_name);
+            const fullPath = resolveMediaFullPath(f.folder_path, f.file_name);
             if (f.mime_type.startsWith('video/')) {
               await videoQueue.add('process-video', { mediaId: f.id, fullPath, mimeType: f.mime_type, skipCascade: true }, { priority: 1 }).catch(() => {});
             } else if (f.mime_type.startsWith('image/')) {
@@ -250,13 +253,13 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       Promise.all(missingMetadata.map((f: any) => 
         metadataQueue.add('extract-metadata', { 
           mediaId: f.id, 
-          fullPath: path.join(MEDIA_ROOT, f.folder_path || '', f.file_name), 
+          fullPath: resolveMediaFullPath(f.folder_path, f.file_name), 
           mimeType: f.mime_type 
         }, { priority: 2 })
       )).catch(err => console.error('Failed to queue metadata jobs', err));
 
       Promise.all(missingThumbs.map((f: any) => {
-        const fPath = path.join(MEDIA_ROOT, f.folder_path || '', f.file_name);
+        const fPath = resolveMediaFullPath(f.folder_path, f.file_name);
         if (f.mime_type.startsWith('video/')) {
           return videoQueue.add('process-video', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
         } else {
@@ -564,8 +567,18 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
 
     // Fetch folder contents
+    const viewParam = ((request.query as any)?.view as string)?.toLowerCase();
+    const effectiveView = viewParam || share.default_staging_view || 'curated';
+    const curatedFilter = effectiveView === 'curated' ? 'AND (is_hero = true OR burst_group_id IS NULL)' : '';
+
     const filesResult = await query(
-      `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
+      `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, 
+              is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height, is_staged,
+              burst_group_id, is_hero, quality_score, face_count,
+              COALESCE((SELECT COUNT(*)::int FROM media_files b WHERE b.burst_group_id = media_files.burst_group_id), 1) as burst_count
+       FROM media_files 
+       WHERE folder_path = $1 AND (is_hidden_staging = false OR is_hidden_staging IS NULL) ${curatedFilter}
+       ORDER BY file_name ASC`, 
       [targetPath]
     );
     const files = filesResult.rows;
@@ -576,13 +589,13 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     Promise.all(missingMetadata.map((f: any) => 
       metadataQueue.add('extract-metadata', { 
         mediaId: f.id, 
-        fullPath: path.join(MEDIA_ROOT, f.folder_path || '', f.file_name), 
+        fullPath: resolveMediaFullPath(f.folder_path, f.file_name), 
         mimeType: f.mime_type 
       }, { priority: 2 })
     )).catch(err => console.error('Failed to queue metadata jobs', err));
 
     Promise.all(missingThumbs.map((f: any) => {
-      const fPath = path.join(MEDIA_ROOT, f.folder_path || '', f.file_name);
+      const fPath = resolveMediaFullPath(f.folder_path, f.file_name);
       if (f.mime_type.startsWith('video/')) {
         return videoQueue.add('process-video', { mediaId: f.id, fullPath: fPath, mimeType: f.mime_type }, { priority: 2 });
       } else {
@@ -797,6 +810,20 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       if (r.key === 'default_share_folder_view_mode') shareDefaults.defaultShareFolderViewMode = r.value;
     }
 
+    let isStagedFolder = false;
+    let stagingNotice = null;
+    if (targetPath) {
+      const stagedCheck = await query(`
+        SELECT 1 FROM media_files 
+        WHERE (folder_path = $1 OR folder_path LIKE $1 || '/%') AND is_staged = true 
+        LIMIT 1
+      `, [targetPath]).catch(() => ({ rows: [] }));
+      isStagedFolder = stagedCheck.rows.length > 0;
+      if (isStagedFolder) {
+        stagingNotice = await FastUpService.getStagingNotice();
+      }
+    }
+
     return reply.send({
       share,
       files: filesResult.rows,
@@ -806,6 +833,8 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       folderCoverImgWidth,
       folderCoverImgHeight,
       folderDescription,
+      isStagedFolder,
+      stagingNotice,
       folderPath: targetPath,
       baseFolderPath,
       defaultShareViewMode: shareDefaults.defaultShareViewMode,
@@ -815,6 +844,92 @@ export async function sharesRoutes(fastify: FastifyInstance) {
   }
 
   fastify.get<{ Params: { token: string } }>('/api/shares/:token', handleShareGet);
+
+  /**
+   * GET /api/shares/:token/media/:id/alternates
+   * Fetches peer photos in a burst group under a public share link.
+   */
+  fastify.get<{ Params: { token: string, id: string } }>('/api/shares/:token/media/:id/alternates', async (request, reply) => {
+    const { token, id } = request.params;
+    const shareRes = await query(`SELECT * FROM shared_folders WHERE share_token = $1 AND is_active = true`, [token]);
+    if (shareRes.rows.length === 0) {
+      return reply.status(404).send({ error: 'Share not found' });
+    }
+    const share = shareRes.rows[0];
+    if (share.expires_at && new Date(share.expires_at) <= new Date()) {
+      return reply.status(401).send({ error: 'Share has expired' });
+    }
+    if (share.show_hidden_alternates === false) {
+      return reply.status(403).send({ error: 'Alternate photos are restricted on this share link' });
+    }
+
+    try {
+      const alternates = await StagingService.getAlternates(id);
+      return reply.send({ success: true, alternates });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/shares/:token/media/:id/set-hero
+   * Promotes an alternate photo to Hero if permitted on the share link.
+   */
+  fastify.post<{ Params: { token: string, id: string } }>('/api/shares/:token/media/:id/set-hero', async (request, reply) => {
+    const { token, id } = request.params;
+    const shareRes = await query(`SELECT * FROM shared_folders WHERE share_token = $1 AND is_active = true`, [token]);
+    if (shareRes.rows.length === 0) {
+      return reply.status(404).send({ error: 'Share not found' });
+    }
+    const share = shareRes.rows[0];
+    if (share.expires_at && new Date(share.expires_at) <= new Date()) {
+      return reply.status(401).send({ error: 'Share has expired' });
+    }
+
+    const photogHeader = request.headers['x-photographer-token'] as string | undefined;
+    const isPhotographer = Boolean(photogHeader && photogHeader.trim().startsWith('ph_tok_'));
+    if (!share.allow_hero_selection && !isPhotographer) {
+      return reply.status(403).send({ error: 'Changing hero photo is not permitted for guests' });
+    }
+
+    try {
+      const result = await StagingService.setHero(id);
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/shares/:token/media/:id/toggle-visibility
+   * Toggles show/hide visibility for an alternate photo.
+   */
+  fastify.post<{ Params: { token: string, id: string }; Body: { show?: boolean } }>('/api/shares/:token/media/:id/toggle-visibility', async (request, reply) => {
+    const { token, id } = request.params;
+    const { show } = (request.body || {}) as { show?: boolean };
+    const shareRes = await query(`SELECT * FROM shared_folders WHERE share_token = $1 AND is_active = true`, [token]);
+    if (shareRes.rows.length === 0) {
+      return reply.status(404).send({ error: 'Share not found' });
+    }
+    const share = shareRes.rows[0];
+    if (share.expires_at && new Date(share.expires_at) <= new Date()) {
+      return reply.status(401).send({ error: 'Share has expired' });
+    }
+
+    const photogHeader = request.headers['x-photographer-token'] as string | undefined;
+    const isPhotographer = Boolean(photogHeader && photogHeader.trim().startsWith('ph_tok_'));
+    if (!share.allow_hero_selection && !isPhotographer) {
+      return reply.status(403).send({ error: 'Modifying photo visibility is not permitted for guests' });
+    }
+
+    try {
+      const result = await StagingService.toggleVisibility(id, show);
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
   fastify.get<{ Params: { token: string, '*': string } }>('/api/shares/:token/*', handleShareGet);
 
   fastify.get<{ Params: { '*': string } }>('/api/shares/folder/*', { preHandler: requireAuth }, async (request, reply) => {

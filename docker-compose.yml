@@ -10,6 +10,8 @@ services:
     environment:
       - NODE_ENV=production
       - BACKEND_PROXY_URL=http://backend:3000
+      - BODY_SIZE_LIMIT=500M
+      - PROTOCOL_HEADER=x-forwarded-proto
     depends_on:
       - backend
     mem_limit: 1g
@@ -24,6 +26,8 @@ services:
     image: ghcr.io/kahmeng15/hellomyphotos/backend:latest
     build:
       context: ./backend
+    ports:
+      - "3000:3000"
     env_file: .env
     environment:
       - LIBVA_DRIVER_NAME=radeonsi
@@ -35,6 +39,7 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
+      - ./volumes/staging_rw:/app/staging:rw
       - ./volumes/geoip:/app/geoip:rw
     group_add:
       - video
@@ -65,6 +70,7 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
+      - ./volumes/staging_rw:/app/staging:rw
       - ./volumes/geoip:/app/geoip:rw
     group_add:
       - video

@@ -35,7 +35,7 @@
 
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Play } from '@lucide/svelte';
+  import { Play, Layers } from '@lucide/svelte';
 
   let { 
     hash, 
@@ -53,7 +53,9 @@
     targetHeight = 250, 
     priority = false, 
     onclick, 
-    initialAspectRatio 
+    initialAspectRatio,
+    isStaged = false,
+    burstCount = 0
   }: { 
     hash: string, 
     src: string, 
@@ -70,7 +72,9 @@
     targetHeight?: number, 
     priority?: boolean, 
     onclick?: (e: MouseEvent) => void, 
-    initialAspectRatio?: number 
+    initialAspectRatio?: number,
+    isStaged?: boolean,
+    burstCount?: number
   } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
@@ -215,6 +219,12 @@
       <Play size={16} fill="white" />
     </div>
   {/if}
+  {#if burstCount && burstCount > 1}
+    <div class="burst-indicator" title="{burstCount} shots in burst stack">
+      <Layers size={11} strokeWidth={2.5} />
+      <span>{burstCount}</span>
+    </div>
+  {/if}
   {#if showFileName && (fileName || alt)}
     <div class="file-name {isVideo ? 'with-video' : ''}" title={fileName || alt}>
       <span>{fileName || alt}</span>
@@ -223,6 +233,27 @@
 </div>
 
 <style>
+  .burst-indicator {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 5;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #f1f5f9;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 12px;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
   .grid-item {
     cursor: pointer;
     overflow: hidden;

@@ -8,6 +8,19 @@
     <p>Manage system configurations, user access, and background pipelines.</p>
   </div>
 
+  <a href="/admin/fastup" class="card link-card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(99, 102, 241, 0.12)); border-color: rgba(56, 189, 248, 0.35);">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.35rem;">
+          <h3 style="margin: 0; color: #f8fafc;">FastUp Live Ingest & Staging</h3>
+          <span style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 999px;">Tethering</span>
+        </div>
+        <p style="margin: 0; color: #a1a1aa; font-size: 0.9rem;">Generate photographer 6-digit OTPs, view live storage & upload stats, match out-of-band photos via EXIF, relink folders, and purge staging.</p>
+      </div>
+      <ChevronRight color="#38bdf8" size={24} />
+    </div>
+  </a>
+
   <a href="/admin/users" class="card link-card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1)); border-color: rgba(168, 85, 247, 0.3);">
     <div style="display: flex; justify-content: space-between; align-items: center;">
       <div>

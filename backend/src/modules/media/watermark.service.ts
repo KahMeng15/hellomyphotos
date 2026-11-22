@@ -54,6 +54,7 @@ const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolv
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 const defaultMediaDir = fs.existsSync('/app/media') ? '/app/media' : path.resolve(process.cwd(), '../volumes/media_ro');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || defaultMediaDir);
+import { STAGING_ROOT } from '../../utils/mediaPath';
 
 const FONTS_DIR = path.resolve(import.meta.dirname, '../../assets/fonts');
 
@@ -936,7 +937,7 @@ export class WatermarkService {
     targetFormat: 'webp' | 'jpeg' | 'png' = 'webp'
   ): Promise<Buffer> {
     const resolvedPath = path.resolve(imagePath);
-    if (!resolvedPath.startsWith(CACHE_ROOT) && !resolvedPath.startsWith(MEDIA_ROOT)) {
+    if (!resolvedPath.startsWith(CACHE_ROOT) && !resolvedPath.startsWith(MEDIA_ROOT) && !resolvedPath.startsWith(STAGING_ROOT)) {
       throw new Error('Access denied to image path');
     }
 

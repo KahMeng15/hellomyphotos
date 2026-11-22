@@ -381,6 +381,51 @@ const SCHEMA_STATEMENTS = [
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_analytics_created ON media_analytics(created_at)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_shared_folders_token ON shared_folders(share_token)`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_shared_folders_active_expires ON shared_folders(is_active, expires_at)`,
+  // ---- FastUp Live Ingest & Photographer Management ----
+  `CREATE TABLE IF NOT EXISTS photographer_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    token VARCHAR(64) UNIQUE NOT NULL,
+    otp_code VARCHAR(16),
+    otp_expires_at TIMESTAMP WITH TIME ZONE,
+    photographer_name VARCHAR(100) NOT NULL,
+    folder_path TEXT NOT NULL,
+    settings_json JSONB DEFAULT '{}'::jsonb,
+    is_active BOOLEAN DEFAULT true,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    last_seen_at TIMESTAMP WITH TIME ZONE,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_photographer_otp ON photographer_tokens(otp_code) WHERE is_active = true`,
+  `CREATE INDEX IF NOT EXISTS idx_photographer_token ON photographer_tokens(token) WHERE is_active = true`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='is_hidden_staging') THEN ALTER TABLE media_files ADD COLUMN is_hidden_staging BOOLEAN DEFAULT false; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='matched_media_id') THEN ALTER TABLE media_files ADD COLUMN matched_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_settings' AND column_name='hide_staging') THEN ALTER TABLE folder_settings ADD COLUMN hide_staging BOOLEAN DEFAULT false; END IF; END $$;`,
+  `CREATE TABLE IF NOT EXISTS fastup_activity_logs (
+    id BIGSERIAL PRIMARY KEY,
+    event_type VARCHAR(50) NOT NULL,
+    photographer_name VARCHAR(100),
+    folder_path TEXT,
+    file_name TEXT,
+    file_size_bytes BIGINT,
+    ip_address VARCHAR(45),
+    status VARCHAR(30) NOT NULL,
+    details JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_fastup_activity_created ON fastup_activity_logs(created_at DESC)`,
+  // ---- FastUp Burst Curation & Staging Dual-View ----
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='burst_group_id') THEN ALTER TABLE media_files ADD COLUMN burst_group_id UUID; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='is_hero') THEN ALTER TABLE media_files ADD COLUMN is_hero BOOLEAN DEFAULT true; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='quality_score') THEN ALTER TABLE media_files ADD COLUMN quality_score REAL; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='face_count') THEN ALTER TABLE media_files ADD COLUMN face_count INTEGER DEFAULT 0; END IF; END $$;`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_burst_group ON media_files(burst_group_id) WHERE is_staged = true`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_staging_curated ON media_files(folder_path, is_hero) WHERE is_staged = true`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_view_mode_toggle') THEN ALTER TABLE shared_folders ADD COLUMN allow_view_mode_toggle BOOLEAN DEFAULT true; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='show_hidden_alternates') THEN ALTER TABLE shared_folders ADD COLUMN show_hidden_alternates BOOLEAN DEFAULT true; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_hero_selection') THEN ALTER TABLE shared_folders ADD COLUMN allow_hero_selection BOOLEAN DEFAULT false; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='default_staging_view') THEN ALTER TABLE shared_folders ADD COLUMN default_staging_view VARCHAR(20) DEFAULT 'curated'; END IF; END $$;`,
+
 ];
 
 // Statements not yet successfully applied. Succeeded ones are dropped so they

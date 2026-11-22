@@ -14,6 +14,7 @@ const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 
 const defaultMediaDir = fs.existsSync('/app/media') ? '/app/media' : path.resolve(process.cwd(), '../volumes/media_ro');
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || defaultMediaDir);
+import { resolveMediaFullPath } from '../../utils/mediaPath';
 
 import { verifyMediaAccess } from '../../utils/auth';
 import { thumbnailQueue } from '../../queue/thumbnailQueue';
@@ -122,7 +123,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     const result = await query(`SELECT folder_path, file_name, mime_type FROM media_files WHERE id = $1`, [safeId]);
     if (result.rows.length > 0) {
       const file = result.rows[0];
-      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+      const fullPath = resolveMediaFullPath(file.folder_path, file.file_name);
       
       // Enqueue high-priority job for missing thumbnail
       if (file.mime_type.startsWith('video/')) {
@@ -263,7 +264,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     const result = await query(`SELECT folder_path, file_name, mime_type FROM media_files WHERE id = $1`, [safeId]);
     if (result.rows.length > 0) {
       const file = result.rows[0];
-      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+      const fullPath = resolveMediaFullPath(file.folder_path, file.file_name);
       
       // Enqueue high-priority job for missing preview
       if (file.mime_type.startsWith('video/')) {
@@ -307,7 +308,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     if (result.rows.length === 0) return reply.status(404).send({ error: 'File not found' });
     
     const file = result.rows[0];
-    const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+    const fullPath = resolveMediaFullPath(file.folder_path, file.file_name);
     
     if (!fs.existsSync(fullPath)) return reply.status(404).send({ error: 'Source file missing' });
 
@@ -490,8 +491,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
       
       // Re-queue
       const { videoQueue } = await import('../../queue/videoQueue');
-      const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || '/app/media');
-      const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+      const fullPath = resolveMediaFullPath(file.folder_path, file.file_name);
       
       await videoQueue.add('process-video', { mediaId: id, fullPath, mimeType: file.mime_type, skipCascade: true }, { priority: 1 }).catch(() => {});
       
@@ -510,7 +510,7 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     if (result.rows.length === 0) return reply.status(404).send({ error: 'File not found' });
 
     const file = result.rows[0];
-    const fullPath = path.join(MEDIA_ROOT, file.folder_path, file.file_name);
+    const fullPath = resolveMediaFullPath(file.folder_path, file.file_name);
     if (!fs.existsSync(fullPath)) return reply.status(404).send({ error: 'Source file missing' });
 
     try {

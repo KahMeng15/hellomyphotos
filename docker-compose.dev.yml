@@ -37,6 +37,7 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
+      - ./volumes/staging_rw:/app/staging:rw
       - ./backend:/app
       - /app/node_modules
       - ./volumes/geoip:/app/geoip:rw
@@ -63,6 +64,7 @@ services:
     volumes:
       - ./volumes/media_ro:/app/media:ro
       - ./volumes/cache_rw:/app/cache:rw
+      - ./volumes/staging_rw:/app/staging:rw
       - ./backend:/app
       - /app/node_modules
       - ./volumes/geoip:/app/geoip:rw

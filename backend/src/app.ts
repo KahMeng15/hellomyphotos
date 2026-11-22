@@ -8,8 +8,11 @@ import { queueRoutes } from './modules/admin/queue.routes';
 import { timelineRoutes } from './modules/timeline/timeline.routes';
 import { watermarkRoutes } from './modules/admin/watermark.routes';
 import { authRoutes } from './modules/auth/auth.routes';
+import { stagingRoutes } from './modules/staging/staging.routes';
+import { fastupRoutes } from './modules/admin/fastup.routes';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
+import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import './queue';
 
@@ -71,7 +74,7 @@ app.register(cors, {
     return cb(null, false);
   },
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-password'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-password', 'x-api-key', 'x-staging-key', 'x-photographer-token', 'x-session-id', 'x-forwarded-proto'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
 });
 
@@ -83,6 +86,13 @@ const COOKIE_SECRET = process.env.COOKIE_SECRET || (
 
 app.register(cookie, {
   secret: COOKIE_SECRET,
+});
+
+app.register(multipart, {
+  limits: {
+    fileSize: 150 * 1024 * 1024, // 150MB per file to handle high-resolution RAW & video
+    files: 20
+  }
 });
 
 import { DEVICE_COOKIE_NAME, getClientDeviceId } from './utils/getDeviceId';
@@ -133,6 +143,8 @@ app.register(queueRoutes);
 app.register(timelineRoutes);
 app.register(watermarkRoutes);
 app.register(analyticsRoutes);
+app.register(stagingRoutes);
+app.register(fastupRoutes);
 
 // Frontend log ingest (used by frontendLogger utility)
 app.post('/api/log', async (request, reply) => {

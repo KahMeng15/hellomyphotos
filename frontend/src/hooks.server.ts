@@ -12,11 +12,19 @@ export const handle: Handle = async ({ event, resolve }) => {
       'authorization',
       'cookie',
       'x-admin-password',
+      'x-api-key',
+      'x-staging-key',
+      'x-photographer-token',
+      'x-session-id',
+      'x-forwarded-proto',
       'user-agent',
       'referer',
       'range',
       'cf-connecting-ip',
-      'x-real-ip'
+      'x-real-ip',
+      'x-device-ip',
+      'x-client-ip',
+      'x-client-local-ip'
     ]) {
       const value = event.request.headers.get(name);
       if (value) headers.set(name, value);

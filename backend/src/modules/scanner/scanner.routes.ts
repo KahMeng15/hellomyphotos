@@ -13,8 +13,9 @@ import { requireAuth, hasFolderAccess, canBrowseFolder } from '../../utils/auth'
 import { logger } from '../../utils/logger';
 import { WatermarkService } from '../media/watermark.service';
 import { CacheTrackerService } from '../media/cacheTracker.service';
-
-const MEDIA_ROOT = process.env.MEDIA_ROOT || '/app/media';
+import { FastUpService } from '../staging/fastup.service';
+import { StagingService } from '../staging/staging.service';
+import { MEDIA_ROOT, STAGING_ROOT, resolveMediaFullPath } from '../../utils/mediaPath';
 
 function profileLabel(folder: string, step: string) {
   return `[FOLDER_PROFILE] ${JSON.stringify(folder)} :: ${step}`;
@@ -531,13 +532,26 @@ export async function scannerRoutes(fastify: FastifyInstance) {
 
     // 3. Serve Directory Tree from DB
     const result = await query(
-      `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height FROM media_files WHERE folder_path = $1 ORDER BY file_name ASC`, 
+      `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, 
+              is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height, 
+              is_staged, is_hidden_staging, burst_group_id, is_hero, quality_score, face_count,
+              COALESCE((SELECT COUNT(*)::int FROM media_files b WHERE b.burst_group_id = media_files.burst_group_id), 1) as burst_count
+       FROM media_files 
+       WHERE folder_path = $1 AND (is_hidden_staging = false OR is_hidden_staging IS NULL) 
+       ORDER BY file_name ASC`, 
       [folder]
     );
     let files = result.rows;
     if (!hasFolderAccess(request.user!, folder)) {
       files = []; // Cannot see files in ancestor folders
     } else {
+      if (folder && files.length > 1) {
+        const needsBurstEval = files.some(f => f.burst_group_id === null && f.quality_score === null);
+        if (needsBurstEval) {
+          StagingService.scheduleBurstClustering(folder);
+        }
+      }
+
       // Prioritize processing for files in this actively navigated folder
       const missingMetadata = files.filter(f => f.exif_json == null);
       const missingThumbs = files.filter(f => !f.has_480p || !f.has_1080p);
@@ -545,13 +559,13 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       Promise.all(missingMetadata.map(f => 
         metadataQueue.add('extract-metadata', { 
           mediaId: f.id, 
-          fullPath: path.join(MEDIA_ROOT, f.folder_path || '', f.file_name), 
+          fullPath: resolveMediaFullPath(f.folder_path, f.file_name), 
           mimeType: f.mime_type 
         }, { priority: 2 })
       )).catch(err => logger.error('Failed to queue high-priority metadata jobs', err));
 
       Promise.all(missingThumbs.map(f => {
-        const fullPath = path.join(MEDIA_ROOT, f.folder_path || '', f.file_name);
+        const fullPath = resolveMediaFullPath(f.folder_path, f.file_name);
         if (f.mime_type.startsWith('video/')) {
           return videoQueue.add('process-video', { mediaId: f.id, fullPath, mimeType: f.mime_type }, { priority: 2 });
         } else {
@@ -563,12 +577,14 @@ export async function scannerRoutes(fastify: FastifyInstance) {
 
     // 4. Dynamically list subdirectories and find their cover images
     const resolvedMediaRoot = path.resolve(MEDIA_ROOT);
+    const resolvedStagingRoot = path.resolve(STAGING_ROOT);
     const cleanFolder = path.normalize(folder || '').replace(/^(\.\.[\/\\])+/, '');
-    const fullPath = path.resolve(resolvedMediaRoot, cleanFolder);
-    if (!fullPath.startsWith(resolvedMediaRoot)) {
+    const mediaFullPath = path.resolve(resolvedMediaRoot, cleanFolder);
+    const stagingFullPath = path.resolve(resolvedStagingRoot, cleanFolder);
+    if (!mediaFullPath.startsWith(resolvedMediaRoot) && !stagingFullPath.startsWith(resolvedStagingRoot)) {
       return reply.status(400).send({ error: 'Invalid folder path' });
     }
-    let directories: { name: string, cover_id: string | null, blurhash: string | null, cover_bounding_box?: any, cover_img_width?: number | null, cover_img_height?: number | null }[] = [];
+    let directories: { name: string, cover_id: string | null, blurhash: string | null, cover_bounding_box?: any, cover_img_width?: number | null, cover_img_height?: number | null, is_staged?: boolean }[] = [];
     let hostError: string | null = null;
     const cacheKey = `folder_dirs_v2:${folder}`;
 
@@ -627,17 +643,29 @@ export async function scannerRoutes(fastify: FastifyInstance) {
 
         // Fallback to filesystem if DB returned 0 directories (e.g. unindexed on disk)
         if (dirNames.length === 0) {
+          const dirSet = new Set<string>();
           try {
-            const items = await fs.promises.readdir(fullPath, { withFileTypes: true });
-            dirNames = items
-              .filter(item => item.isDirectory() && !item.name.startsWith('.'))
-              .map(item => item.name);
+            if (fs.existsSync(mediaFullPath)) {
+              const items = await fs.promises.readdir(mediaFullPath, { withFileTypes: true });
+              items.filter(item => item.isDirectory() && !item.name.startsWith('.')).forEach(i => dirSet.add(i.name));
+            }
           } catch (e: any) {
             if (e.code !== 'ENOENT') {
-              console.error('Failed to read directory:', fullPath, e);
-              hostError = `Storage access error: ${e.message}`;
+              console.error('Failed to read media directory:', mediaFullPath, e);
             }
           }
+
+          try {
+            if (fs.existsSync(stagingFullPath)) {
+              const items = await fs.promises.readdir(stagingFullPath, { withFileTypes: true });
+              items.filter(item => item.isDirectory() && !item.name.startsWith('.')).forEach(i => dirSet.add(i.name));
+            }
+          } catch (e: any) {
+            if (e.code !== 'ENOENT') {
+              console.error('Failed to read staging directory:', stagingFullPath, e);
+            }
+          }
+          dirNames = Array.from(dirSet);
         }
 
         const validDirNames = dirNames.filter(name => {
@@ -712,6 +740,15 @@ export async function scannerRoutes(fastify: FastifyInstance) {
             }
           }
 
+          // Check which subdirectories contain staged files
+          let stagedSet = new Set<string>();
+          try {
+            const stagedDirsRes = folder === ''
+              ? await query(`SELECT DISTINCT split_part(folder_path, '/', 1) AS dir_name FROM media_files WHERE is_staged = true AND folder_path != ''`)
+              : await query(`SELECT DISTINCT split_part(substring(folder_path from length($1) + 2), '/', 1) AS dir_name FROM media_files WHERE folder_path LIKE $2 ESCAPE '\\' AND is_staged = true`, [folder, `${folder.replace(/([%_\\])/g, '\\$1')}/%`]);
+            stagedSet = new Set(stagedDirsRes.rows.map(r => r.dir_name));
+          } catch {}
+
           directories = validDirNames.map(name => {
             const subPath = folder ? `${folder}/${name}` : name;
             const cover = coverMap.get(subPath);
@@ -721,7 +758,8 @@ export async function scannerRoutes(fastify: FastifyInstance) {
               blurhash: cover?.blurhash || null,
               cover_bounding_box: cover?.bounding_box || null,
               cover_img_width: cover?.img_width || null,
-              cover_img_height: cover?.img_height || null
+              cover_img_height: cover?.img_height || null,
+              is_staged: stagedSet.has(name)
             };
           });
           directories.sort((a, b) => a.name.localeCompare(b.name));
@@ -835,6 +873,22 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     `, [folder || '', `${escapedFolderForProc}/%`]);
     const isProcessing = processingRes.rows.length > 0;
     mark('6_processing_count');
+
+    // Check if current folder contains live staging files from FastUp
+    let isStagedFolder = false;
+    let stagingNotice = null;
+    if (folder) {
+      const stagedCheck = await query(`
+        SELECT 1 FROM media_files 
+        WHERE (folder_path = $1 OR folder_path LIKE $1 || '/%') AND is_staged = true 
+        LIMIT 1
+      `, [folder]).catch(() => ({ rows: [] }));
+      isStagedFolder = stagedCheck.rows.length > 0;
+      if (isStagedFolder) {
+        stagingNotice = await FastUpService.getStagingNotice();
+      }
+    }
+
     mark('total');
 
     return reply.send({
@@ -845,6 +899,8 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       folderCoverImgWidth,
       folderCoverImgHeight,
       folderDescription,
+      isStagedFolder,
+      stagingNotice,
       scanning: !exists, // Indicate if a scan was just triggered
       files,
       directories,
@@ -854,6 +910,22 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       defaultFolderViewMode: defaults.defaultFolderViewMode
     });
   };
+
+  fastify.post<{ Body: { folder: string, recursive?: boolean } }>('/api/folder/evaluate-bursts', { preHandler: requireAuth }, async (request, reply) => {
+    const { folder, recursive } = request.body || {};
+    if (!folder) {
+      return reply.status(400).send({ error: 'Folder path is required' });
+    }
+    if (!hasFolderAccess(request.user!, folder)) {
+      return reply.status(403).send({ error: 'Forbidden' });
+    }
+    if (recursive) {
+      await StagingService.evaluateBurstsRecursively(folder);
+    } else {
+      await StagingService.evaluateBurstsForFolder(folder);
+    }
+    return reply.send({ success: true });
+  });
 
   fastify.get<{ Params: { '*'?: string }, Querystring: { q?: string } }>('/api/folder', { preHandler: requireAuth }, handleFolderGet);
   fastify.get<{ Params: { '*'?: string }, Querystring: { q?: string } }>('/api/folder/*', { preHandler: requireAuth }, handleFolderGet);

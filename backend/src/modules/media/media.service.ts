@@ -79,19 +79,95 @@ export class MediaService {
       };
 
       // 1. Generate 1080p WebP preview (max 1920x1080, quality 80)
-      let preview1080: Buffer;
+      let preview1080!: Buffer;
       try {
         preview1080 = await sharp(sharpInput, { unlimited: true })
           .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 80 })
           .toBuffer();
       } catch (err: any) {
-        if (!isHeic) throw err;
-        sharpInput = await runHeicFallback();
-        preview1080 = await sharp(sharpInput, { unlimited: true })
-          .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
-          .webp({ quality: 80 })
-          .toBuffer();
+        if (!isHeic) {
+          // If Sharp failed, attempt to extract high-res embedded preview from camera RAW (ARW, CR2, CR3, NEF, DNG, etc.)
+          let rawExtracted = false;
+          try {
+            const rawFileBuf = await fs.promises.readFile(fullPath);
+            let previewBuffer: Buffer | null = null;
+
+            // 1. Try parsing IFD0 ThumbnailOffset & ThumbnailLength (Sony ARW / TIFF standard for HD preview)
+            try {
+              const exifrModule = await import('exifr');
+              const exifr = exifrModule.default || exifrModule;
+              const parsed = await exifr.parse(rawFileBuf.subarray(0, 512 * 1024), {
+                tiff: true,
+                mergeOutput: false
+              });
+              if (parsed?.ifd0?.ThumbnailOffset && parsed?.ifd0?.ThumbnailLength) {
+                const offset = Number(parsed.ifd0.ThumbnailOffset);
+                const len = Number(parsed.ifd0.ThumbnailLength);
+                if (len > 20 * 1024 && offset + len <= rawFileBuf.length) {
+                  previewBuffer = rawFileBuf.subarray(offset, offset + len);
+                }
+              }
+            } catch {}
+
+            // 2. Scan first 8MB for largest embedded JPEG stream (fallback if IFD0 tags absent)
+            if (!previewBuffer) {
+              const maxScan = Math.min(rawFileBuf.length, 8 * 1024 * 1024);
+              let bestStart = -1;
+              let bestLen = 0;
+              let p = 0;
+              while (p < maxScan - 4) {
+                if (rawFileBuf[p] === 0xFF && rawFileBuf[p + 1] === 0xD8 && rawFileBuf[p + 2] === 0xFF) {
+                  let eoi = -1;
+                  for (let q = p + 2; q < maxScan - 1; q++) {
+                    if (rawFileBuf[q] === 0xFF && rawFileBuf[q + 1] === 0xD9) {
+                      eoi = q + 2;
+                      break;
+                    }
+                  }
+                  if (eoi !== -1) {
+                    const len = eoi - p;
+                    if (len > bestLen) {
+                      bestLen = len;
+                      bestStart = p;
+                    }
+                    p = eoi;
+                    continue;
+                  }
+                }
+                p++;
+              }
+              if (bestStart !== -1 && bestLen > 20 * 1024) {
+                previewBuffer = rawFileBuf.subarray(bestStart, bestStart + bestLen);
+              }
+            }
+
+            // 3. Fallback to standard exifr.thumbnail() if nothing larger was found
+            if (!previewBuffer) {
+              const exifrModule = await import('exifr');
+              const exifr = exifrModule.default || exifrModule;
+              const thumb = await exifr.thumbnail(rawFileBuf);
+              previewBuffer = thumb ? Buffer.from(thumb) : null;
+            }
+
+            if (previewBuffer && previewBuffer.length > 0) {
+              preview1080 = await sharp(previewBuffer, { unlimited: true })
+                .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
+                .webp({ quality: 80 })
+                .toBuffer();
+              rawExtracted = true;
+            }
+          } catch (rawErr: any) {
+            console.warn(`[MediaService] RAW preview extraction error for ${fullPath}:`, rawErr.message);
+          }
+          if (!rawExtracted) throw err;
+        } else {
+          sharpInput = await runHeicFallback();
+          preview1080 = await sharp(sharpInput, { unlimited: true })
+            .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
+            .webp({ quality: 80 })
+            .toBuffer();
+        }
       }
       await fs.promises.writeFile(out1080, preview1080);
       CacheTrackerService.recordWrite('1080p', preview1080.length).catch(() => {});
@@ -121,11 +197,18 @@ export class MediaService {
       );
 
       // 4. Save blurhash, has_1080p, has_480p status to media_files DB table
+      const meta = await sharp(preview1080).metadata();
+      const metaWidth = meta.width || null;
+      const metaHeight = meta.height || null;
+
       await query(
         `UPDATE media_files 
-         SET blurhash = $1, has_1080p = true, has_480p = true, processing_error = NULL, updated_at = NOW() 
+         SET blurhash = $1, has_1080p = true, has_480p = true, 
+             img_width = COALESCE(img_width, $3),
+             img_height = COALESCE(img_height, $4),
+             processing_error = NULL, updated_at = NOW() 
          WHERE id = $2`,
-        [bHash, mediaId]
+        [bHash, mediaId, metaWidth, metaHeight]
       );
 
       return { blurhash: bHash, has1080p: true, has480p: true };
