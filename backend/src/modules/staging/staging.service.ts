@@ -252,6 +252,29 @@ export class StagingService {
       console.warn(`[Staging] BullMQ dispatch warning for ${safeFileName}:`, err.message);
     });
 
+    // Also trigger Google Drive upload if an active sync exists for this staging session
+    if (safeFileName.toLowerCase().endsWith('.jpg') || safeFileName.toLowerCase().endsWith('.jpeg')) {
+      query(
+        `SELECT id, account_id, gdrive_folder_id FROM folder_gdrive_syncs 
+         WHERE folder_path = $1 AND source_type = 'FASTUP' AND is_active = true`,
+        [folderPath]
+      ).then(res => {
+        if (res.rows.length > 0) {
+          const sync = res.rows[0];
+          import('../../queue/gdriveSyncQueue').then(({ gdriveSyncQueue }) => {
+            gdriveSyncQueue.add('upload-file', {
+              type: 'upload-file',
+              syncId: sync.id,
+              accountId: sync.account_id,
+              gdriveFolderId: sync.gdrive_folder_id,
+              localFilePath: targetFilePath,
+              fileName: safeFileName
+            }).catch(e => console.warn(`[Staging GDrive] Failed to queue upload for ${safeFileName}:`, e.message));
+          });
+        }
+      }).catch(() => {});
+    }
+
     // Also trigger thumbnail generation immediately as fallback if running without worker
     if (process.env.DISABLE_WORKER === 'true' && !process.env.IS_WORKER) {
       MediaService.processImage(mediaId, targetFilePath).catch(() => {});

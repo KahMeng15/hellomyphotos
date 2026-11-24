@@ -426,6 +426,43 @@ const SCHEMA_STATEMENTS = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_hero_selection') THEN ALTER TABLE shared_folders ADD COLUMN allow_hero_selection BOOLEAN DEFAULT false; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='default_staging_view') THEN ALTER TABLE shared_folders ADD COLUMN default_staging_view VARCHAR(20) DEFAULT 'curated'; END IF; END $$;`,
 
+  // ---- Google Drive Integration ----
+  `CREATE TABLE IF NOT EXISTS google_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) NOT NULL,
+    label VARCHAR(255),
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    token_expiry TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  )`,
+  `CREATE TABLE IF NOT EXISTS folder_gdrive_syncs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID REFERENCES google_accounts(id) ON DELETE CASCADE,
+    source_type VARCHAR(50) NOT NULL DEFAULT 'MEDIA',
+    folder_path TEXT NOT NULL,
+    gdrive_folder_id TEXT NOT NULL,
+    gdrive_folder_name TEXT NOT NULL,
+    gdrive_link TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT true,
+    auto_sync BOOLEAN DEFAULT true,
+    sync_status VARCHAR(50) DEFAULT 'IDLE',
+    last_synced_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (folder_path, source_type)
+  )`,
+  `CREATE TABLE IF NOT EXISTS gdrive_synced_files (
+    sync_id UUID REFERENCES folder_gdrive_syncs(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    file_size BIGINT NOT NULL,
+    gdrive_file_id TEXT NOT NULL,
+    synced_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (sync_id, file_name)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_folder_gdrive_syncs_path ON folder_gdrive_syncs(folder_path, source_type)`,
+
 ];
 
 // Statements not yet successfully applied. Succeeded ones are dropped so they

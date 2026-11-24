@@ -10,6 +10,7 @@ import { watermarkRoutes } from './modules/admin/watermark.routes';
 import { authRoutes } from './modules/auth/auth.routes';
 import { stagingRoutes } from './modules/staging/staging.routes';
 import { fastupRoutes } from './modules/admin/fastup.routes';
+import { gdriveRoutes } from './modules/gdrive/gdrive.routes';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
@@ -145,6 +146,7 @@ app.register(watermarkRoutes);
 app.register(analyticsRoutes);
 app.register(stagingRoutes);
 app.register(fastupRoutes);
+app.register(gdriveRoutes);
 
 // Frontend log ingest (used by frontendLogger utility)
 app.post('/api/log', async (request, reply) => {

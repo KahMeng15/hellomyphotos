@@ -936,6 +936,34 @@ export class FastUpService {
       await deleteKeysByPattern('share:dirs:*');
     } catch {}
 
+    // 4. Update Google Drive sync if active: migrate sync record from FASTUP to MEDIA and schedule cleanup
+    try {
+      const gdriveSyncRes = await query(
+        `SELECT id, account_id FROM folder_gdrive_syncs WHERE folder_path = $1 AND source_type = 'FASTUP'`,
+        [src]
+      );
+      if (gdriveSyncRes.rows.length > 0) {
+        const syncId = gdriveSyncRes.rows[0].id;
+        const accountId = gdriveSyncRes.rows[0].account_id;
+        // Migrate sync record to media target
+        await query(
+          `UPDATE folder_gdrive_syncs 
+           SET folder_path = $1, source_type = 'MEDIA'
+           WHERE id = $2`,
+          [tgt, syncId]
+        );
+        // Queue cleanup of any missing photos in Google Drive
+        const { gdriveSyncQueue } = await import('../../queue/gdriveSyncQueue');
+        await gdriveSyncQueue.add('reconcile-cleanup', {
+          type: 'reconcile-cleanup',
+          syncId,
+          accountId
+        });
+      }
+    } catch (e: any) {
+      console.warn('[FastUp Reconcile] GDrive migration notice:', e.message);
+    }
+
     return {
       success: true,
       sourceStagingPath: src,

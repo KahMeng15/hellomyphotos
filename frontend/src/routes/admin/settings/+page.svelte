@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Settings, Cpu, HardDrive, ShieldCheck, Save, Clock, Eye } from '@lucide/svelte';
+  import { ChevronLeft, Settings, Cpu, HardDrive, ShieldCheck, Save, Clock, Eye, Cloud, Trash2, CheckCircle, AlertTriangle } from '@lucide/svelte';
   import { toast } from '$lib/stores/toast';
+  import { listGoogleAccounts, disconnectGoogleAccount, getGoogleAuthUrl, type GoogleAccount } from '$lib/api/gdrive';
+  import { page } from '$app/state';
 
   let settings = $state<any>({
     mlConfidenceThreshold: 0.6,
@@ -15,6 +17,45 @@
 
   let loading = $state(true);
   let saving = $state(false);
+
+  // Google Drive state
+  let googleAccounts = $state<GoogleAccount[]>([]);
+  let loadingGDrive = $state(false);
+  let disconnectingId = $state<string | null>(null);
+
+  async function loadGDriveAccounts() {
+    loadingGDrive = true;
+    try {
+      googleAccounts = await listGoogleAccounts();
+    } catch (e: any) {
+      console.warn('Could not load Google accounts:', e.message);
+    } finally {
+      loadingGDrive = false;
+    }
+  }
+
+  async function handleConnectGoogle() {
+    try {
+      const authUrl = await getGoogleAuthUrl();
+      window.location.href = authUrl;
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to initiate Google OAuth. Ensure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set.');
+    }
+  }
+
+  async function handleDisconnectGoogle(acc: GoogleAccount) {
+    if (!confirm(`Are you sure you want to disconnect Google Account "${acc.email}"?`)) return;
+    disconnectingId = acc.id;
+    try {
+      await disconnectGoogleAccount(acc.id);
+      googleAccounts = googleAccounts.filter(a => a.id !== acc.id);
+      toast.success(`Disconnected ${acc.email}`);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to disconnect account');
+    } finally {
+      disconnectingId = null;
+    }
+  }
 
   async function loadSettings() {
     try {
@@ -30,6 +71,17 @@
 
   onMount(() => {
     loadSettings();
+    loadGDriveAccounts();
+
+    // Check query params for OAuth result
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get('connected')) {
+      toast.success(`Google Account connected: ${searchParams.get('connected')}`);
+      history.replaceState({}, '', window.location.pathname);
+    } else if (searchParams.get('error')) {
+      toast.error(`Google connection failed: ${searchParams.get('error')}`);
+      history.replaceState({}, '', window.location.pathname);
+    }
   });
 
   async function saveSettings() {
@@ -246,6 +298,65 @@
               <option value="list">List</option>
             </select>
           </div>
+        </div>
+      </div>
+
+      <!-- Google Drive Cloud Sync -->
+      <div class="card">
+        <div class="card-header" style="justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <Cloud size={20} class="text-blue" />
+            <h3>Google Drive Accounts</h3>
+          </div>
+          <button class="btn sm" onclick={handleConnectGoogle}>
+            <Cloud size={16} /> Connect Account
+          </button>
+        </div>
+        <div class="card-body">
+          <p class="help">
+            Link Google account(s) to enable live event JPEG sync and shareable Drive links from any folder or FastUp session.
+          </p>
+
+          {#if loadingGDrive}
+            <div style="padding: 1rem; text-align: center; color: #71717a;">Loading accounts...</div>
+          {:else if googleAccounts.length === 0}
+            <div style="padding: 2rem; border: 1px dashed rgba(255,255,255,0.15); border-radius: 8px; text-align: center;">
+              <p style="color: #a1a1aa; margin-bottom: 1rem;">No Google accounts connected yet.</p>
+              <button class="btn secondary sm" onclick={handleConnectGoogle}>
+                Connect First Account
+              </button>
+            </div>
+          {:else}
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+              {#each googleAccounts as acc}
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;">
+                  <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <div style="width: 32px; height: 32px; border-radius: 50%; background: rgba(66,133,244,0.15); display: flex; align-items: center; justify-content: center; color: #60a5fa; font-weight: bold; font-size: 0.85rem;">
+                      G
+                    </div>
+                    <div>
+                      <div style="font-weight: 600; color: #f4f4f5; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem;">
+                        {acc.email}
+                        <span style="font-size: 0.7rem; background: rgba(16,185,129,0.15); color: #10b981; padding: 1px 5px; border-radius: 4px; font-weight: normal;">Connected</span>
+                      </div>
+                      {#if acc.label && acc.label !== acc.email}
+                        <div style="font-size: 0.75rem; color: #a1a1aa;">{acc.label}</div>
+                      {/if}
+                    </div>
+                  </div>
+                  <button 
+                    class="btn sm secondary" 
+                    style="color: #ef4444; border-color: rgba(239,68,68,0.2); padding: 0.3rem 0.6rem;"
+                    onclick={() => handleDisconnectGoogle(acc)}
+                    disabled={disconnectingId === acc.id}
+                  >
+                    <Trash2 size={14} />
+                    {disconnectingId === acc.id ? '...' : 'Disconnect'}
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
       </div>
     </div>

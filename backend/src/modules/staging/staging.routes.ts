@@ -345,7 +345,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
    * GET /api/staging/media/:id/alternates
    * Returns all peer photos in the burst group for the requested media ID.
    */
-  fastify.get<{ Params: { id: string } }>('/api/staging/media/:id/alternates', { preHandler: requireAuth }, async (request, reply) => {
+  fastify.get<{ Params: { id: string } }>('/api/staging/media/:id/alternates', { preHandler: requireStagingAuth }, async (request, reply) => {
     const { id } = request.params;
     if (!id) return reply.status(400).send({ error: 'Media ID required' });
     try {
@@ -360,7 +360,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
    * POST /api/staging/media/:id/set-hero
    * Promotes the specified media ID to be the Hero of its burst group.
    */
-  fastify.post<{ Params: { id: string } }>('/api/staging/media/:id/set-hero', { preHandler: requireAuth }, async (request, reply) => {
+  fastify.post<{ Params: { id: string } }>('/api/staging/media/:id/set-hero', { preHandler: requireStagingAuth }, async (request, reply) => {
     const { id } = request.params;
     if (!id) return reply.status(400).send({ error: 'Media ID required' });
     try {
@@ -375,7 +375,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
    * POST /api/staging/media/:id/toggle-visibility
    * Toggles whether an alternate photo is shown or hidden in curated view.
    */
-  fastify.post<{ Params: { id: string }; Body: { show?: boolean } }>('/api/staging/media/:id/toggle-visibility', { preHandler: requireAuth }, async (request, reply) => {
+  fastify.post<{ Params: { id: string }; Body: { show?: boolean } }>('/api/staging/media/:id/toggle-visibility', { preHandler: requireStagingAuth }, async (request, reply) => {
     const { id } = request.params;
     const { show } = (request.body || {}) as { show?: boolean };
     if (!id) return reply.status(400).send({ error: 'Media ID required' });

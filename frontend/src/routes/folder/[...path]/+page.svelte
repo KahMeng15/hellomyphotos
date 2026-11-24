@@ -17,8 +17,10 @@ import { slide } from 'svelte/transition';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
   import { currentUser } from '$lib/stores/auth';
   import { updatePreferences } from '$lib/api/auth';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2, Sparkles, Layers } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2, Sparkles, Layers, Cloud, ExternalLink, FolderPlus, Pause, Play, QrCode, Unlink } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
+  import { getFolderGDriveSync, enableFolderGDriveSync, triggerFolderGDriveSync, togglePauseFolderGDriveSync, disableFolderGDriveSync, listGoogleAccounts, listGoogleDriveFolders, type FolderSyncInfo, type GoogleAccount } from '$lib/api/gdrive';
+  import QRCode from 'qrcode';
   
   let { data }: { data: PageData } = $props();
 
@@ -27,6 +29,184 @@ import { slide } from 'svelte/transition';
   // Settings Modal State
   let folderDescInput = $state('');
   let isSavingSettings = $state(false);
+
+  // Google Drive Sync State
+  let gdriveSyncInfo = $state<FolderSyncInfo | null>(null);
+  let gdriveAccounts = $state<GoogleAccount[]>([]);
+  let selectedGDriveAccount = $state('');
+  let gdriveFolderNameInput = $state('');
+  let isGDriveLoading = $state(false);
+  let isEnablingGDrive = $state(false);
+  let isSyncingNowGDrive = $state(false);
+  let isDeletingGDrive = $state(false);
+  let gdriveActiveTab: 'sync' | 'new' = $state('sync');
+  let gdriveCopied = $state(false);
+
+  // Folder Google Drive QR Code Modal State
+  let showGDriveQrModal = $state(false);
+  let gdriveQrDataUrl = $state<string | null>(null);
+  let isGeneratingGDriveQr = $state(false);
+
+  async function openGDriveQrModal(link: string) {
+    showGDriveQrModal = true;
+    isGeneratingGDriveQr = true;
+    try {
+      gdriveQrDataUrl = await QRCode.toDataURL(link, {
+        width: 320,
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' }
+      });
+    } catch {
+      gdriveQrDataUrl = null;
+    } finally {
+      isGeneratingGDriveQr = false;
+    }
+  }
+
+  // Remote Drive folder selection
+  let gdriveMode = $state<'new' | 'existing'>('new');
+  let remoteDriveFolders = $state<Array<{ id: string; name: string }>>([]);
+  let selectedExistingDriveFolderId = $state('');
+  let isLoadingRemoteFolders = $state(false);
+  let remoteFolderSearch = $state('');
+
+  async function loadRemoteDriveFolders(accId: string) {
+    if (!accId) return;
+    isLoadingRemoteFolders = true;
+    try {
+      remoteDriveFolders = await listGoogleDriveFolders(accId);
+      if (remoteDriveFolders.length > 0 && !selectedExistingDriveFolderId) {
+        selectedExistingDriveFolderId = remoteDriveFolders[0].id;
+      }
+    } catch (e: any) {
+      console.warn('Failed to load remote Google Drive folders:', e.message);
+    } finally {
+      isLoadingRemoteFolders = false;
+    }
+  }
+
+  let filteredRemoteDriveFolders = $derived(
+    remoteDriveFolders.filter(f => f.name.toLowerCase().includes(remoteFolderSearch.toLowerCase()))
+  );
+
+  async function loadGDriveSync() {
+    if (!data.folderPath) return;
+    isGDriveLoading = true;
+    try {
+      const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
+      const [syncData, accounts] = await Promise.all([
+        getFolderGDriveSync(data.folderPath, srcType),
+        listGoogleAccounts().catch(() => [])
+      ]);
+      gdriveSyncInfo = syncData;
+      gdriveAccounts = accounts;
+      if (accounts.length > 0 && !selectedGDriveAccount) {
+        selectedGDriveAccount = accounts[0].id;
+      }
+      if (!gdriveFolderNameInput) {
+        gdriveFolderNameInput = data.folderPath.split('/').pop() || data.folderPath;
+      }
+      if (selectedGDriveAccount) {
+        loadRemoteDriveFolders(selectedGDriveAccount);
+      }
+    } catch (e: any) {
+      console.warn('Could not load GDrive sync info:', e.message);
+    } finally {
+      isGDriveLoading = false;
+    }
+  }
+
+  async function handleEnableGDriveSync() {
+    if (!selectedGDriveAccount) {
+      toast.error('Please select a Google Account');
+      return;
+    }
+    if (gdriveMode === 'existing' && !selectedExistingDriveFolderId) {
+      toast.error('Please select an existing Google Drive folder');
+      return;
+    }
+    isEnablingGDrive = true;
+    try {
+      const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
+      const res = await enableFolderGDriveSync({
+        accountId: selectedGDriveAccount,
+        folderPath: data.folderPath || '',
+        sourceType: srcType,
+        folderName: gdriveMode === 'new' ? (gdriveFolderNameInput || (data.folderPath || 'Photos')) : undefined,
+        existingFolderId: gdriveMode === 'existing' ? selectedExistingDriveFolderId : undefined
+      });
+      gdriveSyncInfo = { synced: true, sync: res.sync };
+      toast.success('Google Drive sync enabled! Link generated.');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to enable Google Drive sync');
+    } finally {
+      isEnablingGDrive = false;
+    }
+  }
+
+  let isTogglingPause = $state(false);
+
+  async function handleTogglePauseGDriveSync() {
+    if (!data.folderPath || !gdriveSyncInfo?.sync) return;
+    const isPaused = gdriveSyncInfo.sync.sync_status === 'PAUSED';
+    isTogglingPause = true;
+    try {
+      const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
+      const res = await togglePauseFolderGDriveSync(data.folderPath, srcType, !isPaused);
+      if (gdriveSyncInfo?.sync) {
+        gdriveSyncInfo.sync.sync_status = res.sync.sync_status;
+        gdriveSyncInfo.sync.is_active = res.sync.is_active;
+      }
+      toast.success(isPaused ? 'Google Drive sync resumed' : 'Google Drive sync paused');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to toggle sync state');
+    } finally {
+      isTogglingPause = false;
+    }
+  }
+
+  async function handleTriggerGDriveSync() {
+    if (!data.folderPath) return;
+    isSyncingNowGDrive = true;
+    try {
+      const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
+      await triggerFolderGDriveSync(data.folderPath, srcType);
+      toast.success('Sync queued with Google Drive');
+      loadGDriveSync();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to trigger sync');
+    } finally {
+      isSyncingNowGDrive = false;
+    }
+  }
+
+  // Delete & Unlink Handlers
+  async function handleUnlinkGDriveSync() {
+    if (!confirm('Unlink Google Drive sync? Existing files and folder will remain safe in your Google Drive.')) return;
+    try {
+      const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
+      await disableFolderGDriveSync(data.folderPath || '', srcType, false);
+      gdriveSyncInfo = { synced: false };
+      toast.success('Google Drive sync unlinked');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to unlink sync');
+    }
+  }
+
+  async function handleDeleteGDriveFolder() {
+    if (!confirm('⚠️ PERMANENTLY DELETE Google Drive folder?\n\nThis will delete the folder and ALL photos inside it on your Google Drive. Your local photos on this server will NOT be touched.')) return;
+    isDeletingGDrive = true;
+    try {
+      const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
+      await disableFolderGDriveSync(data.folderPath || '', srcType, true);
+      gdriveSyncInfo = { synced: false };
+      toast.success('Google Drive folder deleted permanently');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to delete Google Drive folder');
+    } finally {
+      isDeletingGDrive = false;
+    }
+  }
 
   // Share Modal State
   let shareAllowDownloadImages = $state(true);
@@ -737,6 +917,12 @@ import { slide } from 'svelte/transition';
   let showDownloadModal = $state(false);
   let showShareModal = $state(false);
   let showSettingsModal = $state(false);
+  let showGDriveModal = $state(false);
+
+  function openGDriveModal() {
+    loadGDriveSync();
+    showGDriveModal = true;
+  }
 
   let zipTargetFolderPath = $state('');
   let zipTargetFolderName = $state('');
@@ -1299,6 +1485,11 @@ import { slide } from 'svelte/transition';
         <button class="icon-btn" onclick={() => showShareModal = true} title="Share Folder (Shift+S)">
           <Share2 size={18} />
         </button>
+        {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}
+          <button class="icon-btn" onclick={openGDriveModal} title="Google Drive Sync">
+            <Cloud size={18} />
+          </button>
+        {/if}
         <button class="icon-btn" onclick={() => showSettingsModal = true} title="Folder Settings (,)">
           <Settings size={18} />
         </button>
@@ -2297,6 +2488,322 @@ import { slide } from 'svelte/transition';
     <button class="btn" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); color: #ff9999; width: 100%; justify-content: flex-start;" onclick={handleRegenerateVideos} disabled={isRegeneratingVideos}>
       {isRegeneratingVideos ? 'Queuing...' : 'Regenerate Video Transcodes & Thumbnails'}
     </button>
+  </div>
+</Modal>
+
+<Modal bind:show={showGDriveModal} id="folder-gdrive-sync" title="Google Drive Cloud Sync">
+  <div style="max-height: 80vh; overflow-y: auto; padding-right: 4px;">
+    {#if isGDriveLoading}
+      <div style="padding: 24px; text-align: center; color: #888; font-size: 0.9rem;">
+        <Loader2 size={24} class="animate-spin" style="margin: 0 auto 8px;" />
+        Checking Google Drive status...
+      </div>
+    {:else if gdriveSyncInfo?.synced && gdriveSyncInfo.sync}
+      <!-- Success Link Box (Identical to Share Modal's newlyCreatedShareToken box) -->
+      <div style="background: rgba(0,255,100,0.1); border: 1px solid rgba(0,255,100,0.3); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+        <p style="color: #4ade80; margin-bottom: 8px; font-weight: 500; display: flex; align-items: center; justify-content: space-between;">
+          <span style="display: flex; align-items: center; gap: 6px;">
+            <Cloud size={16} /> Google Drive Folder Synced
+          </span>
+          <span style="font-size: 0.7rem; background: {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? 'rgba(234,179,8,0.2)' : 'rgba(16,185,129,0.2)'}; color: {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? '#fbbf24' : '#34d399'}; padding: 2px 8px; border-radius: 4px; font-weight: 500;">
+            {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? 'Paused' : gdriveSyncInfo.sync.sync_status === 'SYNCING' ? 'Syncing...' : 'Active'}
+          </span>
+        </p>
+        <div style="display: flex; gap: 8px;">
+          <input 
+            type="text" 
+            readonly 
+            value={gdriveSyncInfo.sync.gdrive_link} 
+            style="flex: 1; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.85rem;" 
+          />
+          <button 
+            class="icon-btn" 
+            style="display: flex; align-items: center; justify-content: center;" 
+            title="Copy Drive Link"
+            onclick={() => {
+              navigator.clipboard.writeText(gdriveSyncInfo?.sync?.gdrive_link || '');
+              gdriveCopied = true;
+              toast.success('Google Drive link copied!');
+              setTimeout(() => gdriveCopied = false, 2000);
+            }}
+          >
+            {#if gdriveCopied}
+              <Check size={18} color="#10b981" />
+            {:else}
+              <Copy size={18} color="#a1a1aa" />
+            {/if}
+          </button>
+          <button 
+            class="icon-btn" 
+            style="display: flex; align-items: center; justify-content: center;" 
+            title="Show QR Code"
+            onclick={() => openGDriveQrModal(gdriveSyncInfo?.sync?.gdrive_link || '')}
+          >
+            <QrCode size={18} color="#a1a1aa" />
+          </button>
+          <a 
+            href={gdriveSyncInfo.sync.gdrive_link} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            class="icon-btn" 
+            style="display: flex; align-items: center; justify-content: center; text-decoration: none;" 
+            title="Open in Google Drive"
+          >
+            <ExternalLink size={18} color="#a1a1aa" />
+          </a>
+        </div>
+      </div>
+
+      <!-- Sync Status & Details (Identical to Share Modal's Active Links List item style) -->
+      <div style="margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border);">
+        <h4 style="margin-bottom: 12px; font-weight: 500;">Sync Information</h4>
+        <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span style="color: #e4e4e7; font-weight: 500; font-size: 0.95rem;">{gdriveSyncInfo.sync.gdrive_folder_name}</span>
+                <span style="background: {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? '#fbbf24' : '#34d399'}; border: 1px solid {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
+                  {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? 'Paused' : gdriveSyncInfo.sync.sync_status === 'SYNCING' ? 'Syncing' : 'Active'}
+                </span>
+              </div>
+
+              <div style="font-size: 0.8rem; color: #60a5fa; margin-bottom: 4px; font-weight: 500;">
+                {gdriveSyncInfo.sync.syncedFileCount || 0} / {gdriveSyncInfo.sync.totalLocalJpegs || (gdriveSyncInfo.sync.syncedFileCount || 0)} Synced
+              </div>
+
+              <!-- Progress bar -->
+              <div style="height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin-bottom: 6px; max-width: 300px;">
+                <div style="height: 100%; width: {Math.max(gdriveSyncInfo.sync.totalLocalJpegs || 0, gdriveSyncInfo.sync.syncedFileCount || 0) > 0 ? Math.min(100, Math.round(((gdriveSyncInfo.sync.syncedFileCount || 0) / Math.max(gdriveSyncInfo.sync.totalLocalJpegs || 0, gdriveSyncInfo.sync.syncedFileCount || 0)) * 100)) : 100}%; background: {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? '#eab308' : '#34d399'}; transition: width 0.3s;"></div>
+              </div>
+
+              <div style="font-size: 0.72rem; color: #888; display: flex; gap: 10px; flex-wrap: wrap;">
+                <span>{Math.max(gdriveSyncInfo.sync.totalLocalJpegs || 0, gdriveSyncInfo.sync.syncedFileCount || 0) > 0 ? Math.min(100, Math.round(((gdriveSyncInfo.sync.syncedFileCount || 0) / Math.max(gdriveSyncInfo.sync.totalLocalJpegs || 0, gdriveSyncInfo.sync.syncedFileCount || 0)) * 100)) : 100}% Completed</span>
+                <span>•</span>
+                <span>{gdriveSyncInfo.sync.sync_status === 'PAUSED' ? 'Sync Paused' : gdriveSyncInfo.sync.sync_status === 'SYNCING' ? 'Uploading in background...' : 'Up to date'}</span>
+              </div>
+            </div>
+
+            <!-- Management Icon Buttons (Same as Share list icon buttons) -->
+            <div style="display: flex; gap: 6px; align-items: center;">
+              <button 
+                class="icon-btn" 
+                title={gdriveSyncInfo.sync.sync_status === 'PAUSED' ? "Resume Sync" : "Pause Sync"} 
+                onclick={handleTogglePauseGDriveSync}
+                disabled={isTogglingPause || isDeletingGDrive}>
+                {#if gdriveSyncInfo.sync.sync_status === 'PAUSED'}
+                  <Play size={15} color="#10b981" />
+                {:else}
+                  <Pause size={15} color="#fbbf24" />
+                {/if}
+              </button>
+
+              <button 
+                class="icon-btn" 
+                title="Sync Now" 
+                onclick={handleTriggerGDriveSync}
+                disabled={isSyncingNowGDrive || isDeletingGDrive || gdriveSyncInfo.sync.sync_status === 'PAUSED'}>
+                <RefreshCw size={15} class={isSyncingNowGDrive ? 'animate-spin' : ''} color="#a1a1aa" />
+              </button>
+
+              <button 
+                class="icon-btn" 
+                title="Copy Link" 
+                onclick={() => {
+                  navigator.clipboard.writeText(gdriveSyncInfo?.sync?.gdrive_link || '');
+                  gdriveCopied = true;
+                  toast.success('Google Drive link copied!');
+                  setTimeout(() => gdriveCopied = false, 2000);
+                }}>
+                {#if gdriveCopied}
+                  <Check size={15} color="#10b981" />
+                {:else}
+                  <Copy size={15} color="#a1a1aa" />
+                {/if}
+              </button>
+
+              <button 
+                class="icon-btn" 
+                title="Unlink Folder" 
+                onclick={handleUnlinkGDriveSync}
+                disabled={isDeletingGDrive}>
+                <Unlink size={15} color="#a1a1aa" />
+              </button>
+
+              <button 
+                class="icon-btn" 
+                title="Delete from Google Drive" 
+                onclick={handleDeleteGDriveFolder}
+                disabled={isDeletingGDrive}>
+                <Trash2 size={15} color="#f87171" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    {:else}
+      <!-- Create New Google Drive Sync Section (Identical to Create New Share Link Section) -->
+      <div style="margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border);">
+        <h4 style="margin-bottom: 12px; font-weight: 500;">Enable Google Drive Sync</h4>
+
+        {#if gdriveAccounts.length === 0}
+          <div style="text-align: center; padding: 32px 16px; border: 1px dashed var(--glass-border); border-radius: 8px;">
+            <Cloud size={36} style="color: #60a5fa; margin: 0 auto 12px;" />
+            <p style="color: #ccc; font-size: 0.95rem; margin-bottom: 6px; font-weight: 500;">No Google Account Connected</p>
+            <p style="color: #888; font-size: 0.85rem; margin-bottom: 16px; max-width: 380px; margin-left: auto; margin-right: auto;">
+              Please connect your Google Drive account in Admin Settings before setting up sync for this folder.
+            </p>
+            <a href="/admin/settings" class="btn" style="text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
+              <Settings size={15} /> Go to Admin Settings
+            </a>
+          </div>
+        {:else}
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Google Account</label>
+            <select 
+              bind:value={selectedGDriveAccount} 
+              onchange={() => loadRemoteDriveFolders(selectedGDriveAccount)}
+              style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.875rem;"
+            >
+              {#each gdriveAccounts as acc}
+                <option value={acc.id}>{acc.email} {acc.label && acc.label !== acc.email ? `(${acc.label})` : ''}</option>
+              {/each}
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 18px;">
+            <label style="display: block; margin-bottom: 8px; font-size: 0.875rem; color: #ccc;">Destination Folder</label>
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+              <button 
+                type="button" 
+                class="btn" 
+                style="flex: 1; padding: 6px 10px; font-size: 0.8rem; background: {gdriveMode === 'new' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                onclick={() => gdriveMode = 'new'}>
+                Create New Folder
+              </button>
+              <button 
+                type="button" 
+                class="btn" 
+                style="flex: 1; padding: 6px 10px; font-size: 0.8rem; background: {gdriveMode === 'existing' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)'}; color: white; border: 1px solid var(--glass-border);"
+                onclick={() => { gdriveMode = 'existing'; if (remoteDriveFolders.length === 0) loadRemoteDriveFolders(selectedGDriveAccount); }}>
+                Choose Existing Folder
+              </button>
+            </div>
+
+            {#if gdriveMode === 'new'}
+              <div>
+                <input 
+                  type="text" 
+                  bind:value={gdriveFolderNameInput} 
+                  placeholder="e.g. Wedding 2026 Photos"
+                  style="width: 100%; padding: 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-family: inherit; font-size: 0.875rem;" 
+                />
+              </div>
+            {:else}
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.8rem; color: #888;">Select existing Drive directory</span>
+                  <button 
+                    type="button" 
+                    class="btn" 
+                    style="padding: 2px 8px; font-size: 0.75rem; background: transparent; border: 1px solid var(--glass-border); color: #888;"
+                    onclick={() => loadRemoteDriveFolders(selectedGDriveAccount)}
+                    disabled={isLoadingRemoteFolders}
+                  >
+                    <RefreshCw size={12} class={isLoadingRemoteFolders ? 'animate-spin' : ''} style="margin-right: 4px;" /> Refresh
+                  </button>
+                </div>
+
+                {#if isLoadingRemoteFolders}
+                  <div style="padding: 16px; text-align: center; color: #888; font-size: 0.85rem;">
+                    <Loader2 size={16} class="animate-spin" style="margin: 0 auto 6px;" />
+                    Loading Drive folders...
+                  </div>
+                {:else if remoteDriveFolders.length === 0}
+                  <div style="padding: 16px; text-align: center; color: #888; font-size: 0.85rem; border: 1px dashed var(--glass-border); border-radius: 4px;">
+                    No folders found in this Google Drive account.
+                  </div>
+                {:else}
+                  <input 
+                    type="text" 
+                    bind:value={remoteFolderSearch} 
+                    placeholder="Filter folders..."
+                    style="width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.85rem; margin-bottom: 8px;" 
+                  />
+                  <div style="max-height: 180px; overflow-y: auto; background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); border-radius: 4px; padding: 4px;">
+                    {#each filteredRemoteDriveFolders as item}
+                      <label style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 4px; cursor: pointer; transition: background 0.15s; background: {selectedExistingDriveFolderId === item.id ? 'rgba(255,255,255,0.1)' : 'transparent'};">
+                        <input 
+                          type="radio" 
+                          name="drive-folder-radio" 
+                          value={item.id} 
+                          checked={selectedExistingDriveFolderId === item.id}
+                          onchange={() => selectedExistingDriveFolderId = item.id}
+                        />
+                        <Folder size={15} color={selectedExistingDriveFolderId === item.id ? '#60a5fa' : '#94a3b8'} />
+                        <span style="font-size: 0.85rem; color: #f4f4f5; flex: 1;">{item.name}</span>
+                      </label>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+
+          <button 
+            class="btn" 
+            style="width: 100%; background: var(--text-color); color: var(--bg-color);" 
+            onclick={handleEnableGDriveSync} 
+            disabled={isEnablingGDrive}
+          >
+            {isEnablingGDrive ? 'Setting up Google Drive Sync...' : 'Enable Google Drive Sync'}
+          </button>
+        {/if}
+      </div>
+    {/if}
+  </div>
+</Modal>
+
+<Modal bind:show={showGDriveQrModal} id="folder-gdrive-qr" title="Scan Google Drive Link">
+  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 0; text-align: center;">
+    {#if isGeneratingGDriveQr}
+      <div style="width: 220px; height: 220px; display: flex; align-items: center; justify-content: center; color: #888; font-size: 0.875rem;">
+        Generating QR Code...
+      </div>
+    {:else if gdriveQrDataUrl}
+      <div style="background: white; padding: 12px; margin-bottom: 16px; border: 1px solid var(--glass-border);">
+        <img src={gdriveQrDataUrl} alt="QR Code" style="width: 220px; height: 220px; display: block;" />
+      </div>
+    {/if}
+    
+    <div style="width: 100%; max-width: 340px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); padding: 8px 12px; margin-bottom: 20px; word-break: break-all; font-size: 0.85rem; color: #aaa; max-height: 60px; overflow-y: auto; font-family: monospace;">
+      {gdriveSyncInfo?.sync?.gdrive_link || ''}
+    </div>
+
+    <div style="display: flex; gap: 8px; width: 100%; max-width: 340px; justify-content: flex-end;">
+      <button 
+        type="button" 
+        class="btn" 
+        style="flex: 1; padding: 8px 14px; font-size: 0.875rem; background: transparent; color: white; border: 1px solid var(--glass-border); display: flex; align-items: center; justify-content: center; gap: 6px;"
+        onclick={async () => {
+          if (gdriveSyncInfo?.sync?.gdrive_link) {
+            await copyToClipboard(gdriveSyncInfo.sync.gdrive_link);
+            toast.success('Link copied to clipboard!');
+          }
+        }}
+      >
+        <Copy size={16} /> Copy Link
+      </button>
+
+      <a 
+        href={gdriveSyncInfo?.sync?.gdrive_link} 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="btn" 
+        style="flex: 1; padding: 8px 14px; font-size: 0.875rem; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 6px;"
+      >
+        <ExternalLink size={16} /> Open Link
+      </a>
+    </div>
   </div>
 </Modal>
 

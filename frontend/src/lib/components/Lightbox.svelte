@@ -8,10 +8,13 @@
   import BlurhashImage from './BlurhashImage.svelte';
   import Modal from './Modal.svelte';
   import { toast } from '$lib/stores/toast';
-  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut, Clock, Layers, Eye, EyeOff } from '@lucide/svelte';
+  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut, Clock, Layers, Eye, EyeOff, Cloud, ExternalLink, Copy, QrCode } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { formatDate, getRawDate } from '$lib/utils/date';
   import { tracker } from '$lib/utils/analyticsTracker';
+  import { getMediaGDriveLink } from '$lib/api/gdrive';
+  import { currentUser } from '$lib/stores/auth';
+  import QRCode from 'qrcode';
 
   let { 
     media, 
@@ -333,7 +336,9 @@
     // Share: 's' or 'S'
     if ((e.key === 's' || e.key === 'S') && !isSharedView) {
       e.preventDefault();
-      share();
+      showShareMenu = !showShareMenu;
+      showGDriveMenu = false;
+      showMenu = false;
       return;
     }
 
@@ -626,26 +631,90 @@
 
   let isSharing = $state(false);
   let justShared = $state(false);
+  let showShareMenu = $state(false);
+  let sharedUrl = $state<string | null>(null);
 
-  async function share() {
-    if (isSharing || justShared) return;
+  // Common QR Code Modal State
+  let showQrModal = $state(false);
+  let qrModalTitle = $state('QR Code');
+  let qrModalLink = $state('');
+  let qrDataUrl = $state<string | null>(null);
+  let isGeneratingQr = $state(false);
+
+  async function openQrModal(title: string, link: string) {
+    qrModalTitle = title;
+    qrModalLink = link;
+    showQrModal = true;
+    showShareMenu = false;
+    showGDriveMenu = false;
+    showMenu = false;
+    isGeneratingQr = true;
     try {
-      isSharing = true;
+      qrDataUrl = await QRCode.toDataURL(link, {
+        width: 320,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff'
+        }
+      });
+    } catch (err: any) {
+      toast.error('Failed to generate QR code: ' + (err?.message || 'unknown error'));
+      qrDataUrl = null;
+    } finally {
+      isGeneratingQr = false;
+    }
+  }
+
+  async function getOrCreateShareUrl(): Promise<string> {
+    if (sharedUrl) return sharedUrl;
+    isSharing = true;
+    try {
       const date = new Date();
       date.setDate(date.getDate() + 7);
-      const token = await createShare(media.folder_path, media.id, allowDownload, false, false, date.toISOString());
-      
+      const shareToken = await createShare(media.folder_path, media.id, allowDownload, false, false, date.toISOString());
       const domain = (import.meta.env.PUBLIC_APP_DOMAIN as string) || window.location.origin;
-      const url = `${domain}/share/${token}`;
-      await copyToClipboard(url);
-      
-      justShared = true;
-      setTimeout(() => justShared = false, 2000);
-    } catch (e) {
-      console.error(e);
-      alert('Failed to share image');
+      const url = `${domain}/share/${shareToken}`;
+      sharedUrl = url;
+      return url;
     } finally {
       isSharing = false;
+    }
+  }
+
+  async function handleCopyShareLink() {
+    showShareMenu = false;
+    try {
+      const url = await getOrCreateShareUrl();
+      await copyToClipboard(url);
+      justShared = true;
+      toast.success('Share link copied to clipboard!');
+      setTimeout(() => justShared = false, 2500);
+    } catch (e: any) {
+      console.error(e);
+      toast.error('Failed to create share link');
+    }
+  }
+
+  async function handleViewShareLink() {
+    showShareMenu = false;
+    try {
+      const url = await getOrCreateShareUrl();
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (e: any) {
+      console.error(e);
+      toast.error('Failed to generate share link');
+    }
+  }
+
+  async function handleShowShareQr() {
+    showShareMenu = false;
+    try {
+      const url = await getOrCreateShareUrl();
+      await openQrModal('Scan Share Link', url);
+    } catch (e: any) {
+      console.error(e);
+      toast.error('Failed to generate share link');
     }
   }
 
@@ -654,11 +723,71 @@
     if (onsetcover) onsetcover(media.id);
   }
 
+  // Google Drive Link State & Fetching
+  let gdriveLink = $state<string | null>(null);
+  let isGDriveSynced = $state(false);
+  let loadingGDriveLink = $state(false);
+  let gdriveCopied = $state(false);
+  let showGDriveMenu = $state(false);
+
+  async function checkGDriveLink(targetMediaId: string) {
+    if (isSharedView) return;
+    loadingGDriveLink = true;
+    try {
+      const res = await getMediaGDriveLink(targetMediaId);
+      if (res.synced && res.link) {
+        gdriveLink = res.link;
+        isGDriveSynced = true;
+      } else {
+        gdriveLink = null;
+        isGDriveSynced = false;
+      }
+    } catch {
+      gdriveLink = null;
+      isGDriveSynced = false;
+    } finally {
+      loadingGDriveLink = false;
+    }
+  }
+
+  async function copyGDriveLink() {
+    if (!gdriveLink) return;
+    showGDriveMenu = false;
+    try {
+      await copyToClipboard(gdriveLink);
+      gdriveCopied = true;
+      toast.success('Google Drive link copied to clipboard!');
+      setTimeout(() => {
+        gdriveCopied = false;
+      }, 2500);
+    } catch (e: any) {
+      toast.error('Failed to copy link: ' + (e?.message || 'unknown error'));
+    }
+  }
+
+  function handleViewGDriveLink() {
+    if (!gdriveLink) return;
+    showGDriveMenu = false;
+    window.open(gdriveLink, '_blank', 'noopener,noreferrer');
+  }
+
+  function handleShowGDriveQr() {
+    if (!gdriveLink) return;
+    showGDriveMenu = false;
+    openQrModal('Scan Google Drive Link', gdriveLink);
+  }
+
   // Reset zoom & pan when navigating between media items
   $effect(() => {
-    if (media.id) {
+    if (activeMedia.id) {
       currentZoom = 1;
       showZoomSlider = false;
+      gdriveLink = null;
+      isGDriveSynced = false;
+      sharedUrl = null;
+      showShareMenu = false;
+      showGDriveMenu = false;
+      checkGDriveLink(activeMedia.id);
       if (pzInstance) {
         pzInstance.zoomAbs(window.innerWidth / 2, window.innerHeight / 2, 1);
         pzInstance.moveTo(0, 0);
@@ -701,13 +830,32 @@
           </a>
         {/if}
         {#if !isSharedView}
-          <button class="icon-btn {justShared ? 'success' : ''}" onclick={share} title="Share (S)">
-            {#if justShared}
-              <Check size={20} strokeWidth={2} />
-            {:else}
-              <Share2 size={20} strokeWidth={2} />
+          <div style="position: relative;" use:clickOutside={() => showShareMenu = false}>
+            <button 
+              class="icon-btn {justShared ? 'success' : ''} {showShareMenu ? 'active' : ''}" 
+              onclick={() => { showShareMenu = !showShareMenu; showGDriveMenu = false; showMenu = false; }} 
+              title="Share (S)"
+            >
+              {#if justShared}
+                <Check size={20} strokeWidth={2} />
+              {:else}
+                <Share2 size={20} strokeWidth={2} />
+              {/if}
+            </button>
+            {#if showShareMenu}
+              <div class="dropdown-menu">
+                <button onclick={handleViewShareLink}>
+                  <ExternalLink size={15} style="margin-right: 8px; vertical-align: middle;" /> View Link
+                </button>
+                <button onclick={handleCopyShareLink}>
+                  <Copy size={15} style="margin-right: 8px; vertical-align: middle;" /> Copy Link
+                </button>
+                <button onclick={handleShowShareQr}>
+                  <QrCode size={15} style="margin-right: 8px; vertical-align: middle;" /> Show QR Code
+                </button>
+              </div>
             {/if}
-          </button>
+          </div>
         {/if}
         {#if !media.mime_type.startsWith('video/')}
           <div style="display: flex; align-items: center; gap: 8px;">
@@ -738,9 +886,37 @@
         <button class="icon-btn {showInfo ? 'active' : ''}" onclick={toggleInfo} title="Info (I)">
           <Info size={20} strokeWidth={2} />
         </button>
+        {#if !isSharedView && isGDriveSynced && gdriveLink}
+          <div style="position: relative;" use:clickOutside={() => showGDriveMenu = false}>
+            <button 
+              class="icon-btn {gdriveCopied ? 'success' : ''} {showGDriveMenu ? 'active' : ''}" 
+              onclick={() => { showGDriveMenu = !showGDriveMenu; showShareMenu = false; showMenu = false; }} 
+              title={gdriveCopied ? 'Copied Google Drive Link!' : 'Google Drive Link'}
+            >
+              {#if gdriveCopied}
+                <Check size={20} strokeWidth={2} />
+              {:else}
+                <Cloud size={20} strokeWidth={2} />
+              {/if}
+            </button>
+            {#if showGDriveMenu}
+              <div class="dropdown-menu">
+                <button onclick={handleViewGDriveLink}>
+                  <ExternalLink size={15} style="margin-right: 8px; vertical-align: middle;" /> View on Drive
+                </button>
+                <button onclick={copyGDriveLink}>
+                  <Copy size={15} style="margin-right: 8px; vertical-align: middle;" /> Copy Link
+                </button>
+                <button onclick={handleShowGDriveQr}>
+                  <QrCode size={15} style="margin-right: 8px; vertical-align: middle;" /> Show QR Code
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
         {#if !isSharedView}
           <div style="position: relative;" use:clickOutside={() => showMenu = false}>
-            <button class="icon-btn" onclick={() => showMenu = !showMenu} title="More (C to set cover)">
+            <button class="icon-btn" onclick={() => { showMenu = !showMenu; showShareMenu = false; showGDriveMenu = false; }} title="More (C to set cover)">
               <MoreHorizontal size={20} strokeWidth={2} />
             </button>
             {#if showMenu}
@@ -952,6 +1128,53 @@
             </div>
           </div>
           {/if}
+          {#if !isSharedView && isGDriveSynced && gdriveLink}
+          <div class="info-section">
+            <h4>GOOGLE DRIVE</h4>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; background: rgba(255,255,255,0.05); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
+                <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                  <Cloud size={16} color="#60a5fa" style="flex-shrink: 0;" />
+                  <span style="font-size: 0.85rem; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Synced to Drive</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                  <button 
+                    type="button" 
+                    class="btn-sm" 
+                    style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 0.75rem; background: rgba(59,130,246,0.2); color: #93c5fd; border: 1px solid rgba(59,130,246,0.4); border-radius: 4px; cursor: pointer;"
+                    onclick={copyGDriveLink}
+                    title="Copy Google Drive direct link"
+                  >
+                    {#if gdriveCopied}
+                      <Check size={12} /> Copied
+                    {:else}
+                      <Copy size={12} /> Copy Link
+                    {/if}
+                  </button>
+                  <button 
+                    type="button" 
+                    class="btn-sm" 
+                    style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 0.75rem; background: rgba(255,255,255,0.08); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer;"
+                    onclick={handleShowGDriveQr}
+                    title="Show Google Drive QR code"
+                  >
+                    <QrCode size={12} /> QR
+                  </button>
+                  <a 
+                    href={gdriveLink} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    class="btn-sm" 
+                    style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 0.75rem; background: rgba(255,255,255,0.1); color: #f8fafc; border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; text-decoration: none;"
+                    title="Open in Google Drive"
+                  >
+                    <ExternalLink size={12} /> Open
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+          {/if}
           {#if !isSharedView}
           <div class="info-section">
             <h4>PEOPLE</h4>
@@ -1151,6 +1374,50 @@
   </div>
 </div>
 
+<Modal bind:show={showQrModal} id="lightbox-qr-code" title={qrModalTitle}>
+  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 0; text-align: center;">
+    {#if isGeneratingQr}
+      <div style="width: 220px; height: 220px; display: flex; align-items: center; justify-content: center; color: #888; font-size: 0.875rem;">
+        Generating QR Code...
+      </div>
+    {:else if qrDataUrl}
+      <div style="background: white; padding: 12px; margin-bottom: 16px; border: 1px solid var(--glass-border);">
+        <img src={qrDataUrl} alt="QR Code" style="width: 220px; height: 220px; display: block;" />
+      </div>
+    {/if}
+    
+    <div style="width: 100%; max-width: 340px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); padding: 8px 12px; margin-bottom: 20px; word-break: break-all; font-size: 0.85rem; color: #aaa; max-height: 60px; overflow-y: auto; font-family: monospace;">
+      {qrModalLink}
+    </div>
+
+    <div style="display: flex; gap: 8px; width: 100%; max-width: 340px; justify-content: flex-end;">
+      <button 
+        type="button" 
+        class="btn" 
+        style="flex: 1; padding: 8px 14px; font-size: 0.875rem; background: transparent; color: white; border: 1px solid var(--glass-border); display: flex; align-items: center; justify-content: center; gap: 6px;"
+        onclick={async () => {
+          if (qrModalLink) {
+            await copyToClipboard(qrModalLink);
+            toast.success('Link copied to clipboard!');
+          }
+        }}
+      >
+        <Copy size={16} /> Copy Link
+      </button>
+
+      <a 
+        href={qrModalLink} 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        class="btn" 
+        style="flex: 1; padding: 8px 14px; font-size: 0.875rem; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 6px;"
+      >
+        <ExternalLink size={16} /> Open Link
+      </a>
+    </div>
+  </div>
+</Modal>
+
 <style>
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(8px); }
@@ -1228,7 +1495,7 @@
     min-width: 180px;
   }
 
-  .dropdown-menu button {
+  .dropdown-menu button, .dropdown-menu .dropdown-link {
     width: 100%;
     padding: 12px 16px;
     background: none;
@@ -1236,9 +1503,13 @@
     color: white;
     text-align: left;
     cursor: pointer;
+    display: block;
+    text-decoration: none;
+    box-sizing: border-box;
+    font-size: 0.9rem;
   }
 
-  .dropdown-menu button:hover {
+  .dropdown-menu button:hover, .dropdown-menu .dropdown-link:hover {
     background: rgba(255,255,255,0.1);
   }
 

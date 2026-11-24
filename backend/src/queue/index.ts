@@ -8,6 +8,7 @@ import { faceDetectionQueue, faceDetectionWorker } from './faceDetectionQueue';
 import { facialRecognitionQueue, facialRecognitionWorker } from './facialRecognitionQueue';
 import { faceThumbnailQueue, faceThumbnailWorker } from './faceThumbnailQueue';
 import { ogQueue, ogWorker } from './ogQueue';
+import { gdriveSyncQueue, gdriveSyncWorker } from './gdriveSyncQueue';
 import { getExecutionMode, setExecutionMode, type QueueExecutionMode } from './mode';
 import { logger } from '../utils/logger';
 import { dispatchMediaFile, MediaJobData } from './dispatch';
@@ -22,6 +23,7 @@ const allWorkers: [string, Worker | undefined][] = [
   ['facial-recognition', facialRecognitionWorker],
   ['face-thumbnail', faceThumbnailWorker],
   ['og', ogWorker],
+  ['gdrive-sync', gdriveSyncWorker as any],
 ];
 
 for (const [name, worker] of allWorkers) {
@@ -63,6 +65,7 @@ export {
   facialRecognitionQueue, facialRecognitionWorker,
   faceThumbnailQueue, faceThumbnailWorker,
   ogQueue, ogWorker,
+  gdriveSyncQueue, gdriveSyncWorker,
   getExecutionMode, setExecutionMode, type QueueExecutionMode,
   dispatchMediaFile, type MediaJobData
 };
@@ -77,4 +80,5 @@ export const queues: Record<string, Queue> = {
   'facial-recognition': facialRecognitionQueue,
   'face-thumbnail': faceThumbnailQueue,
   'og': ogQueue,
+  'gdrive-sync': gdriveSyncQueue,
 };
