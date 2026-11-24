@@ -874,7 +874,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     const isProcessing = processingRes.rows.length > 0;
     mark('6_processing_count');
 
-    // Check if current folder contains live staging files from FastUp
+    // Check if current folder contains live staging files from FastUp or is paired with FastUp
     let isStagedFolder = false;
     let stagingNotice = null;
     if (folder) {
@@ -884,6 +884,38 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         LIMIT 1
       `, [folder]).catch(() => ({ rows: [] }));
       isStagedFolder = stagedCheck.rows.length > 0;
+
+      if (!isStagedFolder) {
+        // Also check if an active photographer session is configured for this folder or scope
+        const tokenCheck = await query(`
+          SELECT 1 FROM photographer_tokens
+          WHERE is_active = true 
+            AND (expires_at IS NULL OR expires_at > NOW())
+            AND (
+              folder_path = $1 
+              OR folder_path LIKE $1 || '/%' 
+              OR $1 LIKE folder_path || '/%' 
+              OR $1 = ANY(scope_folders)
+              OR EXISTS (
+                SELECT 1 FROM unnest(scope_folders) s 
+                WHERE s = $1 OR s LIKE $1 || '/%' OR $1 LIKE s || '/%'
+              )
+            )
+          LIMIT 1
+        `, [folder]).catch(() => ({ rows: [] }));
+        if (tokenCheck.rows.length > 0) {
+          isStagedFolder = true;
+        } else {
+          // Check if physical staging directory exists on disk
+          const diskStaging = path.join(STAGING_ROOT, folder);
+          try {
+            if (fs.existsSync(diskStaging)) {
+              isStagedFolder = true;
+            }
+          } catch {}
+        }
+      }
+
       if (isStagedFolder) {
         stagingNotice = await FastUpService.getStagingNotice();
       }

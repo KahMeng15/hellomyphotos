@@ -4,7 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { pipeline } from 'stream/promises';
 import { StagingService, sanitizeSessionId } from './staging.service';
-import { FastUpService, resolveClientIp } from './fastup.service';
+import { FastUpService, resolveClientIp, ScopeSecurity } from './fastup.service';
 import { STAGING_ROOT } from '../../utils/mediaPath';
 import { requireAuth } from '../../utils/auth';
 import { query } from '../../config/db';
@@ -37,7 +37,7 @@ export async function requireStagingAuth(request: FastifyRequest, reply: Fastify
   if (candidateToken) {
     try {
       const tokenRes = await query(
-        `SELECT id, photographer_name, folder_path, is_active, expires_at, last_seen_at 
+        `SELECT id, photographer_name, folder_path, scope_folders, is_active, expires_at, last_seen_at 
          FROM photographer_tokens 
          WHERE token = $1
          LIMIT 1`,
@@ -70,7 +70,11 @@ export async function requireStagingAuth(request: FastifyRequest, reply: Fastify
         }
 
         query(`UPDATE photographer_tokens SET last_seen_at = NOW() WHERE id = $1`, [ph.id]).catch(() => {});
-        (request as any).photographer = ph;
+        const effectiveScopes = ScopeSecurity.getEffectiveScopes(ph.scope_folders, ph.folder_path);
+        (request as any).photographer = {
+          ...ph,
+          scopes: effectiveScopes
+        };
         return; // Authorized via Photographer Token
       } else {
         return reply.status(401).send({ error: 'Invalid photographer token' });
@@ -110,8 +114,8 @@ export async function stagingRoutes(fastify: FastifyInstance) {
 
     const querySessionId = (request.query as any)?.sessionId || (request.query as any)?.session_id || (request.query as any)?.folderPath;
     const headerSessionId = (request.headers['x-session-id'] || request.headers['x-sessionid']) as string | undefined;
-    const photogFolder = (request as any).photographer?.folder_path;
-    let sessionId = querySessionId || headerSessionId || photogFolder || '';
+    const photog = (request as any).photographer;
+    let sessionId = querySessionId || headerSessionId || photog?.folder_path || '';
 
     const parts = request.parts();
     const uploadedResults: any[] = [];
@@ -120,6 +124,14 @@ export async function stagingRoutes(fastify: FastifyInstance) {
     try {
       for await (const part of parts) {
         if (part.type === 'file') {
+          const currentCleanSession = ScopeSecurity.normalizePath(sessionId);
+          if (photog && currentCleanSession && !ScopeSecurity.isPathAllowed(currentCleanSession, photog.scopes)) {
+            // Early rejection if session specified is outside allowed scope
+            return reply.status(403).send({
+              error: `Forbidden: Cannot upload photos to '${currentCleanSession}'. Outside allowed scope: ${photog.scopes.join(', ')}`
+            });
+          }
+
           if (!sessionId) {
             // Buffer to temporary staging folder until sessionId field is encountered
             const tmpDir = path.join(STAGING_ROOT, '.tmp');
@@ -130,7 +142,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
             pendingFiles.push({ filename: part.filename, tempPath: tmpFile, mimetype: part.mimetype });
           } else {
             const res = await StagingService.saveUploadedFile(
-              sessionId,
+              currentCleanSession,
               part.filename,
               part.file,
               part.mimetype
@@ -145,9 +157,23 @@ export async function stagingRoutes(fastify: FastifyInstance) {
         }
       }
 
+      const finalSessionId = ScopeSecurity.normalizePath(sessionId);
+
+      // Verify photographer permission on final session id
+      if (photog) {
+        if (!finalSessionId || !ScopeSecurity.isPathAllowed(finalSessionId, photog.scopes)) {
+          for (const p of pendingFiles) {
+            try { await fs.promises.unlink(p.tempPath); } catch {}
+          }
+          return reply.status(403).send({
+            error: `Forbidden: Cannot upload photos to '${finalSessionId || 'root'}'. Outside allowed scope: ${photog.scopes.join(', ')}`
+          });
+        }
+      }
+
       // Process any files that were received before the sessionId field was encountered
       if (pendingFiles.length > 0) {
-        if (!sessionId) {
+        if (!finalSessionId) {
           for (const p of pendingFiles) {
             try { await fs.promises.unlink(p.tempPath); } catch {}
           }
@@ -158,7 +184,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
           try {
             const fileStream = fs.createReadStream(p.tempPath);
             const res = await StagingService.saveUploadedFile(
-              sessionId,
+              finalSessionId,
               p.filename,
               fileStream,
               p.mimetype
@@ -175,13 +201,12 @@ export async function stagingRoutes(fastify: FastifyInstance) {
       }
 
       // Log successful upload activity
-      const photog = (request as any).photographer;
       const clientIp = resolveClientIp(request);
       for (const res of uploadedResults) {
         FastUpService.logActivity({
           eventType: 'upload_completed',
           photographerName: photog?.photographer_name || 'FastUp Camera',
-          folderPath: sanitizeSessionId(sessionId),
+          folderPath: finalSessionId,
           fileName: res.fileName,
           fileSizeBytes: res.sizeBytes,
           ipAddress: clientIp,
@@ -191,7 +216,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
 
       return reply.send({
         success: true,
-        sessionId: sanitizeSessionId(sessionId),
+        sessionId: finalSessionId,
         count: uploadedResults.length,
         files: uploadedResults
       });
@@ -201,12 +226,11 @@ export async function stagingRoutes(fastify: FastifyInstance) {
         try { await fs.promises.unlink(p.tempPath); } catch {}
       }
 
-      const photog = (request as any).photographer;
       const clientIp = resolveClientIp(request);
       FastUpService.logActivity({
         eventType: 'upload_failed',
         photographerName: photog?.photographer_name || 'FastUp Camera',
-        folderPath: sessionId ? sanitizeSessionId(sessionId) : null,
+        folderPath: sessionId ? ScopeSecurity.normalizePath(sessionId) : null,
         ipAddress: clientIp,
         status: 'failed',
         details: { error: err.message || 'Upload failed' }
@@ -221,8 +245,10 @@ export async function stagingRoutes(fastify: FastifyInstance) {
    * Generates an on-demand public share link for the staging session.
    */
   fastify.post('/api/staging/create-share', { preHandler: requireStagingAuth }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const rawBody = (request.body || {}) as any;
+    const sessionId = rawBody.sessionId || rawBody.session_id;
+    const mediaId = rawBody.mediaId || rawBody.media_id;
     const {
-      sessionId,
       allowDownloadImages,
       allowDownloadFolder,
       watermarkEnabled,
@@ -232,14 +258,22 @@ export async function stagingRoutes(fastify: FastifyInstance) {
       showHiddenAlternates,
       allowHeroSelection,
       defaultStagingView
-    } = (request.body || {}) as any;
+    } = rawBody;
 
     if (!sessionId) {
       return reply.status(400).send({ error: 'sessionId is required' });
     }
 
+    const cleanSessionId = ScopeSecurity.normalizePath(sessionId);
+    const photog = (request as any).photographer;
+    if (photog && !ScopeSecurity.isPathAllowed(cleanSessionId, photog.scopes)) {
+      return reply.status(403).send({
+        error: `Forbidden: Cannot create share link for '${cleanSessionId}'. Outside allowed scope: ${photog.scopes.join(', ')}`
+      });
+    }
+
     try {
-      const share = await StagingService.createShare(sessionId, {
+      const share = await StagingService.createShare(cleanSessionId, {
         allowDownloadImages,
         allowDownloadFolder,
         watermarkEnabled,
@@ -263,14 +297,27 @@ export async function stagingRoutes(fastify: FastifyInstance) {
 
   /**
    * GET /api/staging/folders
-   * Lists all existing staging folder paths recursively.
+   * Lists all existing staging folder paths recursively, filtered strictly by photographer scope.
    */
-  fastify.get('/api/staging/folders', { preHandler: requireStagingAuth }, async (_request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/staging/folders', { preHandler: requireStagingAuth }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const folders = await StagingService.listFolders();
+      const photog = (request as any).photographer;
+      if (photog) {
+        const visibleFolders = ScopeSecurity.filterAccessibleFolders(folders, photog.scopes);
+        return reply.send({
+          success: true,
+          folders: visibleFolders,
+          scopes: photog.scopes,
+          defaultFolder: photog.folder_path,
+          photographerName: photog.photographer_name
+        });
+      }
+
       return reply.send({
         success: true,
-        folders
+        folders,
+        scopes: ['*']
       });
     } catch (err: any) {
       return reply.status(500).send({ error: err.message });
@@ -280,6 +327,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
   /**
    * POST /api/staging/folders
    * Creates a folder directory in /app/staging/<folderPath> with recursive support.
+   * Enforces that the folder path must be inside the photographer's allowed scope.
    */
   fastify.post('/api/staging/folders', { preHandler: requireStagingAuth }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { folderPath } = (request.body || {}) as any;
@@ -287,11 +335,23 @@ export async function stagingRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: 'folderPath is required' });
     }
 
+    const cleanPath = ScopeSecurity.normalizePath(folderPath);
+    if (!cleanPath) {
+      return reply.status(400).send({ error: 'Valid folderPath is required' });
+    }
+
+    const photog = (request as any).photographer;
+    if (photog && !ScopeSecurity.isPathAllowed(cleanPath, photog.scopes)) {
+      return reply.status(403).send({
+        error: `Forbidden: Cannot create folder '${cleanPath}'. Outside your allowed scope: ${photog.scopes.join(', ')}`
+      });
+    }
+
     try {
-      const cleanPath = await StagingService.createFolder(folderPath);
+      const createdPath = await StagingService.createFolder(cleanPath);
       return reply.send({
         success: true,
-        folderPath: cleanPath
+        folderPath: createdPath
       });
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
@@ -302,9 +362,13 @@ export async function stagingRoutes(fastify: FastifyInstance) {
    * GET /api/staging/sessions
    * Returns list of staging sessions, photo count, and active share URLs.
    */
-  fastify.get('/api/staging/sessions', { preHandler: requireStagingAuth }, async (_request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/api/staging/sessions', { preHandler: requireStagingAuth }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const sessions = await StagingService.listSessions();
+      let sessions = await StagingService.listSessions();
+      const photog = (request as any).photographer;
+      if (photog) {
+        sessions = sessions.filter(s => ScopeSecurity.isPathAllowed(s.sessionId, photog.scopes));
+      }
       const totalPhotos = sessions.reduce((acc, s) => acc + s.photoCount, 0);
 
       let availableBytes: number | null = null;
@@ -393,8 +457,15 @@ export async function stagingRoutes(fastify: FastifyInstance) {
    */
   fastify.get<{ Params: { '*': string } }>('/api/staging/*', { preHandler: requireStagingAuth }, async (request, reply) => {
     const rawParam = request.params['*'] || (request.query as any)?.sessionId;
-    const safeSessionId = sanitizeSessionId(rawParam);
+    const safeSessionId = ScopeSecurity.normalizePath(rawParam);
     if (!safeSessionId) return reply.status(400).send({ error: 'Invalid sessionId' });
+
+    const photog = (request as any).photographer;
+    if (photog && !ScopeSecurity.isPathAllowed(safeSessionId, photog.scopes)) {
+      return reply.status(403).send({
+        error: `Forbidden: Cannot view photos in '${safeSessionId}'. Outside your allowed scope: ${photog.scopes.join(', ')}`
+      });
+    }
 
     const folderPath = safeSessionId;
     const legacyPath = `staging/${safeSessionId}`;
@@ -456,12 +527,20 @@ export async function stagingRoutes(fastify: FastifyInstance) {
    */
   fastify.delete<{ Params: { '*': string } }>('/api/staging/*', { preHandler: requireStagingAuth }, async (request, reply) => {
     const rawParam = request.params['*'] || (request.query as any)?.sessionId || (request.body as any)?.sessionId;
-    if (!rawParam) {
+    const safeSessionId = ScopeSecurity.normalizePath(rawParam);
+    if (!safeSessionId) {
       return reply.status(400).send({ error: 'sessionId is required' });
     }
 
+    const photog = (request as any).photographer;
+    if (photog && !ScopeSecurity.isPathAllowed(safeSessionId, photog.scopes)) {
+      return reply.status(403).send({
+        error: `Forbidden: Cannot cleanup staging session '${safeSessionId}'. Outside your allowed scope: ${photog.scopes.join(', ')}`
+      });
+    }
+
     try {
-      const result = await StagingService.cleanupSession(rawParam);
+      const result = await StagingService.cleanupSession(safeSessionId);
       return reply.send({
         success: true,
         message: `Staging session '${result.sessionId}' cleaned up successfully`,

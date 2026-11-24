@@ -140,13 +140,29 @@ export class StagingService {
     await fs.promises.mkdir(sessionDir, { recursive: true });
 
     const targetFilePath = path.join(sessionDir, safeFileName);
+    const tempPartPath = path.join(sessionDir, `.${safeFileName}.part-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`);
 
-    // Save to disk
-    if (Buffer.isBuffer(fileStreamOrBuffer)) {
-      await fs.promises.writeFile(targetFilePath, fileStreamOrBuffer);
-    } else {
-      const writeStream = fs.createWriteStream(targetFilePath);
-      await pipeline(fileStreamOrBuffer, writeStream);
+    // Save to disk using atomic temp part file to avoid corrupted files on dropped networks
+    try {
+      if (Buffer.isBuffer(fileStreamOrBuffer)) {
+        await fs.promises.writeFile(tempPartPath, fileStreamOrBuffer);
+      } else {
+        const writeStream = fs.createWriteStream(tempPartPath);
+        await pipeline(fileStreamOrBuffer, writeStream);
+      }
+
+      const tempStat = await fs.promises.stat(tempPartPath);
+      if (tempStat.size === 0) {
+        throw new Error('Upload aborted: received 0 bytes (connection dropped)');
+      }
+
+      // Atomically move complete file into destination
+      await fs.promises.rename(tempPartPath, targetFilePath);
+    } catch (streamErr: any) {
+      try {
+        await fs.promises.unlink(tempPartPath);
+      } catch {}
+      throw streamErr;
     }
 
     const stat = await fs.promises.stat(targetFilePath);
@@ -301,6 +317,7 @@ export class StagingService {
   static async createShare(
     sessionId: string,
     options: {
+      mediaId?: string | null;
       allowDownloadImages?: boolean;
       allowDownloadFolder?: boolean;
       watermarkEnabled?: boolean;
@@ -312,7 +329,7 @@ export class StagingService {
       allowHeroSelection?: boolean;
       defaultStagingView?: string;
     } = {}
-  ): Promise<{ shareToken: string; shareUrl: string; folderPath: string; sessionId: string; expiresAt: string | null }> {
+  ): Promise<{ shareToken: string; shareUrl: string; folderPath: string; sessionId: string; mediaId?: string | null; expiresAt: string | null }> {
     const safeSessionId = sanitizeSessionId(sessionId);
     if (!safeSessionId) {
       throw new Error('Invalid or missing sessionId');
@@ -332,14 +349,22 @@ export class StagingService {
       throw new Error(`Staging session '${safeSessionId}' not found or has no photos`);
     }
 
-    // Check if an active share link already exists
-    const existingShare = await query(
-      `SELECT id, share_token, expires_at 
-       FROM shared_folders 
-       WHERE (folder_path = $1 OR folder_path = $2) AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())
-       ORDER BY created_at DESC LIMIT 1`,
-      [folderPath, `staging/${safeSessionId}`]
-    );
+    // Check if an active share link already exists (either for specific mediaId or for folder)
+    const existingShare = options.mediaId
+      ? await query(
+          `SELECT id, share_token, expires_at 
+           FROM shared_folders 
+           WHERE media_id = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())
+           ORDER BY created_at DESC LIMIT 1`,
+          [options.mediaId]
+        )
+      : await query(
+          `SELECT id, share_token, expires_at 
+           FROM shared_folders 
+           WHERE (folder_path = $1 OR folder_path = $2) AND media_id IS NULL AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())
+           ORDER BY created_at DESC LIMIT 1`,
+          [folderPath, `staging/${safeSessionId}`]
+        );
 
     let shareToken: string;
     let finalExpiresAt: string | null = options.expiresAt || null;
@@ -377,9 +402,9 @@ export class StagingService {
 
       await query(
         `INSERT INTO shared_folders 
-         (folder_path, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, is_active, allow_view_mode_toggle, show_hidden_alternates, allow_hero_selection, default_staging_view)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10, $11, $12)`,
-        [folderPath, shareToken, allowImages, allowFolder, watermark, options.watermarkTemplateId || null, finalExpiresAt, createdBy, allowViewModeToggle, showHiddenAlternates, allowHeroSelection, defaultStagingView]
+         (folder_path, media_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, is_active, allow_view_mode_toggle, show_hidden_alternates, allow_hero_selection, default_staging_view)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11, $12, $13)`,
+        [folderPath, options.mediaId || null, shareToken, allowImages, allowFolder, watermark, options.watermarkTemplateId || null, finalExpiresAt, createdBy, allowViewModeToggle, showHiddenAlternates, allowHeroSelection, defaultStagingView]
       );
 
       invalidateShareCache(shareToken);
@@ -417,6 +442,7 @@ export class StagingService {
       shareUrl,
       folderPath,
       sessionId: safeSessionId,
+      mediaId: options.mediaId || null,
       expiresAt: finalExpiresAt
     };
   }

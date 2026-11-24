@@ -69,7 +69,9 @@ export async function fetchFolderContent(
   folderCoverImgWidth: number | null, 
   folderCoverImgHeight: number | null, 
   folderDescription: string, 
-  hostError?: string | null 
+  hostError?: string | null,
+  isStagedFolder?: boolean,
+  stagingNotice?: { enabled: boolean; title?: string; message?: string } | null
 }> {
   const res = await fetchFn(`${API_BASE}/api/folder/${encodeURIComponent(folderPath)}`, { credentials: 'include', signal });
   if (!res.ok) throw new Error('Failed to fetch folder');
@@ -84,7 +86,9 @@ export async function fetchFolderContent(
     folderCoverImgWidth: data.folderCoverImgWidth || null,
     folderCoverImgHeight: data.folderCoverImgHeight || null,
     folderDescription: data.folderDescription || '',
-    hostError: data.hostError || null
+    hostError: data.hostError || null,
+    isStagedFolder: Boolean(data.isStagedFolder),
+    stagingNotice: data.stagingNotice || null
   };
 }
 

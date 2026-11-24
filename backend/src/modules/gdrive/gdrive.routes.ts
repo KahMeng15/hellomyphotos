@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { requireAuth } from '../../utils/auth';
+import { requireStagingAuth } from '../staging/staging.routes';
 import { GDriveService } from './gdrive.service';
 import { gdriveSyncQueue } from '../../queue/gdriveSyncQueue';
 import { query } from '../../config/db';
@@ -72,13 +73,17 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // Folder sync configuration endpoints (Admins & Super Admins)
+  // Folder sync configuration endpoints (Admins, Super Admins & Staging FastUp clients)
   fastify.register(async (folderScope) => {
-    folderScope.addHook('onRequest', requireAuth);
-    folderScope.addHook('onRequest', async (request, reply) => {
-      if (reply.sent) return;
-      if (request.user?.role !== 'admin' && request.user?.role !== 'super_admin') {
-        return reply.status(403).send({ error: 'Forbidden: Admin access required' });
+    folderScope.addHook('onRequest', requireStagingAuth);
+
+    // List connected Google Accounts for folder sync selection
+    folderScope.get('/api/gdrive/accounts', async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const accounts = await GDriveService.listAccounts();
+        return reply.send({ accounts });
+      } catch (err: any) {
+        return reply.status(500).send({ error: err.message });
       }
     });
 

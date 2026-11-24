@@ -35,11 +35,13 @@
   let showOtpModal = $state(false);
   let photogName = $state('');
   let folderPath = $state('');
+  let scopeFoldersInput = $state('');
   let availableFolders = $state<string[]>([]);
   let isCreatingFolder = $state(false);
   let newFolderName = $state('');
   let creatingFolder = $state(false);
   let validityHours = $state(24);
+  let customServerUrl = $state('');
   let uploadFormat = $state<'JPEG_ONLY' | 'RAW_ONLY' | 'RAW_PLUS_JPEG'>('JPEG_ONLY');
   let autoUpload = $state(true);
   let wifiOnly = $state(false);
@@ -53,6 +55,7 @@
   let editingTokenId = $state('');
   let editPhotogName = $state('');
   let editFolderPath = $state('');
+  let editScopeFoldersInput = $state('');
   let editUploadFormat = $state<'JPEG_ONLY' | 'RAW_ONLY' | 'RAW_PLUS_JPEG'>('JPEG_ONLY');
   let editAutoUpload = $state(true);
   let editWifiOnly = $state(false);
@@ -81,7 +84,7 @@
 
   // Folder Picker Modal State (Hierarchical Directory Navigator with Radio Selection)
   let showFolderPickerModal = $state(false);
-  let folderPickerTarget = $state<'otp' | 'relink' | 'edit'>('otp');
+  let folderPickerTarget = $state<'otp' | 'relink' | 'edit' | 'otp_scope' | 'edit_scope'>('otp');
   let pickerCurrentPath = $state('');
   let pickerSelectedPath = $state('');
   let pickerSearch = $state('');
@@ -91,6 +94,12 @@
   // Purge Modal State
   let showPurgeModal = $state(false);
   let purging = $state(false);
+
+  // Revoke Photographer Session Modal State
+  let showRevokeModal = $state(false);
+  let revokingTokenId = $state<string | null>(null);
+  let revokingTokenName = $state<string>('');
+  let isRevoking = $state(false);
 
   // Staging Hide Toggle State
   let stagingHidden = $state(false);
@@ -248,6 +257,9 @@
     generatedOtp = null;
     isCreatingFolder = false;
     newFolderName = '';
+    photogName = '';
+    folderPath = '';
+    scopeFoldersInput = '';
     loadAvailableSessions();
     showOtpModal = true;
   }
@@ -291,13 +303,24 @@
 
     creatingOtp = true;
     try {
-      const serverOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+      let finalServerUrl = customServerUrl.trim();
+      if (!finalServerUrl) {
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
+        // Do not force localhost onto remote phones if left blank
+        finalServerUrl = isLocalhost ? '' : origin;
+      }
+
+      const rawScopes = scopeFoldersInput.split(',').map(s => s.trim()).filter(Boolean);
+      const finalScopes = rawScopes.length > 0 ? rawScopes : [folderPath.trim()];
+
       const res = await createPhotographerOtp({
         photographerName: photogName.trim(),
         folderPath: folderPath.trim(),
+        scopes: finalScopes,
         validityHours: Number(validityHours),
         settings: {
-          serverUrl: serverOrigin,
+          serverUrl: finalServerUrl,
           sessionId: folderPath.trim(),
           uploadFormat,
           autoUpload,
@@ -323,14 +346,25 @@
     setTimeout(() => { copied = false; }, 2000);
   }
 
-  async function handleRevokeToken(id: string) {
-    if (!confirm('Are you sure you want to permanently delete this photographer session?')) return;
+  function promptRevokeToken(t: PhotographerToken) {
+    revokingTokenId = t.id;
+    revokingTokenName = t.photographerName;
+    showRevokeModal = true;
+  }
+
+  async function confirmRevokeToken() {
+    if (!revokingTokenId) return;
+    isRevoking = true;
     try {
-      await revokePhotographerToken(id);
+      await revokePhotographerToken(revokingTokenId);
       toast.success('Photographer session removed');
+      showRevokeModal = false;
+      revokingTokenId = null;
       await refreshTokens();
     } catch (err: any) {
       toast.error(err.message || 'Failed to remove session');
+    } finally {
+      isRevoking = false;
     }
   }
 
@@ -338,6 +372,7 @@
     editingTokenId = t.id;
     editPhotogName = t.photographerName;
     editFolderPath = t.folderPath;
+    editScopeFoldersInput = t.scopes && t.scopes.length > 0 ? t.scopes.join(', ') : t.folderPath;
     editUploadFormat = t.settings?.uploadFormat || 'JPEG_ONLY';
     editAutoUpload = t.settings?.autoUpload ?? true;
     editWifiOnly = t.settings?.wifiOnly ?? false;
@@ -354,9 +389,13 @@
     }
     savingEdit = true;
     try {
+      const rawScopes = editScopeFoldersInput.split(',').map(s => s.trim()).filter(Boolean);
+      const finalScopes = rawScopes.length > 0 ? rawScopes : [editFolderPath.trim()];
+
       await updatePhotographerToken(editingTokenId, {
         photographerName: editPhotogName.trim(),
         folderPath: editFolderPath.trim(),
+        scopes: finalScopes,
         settings: {
           sessionId: editFolderPath.trim(),
           uploadFormat: editUploadFormat,
@@ -478,7 +517,7 @@
     return list.filter(item => item.name.toLowerCase().includes(q));
   });
 
-  function openFolderPickerModal(target: 'otp' | 'relink' | 'edit', initialValue = '') {
+  function openFolderPickerModal(target: 'otp' | 'relink' | 'edit' | 'otp_scope' | 'edit_scope', initialValue = '') {
     folderPickerTarget = target;
     const cleanVal = initialValue.trim();
     pickerSelectedPath = cleanVal;
@@ -561,10 +600,20 @@
 
     if (folderPickerTarget === 'otp') {
       folderPath = pickerSelectedPath;
+      if (!scopeFoldersInput.trim() || scopeFoldersInput === folderPath) {
+        scopeFoldersInput = pickerSelectedPath;
+      }
+    } else if (folderPickerTarget === 'otp_scope') {
+      scopeFoldersInput = pickerSelectedPath;
+    } else if (folderPickerTarget === 'edit_scope') {
+      editScopeFoldersInput = pickerSelectedPath;
     } else if (folderPickerTarget === 'relink') {
       targetMediaFolderInput = pickerSelectedPath;
     } else if (folderPickerTarget === 'edit') {
       editFolderPath = pickerSelectedPath;
+      if (!editScopeFoldersInput.trim() || editScopeFoldersInput === editFolderPath) {
+        editScopeFoldersInput = pickerSelectedPath;
+      }
     }
 
     showFolderPickerModal = false;
@@ -748,7 +797,19 @@
                         </div>
                       </td>
                       <td>
-                        <span class="tag"><Folder size={12} /> {t.folderPath}</span>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                          <span class="tag"><Folder size={12} /> {t.folderPath}</span>
+                          {#if t.scopes && t.scopes.length > 0}
+                            <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                              <span class="muted text-xs" style="font-size: 0.7rem;">Scope:</span>
+                              {#each t.scopes as sc}
+                                <span class="badge" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); color: #93c5fd; font-size: 0.7rem; padding: 1px 5px;">
+                                  {sc || '/ (Root)'}
+                                </span>
+                              {/each}
+                            </div>
+                          {/if}
+                        </div>
                       </td>
                       <td>
                         <div class="settings-pill-row">
@@ -762,22 +823,44 @@
                         </div>
                       </td>
                       <td>
-                        {#if t.isActive}
-                          <span class="badge active"><CheckCircle2 size={12} /> Active</span>
-                        {:else}
+                        {#if t.connectionStatus === 'disabled' || !t.isActive}
                           <span class="badge danger"><Power size={12} /> Disabled</span>
+                        {:else if t.connectionStatus === 'expired'}
+                          <span class="badge danger"><AlertTriangle size={12} /> Session Expired</span>
+                        {:else if t.connectionStatus === 'otp_expired'}
+                          <span class="badge danger" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171;"><AlertTriangle size={12} /> OTP Expired</span>
+                        {:else if t.connectionStatus === 'pending_claim'}
+                          <span class="badge info"><KeyRound size={12} /> Pending Claim</span>
+                        {:else if t.connectionStatus === 'online'}
+                          <span class="badge active"><span class="live-dot"></span> Online</span>
+                        {:else}
+                          <span class="badge" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.25);"><Wifi size={12} /> Offline</span>
                         {/if}
                       </td>
                       <td>
                         <span class="muted text-sm">
-                          {formatDateTime(t.lastSeenAt)}
+                          {#if t.lastSeenAt}
+                            {formatDateTime(t.lastSeenAt)}
+                          {:else}
+                            Never
+                          {/if}
                         </span>
                       </td>
                       <td>
                         {#if t.otpCode}
-                          <span class="otp-pill">{t.otpCode}</span>
+                          <div style="display: flex; flex-direction: column; gap: 2px;">
+                            <span class="otp-pill {t.isOtpExpired ? 'expired-otp' : ''}">{t.otpCode}</span>
+                            {#if t.isOtpExpired}
+                              <span class="text-xs" style="color: #f87171;">Expired</span>
+                            {:else}
+                              <span class="muted text-xs">Unclaimed</span>
+                            {/if}
+                          </div>
                         {:else}
-                          <span class="muted text-sm">Claimed</span>
+                          <div style="display: flex; align-items: center; gap: 4px;">
+                            <CheckCircle2 size={13} color="#34d399" />
+                            <span class="muted text-sm" style="color: #34d399;">Claimed</span>
+                          </div>
                         {/if}
                       </td>
                       <td>
@@ -817,7 +900,7 @@
 
                           <button 
                             class="btn danger btn-xs" 
-                            onclick={() => handleRevokeToken(t.id)}
+                            onclick={() => promptRevokeToken(t)}
                             title="Delete session"
                           >
                             <Trash2 size={12} />
@@ -1538,7 +1621,7 @@
       </div>
 
       <div class="form-group">
-        <label for="folder-pick">Event Session Folder Path *</label>
+        <label for="folder-pick">Default Session Folder Path *</label>
         <div style="display: flex; gap: 8px; align-items: center;">
           <input 
             id="folder-pick" 
@@ -1547,6 +1630,11 @@
             placeholder="e.g. weddings/2026-11-22-john" 
             class="form-input" 
             style="flex: 1;"
+            oninput={() => {
+              if (!scopeFoldersInput.trim() || scopeFoldersInput === folderPath) {
+                scopeFoldersInput = folderPath;
+              }
+            }}
             required 
           />
           <button 
@@ -1558,7 +1646,45 @@
             <Folder size={16} /> Browse...
           </button>
         </div>
-        <p class="muted text-xs" style="margin-top: 4px;">Click <strong>Browse...</strong> to navigate through parent folders and select via radio button.</p>
+        <p class="muted text-xs" style="margin-top: 4px;">Initial folder selected on FastUp upon pairing.</p>
+      </div>
+
+      <div class="form-group">
+        <label for="scope-folders">Allowed Scope Folders (Read / Write Permissions) *</label>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input 
+            id="scope-folders" 
+            type="text" 
+            bind:value={scopeFoldersInput} 
+            placeholder="e.g. weddings/2026-11-22-john (or comma-separated scopes)" 
+            class="form-input" 
+            style="flex: 1;"
+            required 
+          />
+          <button 
+            type="button" 
+            class="btn secondary" 
+            onclick={() => openFolderPickerModal('otp_scope', scopeFoldersInput)}
+            title="Browse & select scope folder"
+          >
+            <Folder size={16} /> Browse...
+          </button>
+        </div>
+        <p class="muted text-xs" style="margin-top: 4px;">
+          FastUp can <strong>ONLY</strong> view, select, and create subfolders inside this scope. Parent folders up to Root are visible for navigation, but cannot be selected or written to.
+        </p>
+      </div>
+
+      <div class="form-group">
+        <label for="server-url">Target Server URL (Optional)</label>
+        <input 
+          id="server-url" 
+          type="text" 
+          bind:value={customServerUrl} 
+          placeholder="e.g. http://192.168.1.100:8000 (leave blank to keep phone's setting)" 
+          class="form-input" 
+        />
+        <p class="muted text-xs" style="margin-top: 4px;">Leave blank if testing on localhost so the Android phone preserves its own entered LAN IP / domain.</p>
       </div>
 
       <div class="form-row">
@@ -1621,7 +1747,7 @@
     </div>
 
     <div class="form-group">
-      <label for="edit-folder-pick">Assigned Folder Path *</label>
+      <label for="edit-folder-pick">Default Session Folder Path *</label>
       <div style="display: flex; gap: 8px; align-items: center;">
         <input 
           id="edit-folder-pick" 
@@ -1640,7 +1766,33 @@
           <Folder size={16} /> Browse...
         </button>
       </div>
-      <p class="muted text-xs" style="margin-top: 4px;">Click <strong>Browse...</strong> to navigate through parent folders and select via radio button.</p>
+      <p class="muted text-xs" style="margin-top: 4px;">Initial folder selected on FastUp upon pairing.</p>
+    </div>
+
+    <div class="form-group">
+      <label for="edit-scope-folders">Allowed Scope Folders (Read / Write Permissions) *</label>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <input 
+          id="edit-scope-folders" 
+          type="text" 
+          bind:value={editScopeFoldersInput} 
+          placeholder="e.g. weddings/2026-11-22-john (or comma-separated scopes)"
+          class="form-input" 
+          style="flex: 1;" 
+          required
+        />
+        <button 
+          type="button" 
+          class="btn secondary" 
+          onclick={() => openFolderPickerModal('edit_scope', editScopeFoldersInput)}
+          title="Browse & select scope folder"
+        >
+          <Folder size={16} /> Browse...
+        </button>
+      </div>
+      <p class="muted text-xs" style="margin-top: 4px;">
+        FastUp can <strong>ONLY</strong> view, select, and create subfolders inside this scope. Parent folders up to Root are visible for navigation, but cannot be selected or written to.
+      </p>
     </div>
 
     <div class="form-row">
@@ -1915,6 +2067,28 @@
   </div>
 </Modal>
 
+<!-- Revoke Session Confirmation Modal -->
+<Modal id="revoke-session-modal" bind:show={showRevokeModal} title="Revoke Photographer Session">
+  <div style="padding: 0.5rem 0 1rem 0;">
+    <p style="color: #cbd5e1; margin-bottom: 1rem; line-height: 1.5; font-size: 0.95rem;">
+      Are you sure you want to permanently delete and revoke the session for
+      <strong style="color: #fff; font-weight: 600;">{revokingTokenName || 'this photographer'}</strong>?
+    </p>
+    <div class="status-box box-danger" style="margin-bottom: 1rem;">
+      <AlertTriangle size={18} />
+      <span>
+        FastUp app using this session will be immediately disconnected and blocked from uploading.
+      </span>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn secondary" onclick={() => { showRevokeModal = false; revokingTokenId = null; }}>Cancel</button>
+    <button type="button" class="btn danger" onclick={confirmRevokeToken} disabled={isRevoking}>
+      {isRevoking ? 'Revoking...' : 'Permanently Revoke'}
+    </button>
+  </div>
+</Modal>
+
 <style>
   .admin-container {
     width: 100%;
@@ -2122,6 +2296,28 @@
     background: rgba(16, 185, 129, 0.15);
     color: #34d399;
     border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #34d399;
+    box-shadow: 0 0 6px #34d399;
+    display: inline-block;
+    animation: livePulse 2s infinite ease-in-out;
+  }
+
+  @keyframes livePulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.3; transform: scale(0.8); }
+  }
+
+  .expired-otp {
+    text-decoration: line-through;
+    opacity: 0.6;
+    border-color: rgba(239, 68, 68, 0.4) !important;
+    color: #f87171 !important;
   }
 
   .badge.danger {

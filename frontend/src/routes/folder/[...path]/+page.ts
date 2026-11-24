@@ -36,10 +36,12 @@ export const load: PageLoad = async (event) => {
       directories: data.directories,
       scanning: data.scanning,
       isProcessing: data.isProcessing,
-      hostError: data.hostError
+      hostError: data.hostError,
+      isStagedFolder: data.isStagedFolder,
+      stagingNotice: data.stagingNotice
     };
   } catch (error) {
     console.error('Failed to load folder:', error);
-    return { folderPath, files: [], directories: [] };
+    return { folderPath, files: [], directories: [], isStagedFolder: false, stagingNotice: null };
   }
 };

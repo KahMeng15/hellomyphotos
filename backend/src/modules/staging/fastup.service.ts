@@ -22,6 +22,7 @@ export interface PredefinedSettings {
 export interface CreateOtpParams {
   photographerName: string;
   folderPath: string;
+  scopes?: string[];
   validityHours?: number;
   settings?: PredefinedSettings;
   userId?: string | null;
@@ -129,17 +130,115 @@ export function resolveClientIp(request: any, explicitIp?: string): string {
   return reqIp || '127.0.0.1';
 }
 
+export class ScopeSecurity {
+  /**
+   * Normalizes a folder path: removes leading/trailing slashes, resolves empty to '',
+   * cleans any '..' or '.' segments to prevent path traversal.
+   */
+  static normalizePath(folderPath: string | null | undefined): string {
+    if (!folderPath) return '';
+    return folderPath
+      .replace(/\\/g, '/')
+      .split('/')
+      .map(s => s.trim())
+      .filter(s => s && s !== '.' && s !== '..')
+      .join('/');
+  }
+
+  /**
+   * Resolves the effective scopes for a photographer.
+   * If scopes contains '*' or '/' or is empty when explicitly permitted root, root is allowed.
+   * If no scopes, falls back to [folder_path].
+   */
+  static getEffectiveScopes(scopeFolders?: string[] | null, defaultFolder?: string | null): string[] {
+    const raw = (scopeFolders && scopeFolders.length > 0)
+      ? scopeFolders
+      : (defaultFolder ? [defaultFolder] : []);
+    const clean = raw.map(s => this.normalizePath(s)).filter(s => s !== undefined);
+    return clean.length > 0 ? clean : [''];
+  }
+
+  /**
+   * Checks if a target path is strictly within the allowed scopes (or identical to a scope).
+   * Photographers have READ + WRITE + UPLOAD + CREATE permissions inside allowed paths.
+   */
+  static isPathAllowed(targetPath: string, allowedScopes: string[]): boolean {
+    if (!allowedScopes || allowedScopes.length === 0) return false;
+    const target = this.normalizePath(targetPath);
+    for (const scope of allowedScopes) {
+      const s = this.normalizePath(scope);
+      if (s === '*' || s === '' || s === '/') return true; // Unrestricted root access
+      if (target === s) return true;
+      if (target.startsWith(s + '/')) return true; // Subfolder inside scope
+    }
+    return false;
+  }
+
+  /**
+   * Checks if a path is an ancestor (parent) of any allowed scope.
+   * Ancestors must be visible so FastUp can navigate from Root -> ancestor -> scoped folder,
+   * but WRITE/SELECT/CREATE permissions MUST be denied for ancestors.
+   */
+  static isPathAncestor(targetPath: string, allowedScopes: string[]): boolean {
+    if (!allowedScopes || allowedScopes.length === 0) return false;
+    const target = this.normalizePath(targetPath);
+    for (const scope of allowedScopes) {
+      const s = this.normalizePath(scope);
+      if (s === '*' || s === '' || s === '/') return false; // Already allowed, not ancestor
+      if (target === '') return true; // Root is ancestor of any specific scope
+      if (s.startsWith(target + '/')) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Filters all system folders so that ONLY:
+   * 1. Scoped folders and their descendants (allowed read/write)
+   * 2. Ancestor folders leading down from root to the scopes (read-only navigation)
+   * are returned.
+   * ANY folder outside the scope and not an ancestor is completely omitted!
+   */
+  static filterAccessibleFolders(allFolders: string[], allowedScopes: string[]): string[] {
+    const effective = allowedScopes.map(s => this.normalizePath(s));
+    if (effective.includes('*') || effective.includes('')) {
+      return allFolders.map(s => this.normalizePath(s)).sort();
+    }
+    const result = new Set<string>();
+    // Always include ancestors leading to scopes
+    for (const scope of effective) {
+      if (!scope) continue;
+      const parts = scope.split('/');
+      for (let i = 1; i <= parts.length; i++) {
+        result.add(parts.slice(0, i).join('/'));
+      }
+    }
+    // Also include any folders in allFolders that are inside scope or ancestors of scope
+    for (const f of allFolders) {
+      const norm = this.normalizePath(f);
+      if (!norm) continue;
+      if (this.isPathAllowed(norm, effective) || this.isPathAncestor(norm, effective)) {
+        result.add(norm);
+      }
+    }
+    return Array.from(result).sort();
+  }
+}
+
 export class FastUpService {
   /**
-   * Generates a 6-digit numeric OTP and pre-allocates a photographer session.
+   * Generates a 6-digit numeric OTP and pre-allocates a photographer session with scope.
    */
   static async createOtp(params: CreateOtpParams) {
-    const safeFolderPath = sanitizeSessionId(params.folderPath);
+    const safeFolderPath = ScopeSecurity.normalizePath(params.folderPath);
     if (!safeFolderPath) {
       throw new Error('Valid folder path is required');
     }
     const photogName = (params.photographerName || 'Photographer').trim();
     const validityHours = Math.max(1, Math.min(params.validityHours || 24, 720)); // 1 hour to 30 days
+
+    const rawScopes = (params.scopes && params.scopes.length > 0) ? params.scopes : [safeFolderPath];
+    const cleanScopes = rawScopes.map(s => ScopeSecurity.normalizePath(s)).filter(Boolean);
+    const finalScopes = cleanScopes.length > 0 ? cleanScopes : [safeFolderPath];
 
     // Generate cryptographically secure 6-digit numeric code
     const randomNum = crypto.randomInt(100000, 999999);
@@ -158,15 +257,16 @@ export class FastUpService {
 
     const res = await query(
       `INSERT INTO photographer_tokens 
-       (token, otp_code, otp_expires_at, photographer_name, folder_path, settings_json, is_active, expires_at, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)
-       RETURNING id, token, otp_code, photographer_name, folder_path, settings_json, is_active, expires_at, created_at`,
+       (token, otp_code, otp_expires_at, photographer_name, folder_path, scope_folders, settings_json, is_active, expires_at, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9)
+       RETURNING id, token, otp_code, photographer_name, folder_path, scope_folders, settings_json, is_active, expires_at, created_at`,
       [
         token,
         otpCode,
         otpExpiresAt,
         photogName,
         safeFolderPath,
+        finalScopes,
         JSON.stringify(predefined),
         expiresAt,
         params.userId || null
@@ -179,6 +279,7 @@ export class FastUpService {
       otpCode: row.otp_code,
       photographerName: row.photographer_name,
       folderPath: row.folder_path,
+      scopes: row.scope_folders,
       expiresAt: row.expires_at,
       settings: row.settings_json
     };
@@ -186,7 +287,7 @@ export class FastUpService {
 
   /**
    * Claims a 6-digit OTP code from FastUp, marking the code consumed
-   * and returning the persistent token and predefined settings.
+   * and returning the persistent token, allowed scopes, and predefined settings.
    */
   static async claimOtp(otpCode: string, ipAddress?: string) {
     const cleanCode = (otpCode || '').replace(/\D/g, '').trim();
@@ -195,18 +296,30 @@ export class FastUpService {
     }
 
     const res = await query(
-      `SELECT id, token, photographer_name, folder_path, settings_json, expires_at 
+      `SELECT id, token, otp_code, otp_expires_at, photographer_name, folder_path, scope_folders, settings_json, is_active, expires_at 
        FROM photographer_tokens 
-       WHERE otp_code = $1 AND is_active = true AND (otp_expires_at IS NULL OR otp_expires_at > NOW())
+       WHERE otp_code = $1 
        LIMIT 1`,
       [cleanCode]
     );
 
     if (res.rows.length === 0) {
-      throw new Error('Invalid or expired OTP code');
+      throw new Error('Invalid OTP code. Please check the 6 digits and try again.');
     }
 
     const row = res.rows[0];
+
+    if (!row.is_active) {
+      throw new Error('This photographer session is disabled. Please contact the administrator.');
+    }
+
+    if (row.expires_at && new Date(row.expires_at) <= new Date()) {
+      throw new Error('This photographer session has expired.');
+    }
+
+    if (row.otp_expires_at && new Date(row.otp_expires_at) <= new Date()) {
+      throw new Error('This OTP code has expired. Please generate a new code in HelloMyPhotos.');
+    }
 
     // Invalidate the OTP code so it cannot be claimed twice, update last_seen_at
     await query(
@@ -227,11 +340,13 @@ export class FastUpService {
     }).catch(() => {});
 
     const settings = row.settings_json || {};
+    const effectiveScopes = ScopeSecurity.getEffectiveScopes(row.scope_folders, row.folder_path);
 
     return {
       token: row.token,
       photographerName: row.photographer_name,
       folderPath: row.folder_path,
+      scopes: effectiveScopes,
       settings: {
         serverUrl: settings.serverUrl || '',
         sessionId: row.folder_path,
@@ -243,45 +358,73 @@ export class FastUpService {
   }
 
   /**
-   * Lists all photographer tokens and their live status.
+   * Lists all photographer tokens and their live status including scope.
    */
   static async listTokens() {
     const res = await query(
-      `SELECT id, token, otp_code, photographer_name, folder_path, settings_json, is_active, expires_at, last_seen_at, created_at 
+      `SELECT id, token, otp_code, otp_expires_at, photographer_name, folder_path, scope_folders, settings_json, is_active, expires_at, last_seen_at, created_at 
        FROM photographer_tokens 
        ORDER BY created_at DESC 
        LIMIT 100`
     );
 
-    return res.rows.map(row => ({
-      id: row.id,
-      tokenPreview: row.token.slice(0, 10) + '...' + row.token.slice(-4),
-      hasPendingOtp: Boolean(row.otp_code),
-      otpCode: row.otp_code,
-      photographerName: row.photographer_name,
-      folderPath: row.folder_path,
-      isActive: row.is_active && (!row.expires_at || new Date(row.expires_at) > new Date()),
-      expiresAt: row.expires_at,
-      lastSeenAt: row.last_seen_at,
-      createdAt: row.created_at,
-      settings: row.settings_json
-    }));
+    const now = new Date();
+    return res.rows.map(row => {
+      const isExpired = Boolean(row.expires_at && new Date(row.expires_at) <= now);
+      const isOtpExpired = Boolean(row.otp_code && row.otp_expires_at && new Date(row.otp_expires_at) <= now);
+      const isOnline = Boolean(row.last_seen_at && (now.getTime() - new Date(row.last_seen_at).getTime()) <= 3 * 60 * 1000);
+
+      let connectionStatus = 'offline';
+      if (!row.is_active) {
+        connectionStatus = 'disabled';
+      } else if (isExpired) {
+        connectionStatus = 'expired';
+      } else if (row.otp_code) {
+        connectionStatus = isOtpExpired ? 'otp_expired' : 'pending_claim';
+      } else if (isOnline) {
+        connectionStatus = 'online';
+      } else {
+        connectionStatus = 'offline';
+      }
+
+      return {
+        id: row.id,
+        tokenPreview: row.token.slice(0, 10) + '...' + row.token.slice(-4),
+        hasPendingOtp: Boolean(row.otp_code && !isOtpExpired),
+        otpCode: row.otp_code,
+        otpExpiresAt: row.otp_expires_at,
+        isOtpExpired,
+        photographerName: row.photographer_name,
+        folderPath: row.folder_path,
+        scopes: ScopeSecurity.getEffectiveScopes(row.scope_folders, row.folder_path),
+        isActive: row.is_active && !isExpired,
+        isOnline,
+        connectionStatus,
+        expiresAt: row.expires_at,
+        lastSeenAt: row.last_seen_at,
+        createdAt: row.created_at,
+        settings: row.settings_json
+      };
+    });
   }
 
   /**
    * Toggles active/disabled status for a photographer session.
+   * Supports both database UUID id and raw token string.
    */
-  static async toggleTokenActive(tokenId: string, isActive?: boolean) {
+  static async toggleTokenActive(identifier: string, isActive?: boolean) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+    const whereCol = isUuid ? 'id' : 'token';
     let res;
     if (typeof isActive === 'boolean') {
       res = await query(
-        `UPDATE photographer_tokens SET is_active = $1 WHERE id = $2 RETURNING id, is_active, photographer_name, folder_path`,
-        [isActive, tokenId]
+        `UPDATE photographer_tokens SET is_active = $1 WHERE ${whereCol} = $2 RETURNING id, is_active, photographer_name, folder_path`,
+        [isActive, identifier]
       );
     } else {
       res = await query(
-        `UPDATE photographer_tokens SET is_active = NOT is_active WHERE id = $1 RETURNING id, is_active, photographer_name, folder_path`,
-        [tokenId]
+        `UPDATE photographer_tokens SET is_active = NOT is_active WHERE ${whereCol} = $1 RETURNING id, is_active, photographer_name, folder_path`,
+        [identifier]
       );
     }
 
@@ -340,6 +483,7 @@ export class FastUpService {
   static async updateToken(tokenId: string, updates: {
     photographerName?: string;
     folderPath?: string;
+    scopes?: string[];
     settings?: any;
     validityHours?: number;
   }) {
@@ -348,7 +492,14 @@ export class FastUpService {
     const current = currentRes.rows[0];
 
     const newName = updates.photographerName?.trim() || current.photographer_name;
-    const newFolder = updates.folderPath?.trim() || current.folder_path;
+    const newFolder = updates.folderPath ? ScopeSecurity.normalizePath(updates.folderPath) : current.folder_path;
+    let newScopes = current.scope_folders || (current.folder_path ? [current.folder_path] : []);
+    if (updates.scopes && updates.scopes.length > 0) {
+      newScopes = updates.scopes.map(s => ScopeSecurity.normalizePath(s)).filter(Boolean);
+    } else if (updates.folderPath && (!current.scope_folders || current.scope_folders.length <= 1)) {
+      newScopes = [newFolder];
+    }
+
     const mergedSettings = {
       ...(current.settings_json || {}),
       ...(updates.settings || {})
@@ -363,25 +514,44 @@ export class FastUpService {
       `UPDATE photographer_tokens 
        SET photographer_name = $1, 
            folder_path = $2, 
-           settings_json = $3, 
-           expires_at = $4 
-       WHERE id = $5 
-       RETURNING id, photographer_name, folder_path, settings_json, is_active, expires_at`,
-      [newName, newFolder, JSON.stringify(mergedSettings), newExpiresAt, tokenId]
+           scope_folders = $3,
+           settings_json = $4, 
+           expires_at = $5 
+       WHERE id = $6 
+       RETURNING id, photographer_name, folder_path, scope_folders, settings_json, is_active, expires_at`,
+      [newName, newFolder, newScopes, JSON.stringify(mergedSettings), newExpiresAt, tokenId]
     );
 
-    return res.rows[0];
+    const updated = res.rows[0];
+    return {
+      ...updated,
+      scopes: ScopeSecurity.getEffectiveScopes(updated.scope_folders, updated.folder_path)
+    };
   }
 
   /**
    * Revokes or deletes a photographer's token immediately.
+   * Supports both database UUID id and raw token string.
    */
-  static async revokeToken(tokenId: string) {
+  static async revokeToken(identifier: string) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+    const whereCol = isUuid ? 'id' : 'token';
     const res = await query(
-      `DELETE FROM photographer_tokens WHERE id = $1 RETURNING id`,
-      [tokenId]
+      `DELETE FROM photographer_tokens WHERE ${whereCol} = $1 RETURNING id, photographer_name, folder_path`,
+      [identifier]
     );
-    return res.rows.length > 0;
+    if (res.rows.length > 0) {
+      const deleted = res.rows[0];
+      FastUpService.logActivity({
+        eventType: 'connection',
+        photographerName: deleted.photographer_name,
+        folderPath: deleted.folder_path,
+        status: 'failed',
+        details: { action: 'token_permanently_revoked' }
+      }).catch(() => {});
+      return true;
+    }
+    return false;
   }
 
   /**

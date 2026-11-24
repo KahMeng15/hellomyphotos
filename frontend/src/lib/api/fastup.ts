@@ -11,6 +11,7 @@ export interface PredefinedSettings {
 export interface CreateOtpParams {
   photographerName: string;
   folderPath: string;
+  scopes?: string[];
   validityHours?: number;
   settings?: PredefinedSettings;
 }
@@ -20,9 +21,14 @@ export interface PhotographerToken {
   tokenPreview: string;
   hasPendingOtp: boolean;
   otpCode: string | null;
+  otpExpiresAt?: string | null;
+  isOtpExpired?: boolean;
   photographerName: string;
   folderPath: string;
+  scopes?: string[];
   isActive: boolean;
+  isOnline?: boolean;
+  connectionStatus?: 'online' | 'offline' | 'pending_claim' | 'otp_expired' | 'expired' | 'disabled';
   expiresAt: string | null;
   lastSeenAt: string | null;
   createdAt: string;
@@ -120,10 +126,21 @@ export interface ReconcileData {
   }>;
 }
 
+function getAuthHeaders(extraHeaders: Record<string, string> = {}): Record<string, string> {
+  const headers: Record<string, string> = { ...extraHeaders };
+  if (typeof localStorage !== 'undefined') {
+    const token = localStorage.getItem('token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+  return headers;
+}
+
 export async function createPhotographerOtp(params: CreateOtpParams) {
   const res = await fetch(`${API_BASE}/api/admin/fastup/otp`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify(params)
   });
@@ -133,7 +150,10 @@ export async function createPhotographerOtp(params: CreateOtpParams) {
 }
 
 export async function fetchPhotographerTokens(): Promise<PhotographerToken[]> {
-  const res = await fetch(`${API_BASE}/api/admin/fastup/tokens`, { credentials: 'include' });
+  const res = await fetch(`${API_BASE}/api/admin/fastup/tokens`, {
+    headers: getAuthHeaders(),
+    credentials: 'include'
+  });
   if (!res.ok) throw new Error('Failed to fetch photographer tokens');
   return res.json();
 }
@@ -141,16 +161,18 @@ export async function fetchPhotographerTokens(): Promise<PhotographerToken[]> {
 export async function revokePhotographerToken(id: string) {
   const res = await fetch(`${API_BASE}/api/admin/fastup/tokens/${id}`, {
     method: 'DELETE',
+    headers: getAuthHeaders(),
     credentials: 'include'
   });
-  if (!res.ok) throw new Error('Failed to revoke token');
-  return res.json();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Failed to revoke token');
+  return data;
 }
 
 export async function togglePhotographerTokenActive(id: string, isActive?: boolean): Promise<{ id: string; isActive: boolean }> {
   const res = await fetch(`${API_BASE}/api/admin/fastup/tokens/${id}/toggle-active`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify({ isActive })
   });
@@ -162,7 +184,7 @@ export async function togglePhotographerTokenActive(id: string, isActive?: boole
 export async function refreshPhotographerOtp(id: string, validityHours: number = 24): Promise<{ id: string; otpCode: string; otpExpiresAt: string }> {
   const res = await fetch(`${API_BASE}/api/admin/fastup/tokens/${id}/refresh-otp`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify({ validityHours })
   });
@@ -174,12 +196,13 @@ export async function refreshPhotographerOtp(id: string, validityHours: number =
 export async function updatePhotographerToken(id: string, params: {
   photographerName?: string;
   folderPath?: string;
+  scopes?: string[];
   settings?: PredefinedSettings;
   validityHours?: number;
 }): Promise<any> {
   const res = await fetch(`${API_BASE}/api/admin/fastup/tokens/${id}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     credentials: 'include',
     body: JSON.stringify(params)
   });
@@ -190,7 +213,10 @@ export async function updatePhotographerToken(id: string, params: {
 
 export async function fetchFastUpStats(sessionId?: string): Promise<FastUpStats> {
   const p = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
-  const res = await fetch(`${API_BASE}/api/admin/fastup/stats${p}`, { credentials: 'include' });
+  const res = await fetch(`${API_BASE}/api/admin/fastup/stats${p}`, {
+    headers: getAuthHeaders(),
+    credentials: 'include'
+  });
   if (!res.ok) throw new Error('Failed to fetch FastUp stats');
   return res.json();
 }
@@ -198,6 +224,7 @@ export async function fetchFastUpStats(sessionId?: string): Promise<FastUpStats>
 export async function retryFastUpFailedJobs() {
   const res = await fetch(`${API_BASE}/api/admin/fastup/retry-failed`, {
     method: 'POST',
+    headers: getAuthHeaders(),
     credentials: 'include'
   });
   if (!res.ok) throw new Error('Failed to retry failed jobs');

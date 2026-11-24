@@ -42,7 +42,7 @@ export async function fastupRoutes(fastify: FastifyInstance) {
      */
     adminScope.post('/api/admin/fastup/otp', async (request: FastifyRequest, reply: FastifyReply) => {
       const body = (request.body as any) || {};
-      const { photographerName, folderPath, validityHours, settings } = body;
+      const { photographerName, folderPath, scopes, validityHours, settings } = body;
 
       if (!folderPath || !photographerName) {
         return reply.status(400).send({ error: 'Folder path and photographer name are required' });
@@ -52,6 +52,7 @@ export async function fastupRoutes(fastify: FastifyInstance) {
         const result = await FastUpService.createOtp({
           photographerName,
           folderPath,
+          scopes: Array.isArray(scopes) ? scopes : (scopes ? [String(scopes)] : undefined),
           validityHours: validityHours ? Number(validityHours) : 24,
           settings,
           userId: request.user?.id
@@ -77,13 +78,16 @@ export async function fastupRoutes(fastify: FastifyInstance) {
 
     /**
      * DELETE /api/admin/fastup/tokens/:id
-     * Revoke / delete a photographer token.
+     * Revoke / delete a photographer token (by UUID or token string).
      */
     adminScope.delete<{ Params: { id: string } }>('/api/admin/fastup/tokens/:id', async (request, reply) => {
       const { id } = request.params;
       try {
         const revoked = await FastUpService.revokeToken(id);
-        return reply.send({ success: revoked });
+        if (!revoked) {
+          return reply.status(404).send({ error: 'Photographer session not found or already deleted' });
+        }
+        return reply.send({ success: true });
       } catch (err: any) {
         return reply.status(500).send({ error: err.message });
       }
@@ -130,6 +134,7 @@ export async function fastupRoutes(fastify: FastifyInstance) {
         const result = await FastUpService.updateToken(id, {
           photographerName: body.photographerName,
           folderPath: body.folderPath,
+          scopes: Array.isArray(body.scopes) ? body.scopes : (body.scopes ? [String(body.scopes)] : undefined),
           settings: body.settings,
           validityHours: body.validityHours ? Number(body.validityHours) : undefined
         });

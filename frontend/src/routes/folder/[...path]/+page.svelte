@@ -17,7 +17,7 @@ import { slide } from 'svelte/transition';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
   import { currentUser } from '$lib/stores/auth';
   import { updatePreferences } from '$lib/api/auth';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2, Sparkles, Layers, Cloud, ExternalLink, FolderPlus, Pause, Play, QrCode, Unlink } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2, Sparkles, Layers, Cloud, ExternalLink, FolderPlus, Pause, Play, QrCode, Unlink, Radio } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { getFolderGDriveSync, enableFolderGDriveSync, triggerFolderGDriveSync, togglePauseFolderGDriveSync, disableFolderGDriveSync, listGoogleAccounts, listGoogleDriveFolders, type FolderSyncInfo, type GoogleAccount } from '$lib/api/gdrive';
   import QRCode from 'qrcode';
@@ -25,6 +25,22 @@ import { slide } from 'svelte/transition';
   let { data }: { data: PageData } = $props();
 
   let isStagedFolder = $derived(Boolean((data as any).isStagedFolder || data.files?.some((f: any) => f.is_staged)));
+  let stagingNotice = $derived((data as any).stagingNotice || (isStagedFolder ? {
+    enabled: true,
+    title: 'Realtime Photo Sync in Progress',
+    message: 'Note that the photos in this app are being synced in realtime and are not filtered or edited yet. Please return during a later time for the final images. Any enquiries about these photos, you may contact the photographer.'
+  } : null));
+  let isRefreshingLiveSync = $state(false);
+
+  async function handleRefreshLiveSync() {
+    isRefreshingLiveSync = true;
+    try {
+      const { invalidateAll } = await import('$app/navigation');
+      await invalidateAll();
+    } catch {} finally {
+      setTimeout(() => { isRefreshingLiveSync = false; }, 600);
+    }
+  }
   
   // Settings Modal State
   let folderDescInput = $state('');
@@ -1536,6 +1552,28 @@ import { slide } from 'svelte/transition';
 </div>
 
 {#key data.folderPath}
+{#if isStagedFolder && stagingNotice && stagingNotice.enabled}
+  <div class="staging-disclaimer-banner">
+    <div class="disclaimer-icon">
+      <Radio size={20} color="#a855f7" />
+    </div>
+    <div class="disclaimer-content">
+      <h4 class="disclaimer-title">{stagingNotice.title || 'Realtime Photo Sync in Progress'}</h4>
+      <p class="disclaimer-text">{stagingNotice.message}</p>
+    </div>
+    <button 
+      type="button" 
+      class="disclaimer-refresh-btn" 
+      onclick={handleRefreshLiveSync}
+      disabled={isRefreshingLiveSync}
+      title="Refresh photos from live sync"
+    >
+      <RefreshCw size={15} class={isRefreshingLiveSync ? 'spinning' : ''} />
+      <span>Refresh</span>
+    </button>
+  </div>
+{/if}
+
 {#if isSearching && !isSearchLoading && sortedDirectories.length === 0 && sortedFiles.length === 0 && viewMode !== 'compact-list'}
   <div class="search-empty-state">
     <p class="empty-title">No media or folders found matching "{searchQuery}"</p>
@@ -2816,6 +2854,97 @@ import { slide } from 'svelte/transition';
 </Modal>
 
 <style>
+  /* Staging / FastUp Live Sync Disclaimer Banner */
+  .staging-disclaimer-banner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    margin: 0 0 24px 0;
+    background: linear-gradient(135deg, rgba(88, 28, 135, 0.25) 0%, rgba(24, 24, 27, 0.75) 100%);
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 16px rgba(168, 85, 247, 0.15);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    animation: fadeInNotice 0.3s ease-out;
+  }
+  @keyframes fadeInNotice {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .disclaimer-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    background: rgba(168, 85, 247, 0.2);
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .disclaimer-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+  .disclaimer-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #f3e8ff;
+    letter-spacing: -0.01em;
+  }
+  .disclaimer-text {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: #d1d5db;
+  }
+  .disclaimer-refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: rgba(168, 85, 247, 0.18);
+    border: 1px solid rgba(168, 85, 247, 0.45);
+    color: #f3e8ff;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .disclaimer-refresh-btn:hover:not(:disabled) {
+    background: rgba(168, 85, 247, 0.32);
+    border-color: rgba(168, 85, 247, 0.65);
+    transform: translateY(-1px);
+    color: #ffffff;
+  }
+  .disclaimer-refresh-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .spinning {
+    animation: spin 1s linear infinite;
+  }
+  @media (max-width: 640px) {
+    .staging-disclaimer-banner {
+      flex-wrap: wrap;
+    }
+    .disclaimer-refresh-btn {
+      width: 100%;
+      justify-content: center;
+      margin-top: 4px;
+    }
+  }
+
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }

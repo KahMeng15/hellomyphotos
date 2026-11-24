@@ -398,6 +398,7 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_photographer_otp ON photographer_tokens(otp_code) WHERE is_active = true`,
   `CREATE INDEX IF NOT EXISTS idx_photographer_token ON photographer_tokens(token) WHERE is_active = true`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='photographer_tokens' AND column_name='scope_folders') THEN ALTER TABLE photographer_tokens ADD COLUMN scope_folders TEXT[] DEFAULT '{}'::text[]; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='is_hidden_staging') THEN ALTER TABLE media_files ADD COLUMN is_hidden_staging BOOLEAN DEFAULT false; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='matched_media_id') THEN ALTER TABLE media_files ADD COLUMN matched_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_settings' AND column_name='hide_staging') THEN ALTER TABLE folder_settings ADD COLUMN hide_staging BOOLEAN DEFAULT false; END IF; END $$;`,
