@@ -535,7 +535,14 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, 
               is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height, 
               is_staged, is_hidden_staging, burst_group_id, is_hero, quality_score, face_count, is_favorite,
-              COALESCE((SELECT COUNT(*)::int FROM media_files b WHERE b.burst_group_id = media_files.burst_group_id), 1) as burst_count
+              CASE 
+                WHEN media_files.burst_group_id IS NOT NULL THEN (
+                  SELECT COUNT(*)::int 
+                  FROM media_files b 
+                  WHERE b.burst_group_id = media_files.burst_group_id
+                )
+                ELSE 1 
+              END as burst_count
        FROM media_files 
        WHERE folder_path = $1 AND (is_hidden_staging = false OR is_hidden_staging IS NULL) 
        ORDER BY file_name ASC`, 

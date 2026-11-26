@@ -426,6 +426,7 @@ const SCHEMA_STATEMENTS = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='quality_score') THEN ALTER TABLE media_files ADD COLUMN quality_score REAL; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='face_count') THEN ALTER TABLE media_files ADD COLUMN face_count INTEGER DEFAULT 0; END IF; END $$;`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_burst_group ON media_files(burst_group_id) WHERE is_staged = true`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_burst_group_all ON media_files(burst_group_id) WHERE burst_group_id IS NOT NULL`,
   `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_staging_curated ON media_files(folder_path, is_hero) WHERE is_staged = true`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_view_mode_toggle') THEN ALTER TABLE shared_folders ADD COLUMN allow_view_mode_toggle BOOLEAN DEFAULT true; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='show_hidden_alternates') THEN ALTER TABLE shared_folders ADD COLUMN show_hidden_alternates BOOLEAN DEFAULT true; END IF; END $$;`,

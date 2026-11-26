@@ -475,7 +475,14 @@ export async function stagingRoutes(fastify: FastifyInstance) {
     const filesRes = await query(
       `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, created_at, updated_at, img_width, img_height, is_staged,
               burst_group_id, is_hero, quality_score, face_count,
-              COALESCE((SELECT COUNT(*)::int FROM media_files b WHERE b.burst_group_id = media_files.burst_group_id), 1) as burst_count
+              CASE 
+                WHEN media_files.burst_group_id IS NOT NULL THEN (
+                  SELECT COUNT(*)::int 
+                  FROM media_files b 
+                  WHERE b.burst_group_id = media_files.burst_group_id
+                )
+                ELSE 1 
+              END as burst_count
        FROM media_files 
        WHERE (folder_path = $1 OR folder_path LIKE $2 OR folder_path = $3 OR folder_path LIKE $4) ${curatedFilter}
        ORDER BY created_at DESC`,

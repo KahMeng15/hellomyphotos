@@ -1018,7 +1018,14 @@ export class StagingService {
       `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, 
               has_1080p, has_480p, created_at, updated_at, img_width, img_height, is_staged,
               burst_group_id, is_hero, quality_score, face_count,
-              (SELECT COUNT(*)::int FROM media_files b WHERE b.burst_group_id = media_files.burst_group_id) as burst_count
+              CASE 
+                WHEN media_files.burst_group_id IS NOT NULL THEN (
+                  SELECT COUNT(*)::int 
+                  FROM media_files b 
+                  WHERE b.burst_group_id = media_files.burst_group_id
+                )
+                ELSE 1 
+              END as burst_count
        FROM media_files 
        WHERE burst_group_id = $1 
        ORDER BY is_hero DESC, COALESCE((exif_json->>'DateTimeOriginal')::timestamp, created_at) ASC, file_name ASC`,
