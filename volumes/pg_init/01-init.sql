@@ -17,6 +17,7 @@ CREATE TABLE media_files (
     transcoded_mp4_path TEXT,
     transcoded_webm_path TEXT,
     is_favorite BOOLEAN DEFAULT false,
+    is_staged BOOLEAN DEFAULT false,
     clip_embedding vector(512),
     file_identifier VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

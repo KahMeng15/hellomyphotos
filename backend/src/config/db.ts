@@ -77,6 +77,7 @@ const SCHEMA_STATEMENTS = [
     is_transcoded BOOLEAN DEFAULT false,
     transcoded_mp4_path TEXT,
     transcoded_webm_path TEXT,
+    is_staged BOOLEAN DEFAULT false,
     clip_embedding vector(512),
     failed_attempts INTEGER DEFAULT 0,
     processing_error TEXT,
@@ -419,6 +420,7 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_fastup_activity_created ON fastup_activity_logs(created_at DESC)`,
   // ---- FastUp Burst Curation & Staging Dual-View ----
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='is_staged') THEN ALTER TABLE media_files ADD COLUMN is_staged BOOLEAN DEFAULT false; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='burst_group_id') THEN ALTER TABLE media_files ADD COLUMN burst_group_id UUID; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='is_hero') THEN ALTER TABLE media_files ADD COLUMN is_hero BOOLEAN DEFAULT true; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='quality_score') THEN ALTER TABLE media_files ADD COLUMN quality_score REAL; END IF; END $$;`,
