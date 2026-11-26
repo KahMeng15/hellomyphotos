@@ -1104,6 +1104,7 @@ export class FastUpService {
     try {
       await deleteKeysByPattern('folder_dirs_v2:*');
       await deleteKeysByPattern('share:dirs:*');
+      await redis.del('cache:staging:folders');
     } catch {}
 
     // 4. Update Google Drive sync if active: migrate sync record from FASTUP to MEDIA and schedule cleanup
@@ -1170,6 +1171,7 @@ export class FastUpService {
     try {
       await deleteKeysByPattern('folder_dirs_v2:*');
       await deleteKeysByPattern('share:dirs:*');
+      await redis.del('cache:staging:folders');
     } catch {}
 
     return {
@@ -1243,6 +1245,7 @@ export class FastUpService {
     try {
       await deleteKeysByPattern('folder_dirs_v2:*');
       await deleteKeysByPattern('share:dirs:*');
+      await redis.del('cache:staging:folders');
     } catch {}
 
     return {

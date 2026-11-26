@@ -14,6 +14,11 @@ if (process.env.IS_WORKER === 'true') {
   console.log(`[Face Detection Worker] Running face detection for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   if (!mimeType || mimeType.startsWith('image/')) {
+    const fileExists = await query('SELECT 1 FROM media_files WHERE id = $1', [mediaId]);
+    if (fileExists.rows.length === 0) {
+      console.log(`[Face Detection Worker] Skipping ${mediaId}: file no longer exists in database`);
+      return { skipped: true, reason: 'File no longer exists in database' };
+    }
     const existing = await query('SELECT 1 FROM face_embeddings WHERE media_id = $1 LIMIT 1', [mediaId]);
     if (existing.rows.length > 0) {
       console.log(`[Face Detection Worker] Skipping ${mediaId}, faces already detected`);

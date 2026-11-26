@@ -14,7 +14,11 @@ if (process.env.IS_WORKER === 'true') {
   console.log(`[Smart Search Worker] Generating search index for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   const existing = await query('SELECT clip_embedding FROM media_files WHERE id = $1', [mediaId]);
-  if (existing.rows.length > 0 && existing.rows[0].clip_embedding !== null) {
+  if (existing.rows.length === 0) {
+    console.log(`[Smart Search Worker] Skipping ${mediaId}: file no longer exists in database`);
+    return { skipped: true, reason: 'File no longer exists' };
+  }
+  if (existing.rows[0].clip_embedding !== null) {
     console.log(`[Smart Search Worker] Skipping ${mediaId}, embedding already generated`);
   } else {
     try {

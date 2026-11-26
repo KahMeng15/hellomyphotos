@@ -16,7 +16,11 @@ if (process.env.IS_WORKER === 'true') {
   let actionTaken = 'processed';
   if (mimeType && mimeType.startsWith('video/')) {
     const existing = await query('SELECT has_480p FROM media_files WHERE id = $1', [mediaId]);
-    if (existing.rows.length > 0 && existing.rows[0].has_480p) {
+    if (existing.rows.length === 0) {
+      console.log(`[Video Worker] Skipping ${mediaId}: file no longer exists in database`);
+      return { action: 'skipped' };
+    }
+    if (existing.rows[0].has_480p) {
       console.log(`[Video Worker] Skipping ${mediaId}, video already processed`);
       actionTaken = 'skipped';
     } else {

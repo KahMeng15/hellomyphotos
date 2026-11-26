@@ -15,7 +15,11 @@ if (process.env.IS_WORKER === 'true') {
   console.log(`[Metadata Worker] Extracting metadata for: ${(fullPath || mediaId).replace(/^.*\/media_ro\//, '')}`);
 
   const existing = await query('SELECT exif_json FROM media_files WHERE id = $1', [mediaId]);
-  if (existing.rows.length > 0 && existing.rows[0].exif_json !== null) {
+  if (existing.rows.length === 0) {
+    console.log(`[Metadata Worker] Skipping ${mediaId}: file no longer exists in database`);
+    return;
+  }
+  if (existing.rows[0].exif_json !== null) {
     console.log(`[Metadata Worker] Skipping ${mediaId}, metadata already extracted`);
   } else {
     await MetadataService.extractMetadata(mediaId, fullPath, mimeType);

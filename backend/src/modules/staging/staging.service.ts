@@ -458,12 +458,21 @@ export class StagingService {
   }
 
   /**
-   * Returns all directory paths across media_files, MEDIA_ROOT, and STAGING_ROOT.
+   * Returns all directory paths across media_files, MEDIA_ROOT (indexed in DB), and STAGING_ROOT.
    */
   static async listFolders(): Promise<string[]> {
+    const cacheKey = 'cache:staging:folders';
+    try {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {}
+
     const foldersSet = new Set<string>();
 
     // 1. Fetch real existing folders from media_files, folder_settings, and photographer_tokens
+    // Uses indexed DB query (<90ms) instead of synchronous unbounded recursive readdir over CIFS network mount (71s)
     try {
       const dbFolders = await query(`
         SELECT DISTINCT folder_path FROM (
@@ -494,24 +503,7 @@ export class StagingService {
       console.warn('[Staging] Failed querying DB folders:', e.message);
     }
 
-    // 2. Scan permanent media filesystem (MEDIA_ROOT)
-    if (fs.existsSync(MEDIA_ROOT)) {
-      async function walkMedia(currentDir: string, relPath: string) {
-        try {
-          const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
-          for (const entry of entries) {
-            if (entry.isDirectory() && !entry.name.startsWith('.')) {
-              const nextRel = relPath ? `${relPath}/${entry.name}` : entry.name;
-              foldersSet.add(nextRel);
-              await walkMedia(path.join(currentDir, entry.name), nextRel);
-            }
-          }
-        } catch {}
-      }
-      await walkMedia(MEDIA_ROOT, '');
-    }
-
-    // 3. Scan staging filesystem (STAGING_ROOT)
+    // 2. Scan staging filesystem (STAGING_ROOT) - lightweight local directories only
     if (fs.existsSync(STAGING_ROOT)) {
       async function walkStaging(currentDir: string, relPath: string) {
         try {
@@ -530,6 +522,11 @@ export class StagingService {
 
     const folders = Array.from(foldersSet);
     folders.sort();
+
+    try {
+      await redis.set(cacheKey, JSON.stringify(folders), 'EX', 3600);
+    } catch {}
+
     return folders;
   }
 
@@ -561,6 +558,7 @@ export class StagingService {
 
     // Invalidate Redis directory caches
     await deleteKeysByPattern('folder_dirs_v2:*').catch(() => {});
+    await redis.del('cache:staging:folders').catch(() => {});
 
     return cleanPath;
   }
@@ -585,16 +583,20 @@ export class StagingService {
         const folders = await this.listFolders();
         for (const rel of folders) {
           const fullDir = path.join(STAGING_ROOT, rel);
-          const stat = await fs.promises.stat(fullDir);
-          sessionMap.set(rel, {
-            sessionId: rel,
-            folderPath: `staging/${rel}`,
-            photoCount: 0,
-            sizeBytes: 0,
-            createdAt: stat.birthtime.toISOString(),
-            lastModifiedAt: stat.mtime.toISOString(),
-            shares: []
-          });
+          try {
+            if (!fs.existsSync(fullDir)) continue;
+            const stat = await fs.promises.stat(fullDir);
+            if (!stat.isDirectory()) continue;
+            sessionMap.set(rel, {
+              sessionId: rel,
+              folderPath: `staging/${rel}`,
+              photoCount: 0,
+              sizeBytes: 0,
+              createdAt: stat.birthtime.toISOString(),
+              lastModifiedAt: stat.mtime.toISOString(),
+              shares: []
+            });
+          } catch {}
         }
       } catch (err: any) {
         console.error('[Staging] Failed to scan STAGING_ROOT folders:', err.message);
@@ -734,6 +736,7 @@ export class StagingService {
     try {
       await deleteKeysByPattern('folder_dirs_v2:*');
       await deleteKeysByPattern('share:dirs:*');
+      await redis.del('cache:staging:folders');
     } catch {}
 
     return {
