@@ -51,6 +51,7 @@
   let editExpiryDateTime = $state('');
   let editAllowDownloadImages = $state(false);
   let editAllowDownloadFolder = $state(false);
+  let editAllowFavorites = $state(false);
   let editWatermarkEnabled = $state(false);
   let editWatermarkTemplateId = $state<string>('');
   let editIsActive = $state(true);
@@ -216,6 +217,7 @@
     extendingToken = null;
     editAllowDownloadImages = share.allow_download_images ?? false;
     editAllowDownloadFolder = share.allow_download_folder ?? false;
+    editAllowFavorites = share.allow_favorites ?? false;
     editWatermarkEnabled = share.watermark_enabled ?? false;
     editWatermarkTemplateId = share.watermark_template_id || '';
     editIsActive = share.is_active !== false;
@@ -263,6 +265,7 @@
         expires_at: expiresAt,
         allow_download_images: editAllowDownloadImages,
         allow_download_folder: editAllowDownloadFolder,
+        allow_favorites: editAllowFavorites,
         watermark_enabled: isWatermarked,
         watermark_template_id: editWatermarkTemplateId || null
       });
@@ -902,6 +905,10 @@
                   <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #ccc; cursor: pointer;">
                     <input type="checkbox" bind:checked={editAllowDownloadFolder} style="width: 16px; height: 16px;" />
                     Allow downloading entire folder (ZIP)
+                  </label>
+                  <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #ccc; cursor: pointer;">
+                    <input type="checkbox" bind:checked={editAllowFavorites} style="width: 16px; height: 16px;" />
+                    Allow visitors to favorite photos
                   </label>
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <label style="font-size: 0.82rem; color: #ccc;">Watermark:</label>

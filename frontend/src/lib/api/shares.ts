@@ -5,6 +5,7 @@ export interface ShareData {
   share_token: string;
   allow_download_images: boolean;
   allow_download_folder: boolean;
+  allow_favorites?: boolean;
   watermark_enabled: boolean;
   watermark_template_id?: string | null;
   watermark_template_name?: string | null;
@@ -56,12 +57,13 @@ export async function createShare(
   allowDownloadFolder: boolean,
   watermarkEnabled: boolean,
   expiresAt: string | null,
-  watermarkTemplateId?: string | null
+  watermarkTemplateId?: string | null,
+  allowFavorites?: boolean
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/shares`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt })
+    body: JSON.stringify({ folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites })
   });
   if (!res.ok) throw new Error('Failed to create share');
   const data = await res.json();
@@ -74,12 +76,13 @@ export async function createPersonShare(
   allowDownloadFolder: boolean,
   watermarkEnabled: boolean,
   expiresAt: string | null,
-  watermarkTemplateId?: string | null
+  watermarkTemplateId?: string | null,
+  allowFavorites?: boolean
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/shares`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, folderPath: null, mediaId: null })
+    body: JSON.stringify({ personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, folderPath: null, mediaId: null, allowFavorites })
   });
   if (!res.ok) throw new Error('Failed to create person share');
   const data = await res.json();
@@ -107,6 +110,7 @@ export interface UpdateSharePayload {
   allowDownloadFolder?: boolean;
   watermarkEnabled?: boolean;
   watermarkTemplateId?: string | null;
+  allowFavorites?: boolean;
 }
 
 export async function updateShare(token: string, updates: UpdateSharePayload): Promise<ShareData> {
@@ -218,6 +222,7 @@ export async function updateAdminShare(token: string, payload: {
   allow_download_folder?: boolean;
   watermark_enabled?: boolean;
   watermark_template_id?: string | null;
+  allow_favorites?: boolean;
 }): Promise<void> {
   const jwt = localStorage.getItem('token');
   const res = await fetch(`${API_BASE}/api/admin/shares/${token}`, {

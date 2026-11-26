@@ -20,6 +20,7 @@ export interface MediaFile {
   distance?: number;
   burst_group_id?: string | null;
   is_hero?: boolean;
+  is_favorite?: boolean;
   burst_count?: number;
   quality_score?: number | null;
   face_count?: number;
@@ -360,6 +361,28 @@ export async function togglePhotoVisibility(mediaId: string, show?: boolean, sha
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || 'Failed to update photo visibility');
+  }
+  return res.json();
+}
+
+export async function toggleFavorite(
+  mediaId: string, 
+  isFavorite?: boolean, 
+  shareToken?: string
+): Promise<{ success: boolean; id: string; is_favorite: boolean }> {
+  const url = shareToken 
+    ? `${API_BASE}/api/shares/${encodeURIComponent(shareToken)}/media/${encodeURIComponent(mediaId)}/favorite`
+    : `${API_BASE}/api/media/${encodeURIComponent(mediaId)}/favorite`;
+  
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_favorite: isFavorite }),
+    credentials: 'include'
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to update favorite status');
   }
   return res.json();
 }

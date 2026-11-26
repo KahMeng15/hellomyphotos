@@ -1688,7 +1688,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post('/api/admin/shares', async (request, reply) => {
     try {
-      const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt } = (request.body || {}) as any;
+      const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites } = (request.body || {}) as any;
       if (!folderPath && !mediaId && !personId) {
         return reply.status(400).send({ error: 'Missing folderPath, mediaId, or personId' });
       }
@@ -1696,9 +1696,9 @@ export async function adminRoutes(fastify: FastifyInstance) {
       const shareToken = crypto.randomBytes(6).toString('base64url');
       const isWatermarked = watermarkEnabled ?? Boolean(watermarkTemplateId);
       await query(`
-        INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id]);
+        INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, allow_favorites)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id, allowFavorites ?? false]);
       return reply.send({ success: true, shareToken });
     } catch (e: any) {
       request.log.error(e);
@@ -1708,7 +1708,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.put('/api/admin/shares/:token', async (request, reply) => {
     const { token } = request.params as any;
-    const { is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id } = request.body as any;
+    const { is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, allow_favorites } = request.body as any;
     try {
       await query(`
         UPDATE shared_folders 
@@ -1717,9 +1717,10 @@ export async function adminRoutes(fastify: FastifyInstance) {
             allow_download_images = COALESCE($3, allow_download_images),
             allow_download_folder = COALESCE($4, allow_download_folder),
             watermark_enabled = COALESCE($5, watermark_enabled),
-            watermark_template_id = COALESCE($6, watermark_template_id)
-        WHERE share_token = $7
-      `, [is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, token]);
+            watermark_template_id = COALESCE($6, watermark_template_id),
+            allow_favorites = COALESCE($7, allow_favorites)
+        WHERE share_token = $8
+      `, [is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, allow_favorites, token]);
       return reply.send({ success: true });
     } catch (e: any) {
       request.log.error(e);

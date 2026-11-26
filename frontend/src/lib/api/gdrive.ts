@@ -8,6 +8,17 @@ export interface GoogleAccount {
   created_at: string;
 }
 
+export interface CaesiumConfig {
+  enabled: boolean;
+  mode?: 'lossy' | 'lossless' | 'max_size';
+  quality?: number; // 1-100, default 80
+  max_size?: string; // e.g. '1MB', '500KB'
+  width?: number | null;
+  height?: number | null;
+  keep_exif?: boolean; // default true
+  keep_dates?: boolean; // default true
+}
+
 export interface FolderSyncInfo {
   synced: boolean;
   sync?: {
@@ -25,6 +36,8 @@ export interface FolderSyncInfo {
     error_message: string | null;
     syncedFileCount?: number;
     totalLocalJpegs?: number;
+    caesium_enabled?: boolean;
+    caesium_config?: CaesiumConfig | null;
   };
 }
 
@@ -84,12 +97,56 @@ export async function listGoogleDriveFolders(accountId: string, parentId?: strin
   return data.folders || [];
 }
 
+export async function getCaesiumSettings(): Promise<{
+  isAvailable: boolean;
+  version?: string;
+  binaryPath?: string;
+  defaultConfig: CaesiumConfig;
+}> {
+  const res = await fetch(`${API_BASE}/api/gdrive/caesium-settings`, {
+    credentials: 'include'
+  });
+  if (!res.ok) {
+    return {
+      isAvailable: false,
+      defaultConfig: {
+        enabled: true,
+        mode: 'lossy',
+        quality: 80,
+        max_size: '1MB',
+        width: null,
+        height: null,
+        keep_exif: true,
+        keep_dates: true
+      }
+    };
+  }
+  return res.json();
+}
+
+export async function updateCaesiumDefaultSettings(config: Partial<CaesiumConfig>): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/gdrive/caesium-settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ config })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update default Caesium settings');
+  }
+  return res.json();
+}
+
 export async function enableFolderGDriveSync(params: {
   accountId: string;
   folderPath: string;
   sourceType?: 'MEDIA' | 'FASTUP';
   folderName?: string;
   existingFolderId?: string;
+  caesiumEnabled?: boolean;
+  caesiumConfig?: CaesiumConfig;
+  saveAsDefault?: boolean;
 }): Promise<any> {
   const res = await fetch(`${API_BASE}/api/gdrive/sync`, {
     method: 'POST',
@@ -100,6 +157,26 @@ export async function enableFolderGDriveSync(params: {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || 'Failed to enable Google Drive sync');
+  }
+  return res.json();
+}
+
+export async function updateFolderCaesiumSettings(params: {
+  folderPath: string;
+  sourceType?: 'MEDIA' | 'FASTUP';
+  caesiumEnabled: boolean;
+  caesiumConfig: CaesiumConfig;
+  saveAsDefault?: boolean;
+}): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/gdrive/sync/caesium`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(params)
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update Caesium settings');
   }
   return res.json();
 }

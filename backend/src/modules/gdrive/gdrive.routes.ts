@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { requireAuth } from '../../utils/auth';
 import { requireStagingAuth } from '../staging/staging.routes';
 import { GDriveService } from './gdrive.service';
+import { CaesiumService, CaesiumConfig } from './caesium.service';
 import { gdriveSyncQueue } from '../../queue/gdriveSyncQueue';
 import { query } from '../../config/db';
 import { logger } from '../../utils/logger';
@@ -87,6 +88,34 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
       }
     });
 
+    // Get Caesium settings and availability
+    folderScope.get('/api/gdrive/caesium-settings', async (_request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const status = await CaesiumService.isAvailable();
+        const defaultConfig = await CaesiumService.getDefaultConfig();
+        return reply.send({
+          isAvailable: status.available,
+          version: status.version,
+          binaryPath: status.binaryPath,
+          defaultConfig
+        });
+      } catch (err: any) {
+        return reply.status(500).send({ error: err.message });
+      }
+    });
+
+    // Update global default Caesium settings (for recycling across folders)
+    folderScope.put<{
+      Body: { config: Partial<CaesiumConfig> }
+    }>('/api/gdrive/caesium-settings', async (request, reply) => {
+      try {
+        const updated = await CaesiumService.saveDefaultConfig(request.body.config || {});
+        return reply.send({ success: true, defaultConfig: updated });
+      } catch (err: any) {
+        return reply.status(500).send({ error: err.message });
+      }
+    });
+
     // Get list of folders on Google Drive
     folderScope.get<{
       Querystring: { accountId: string; parentId?: string }
@@ -164,9 +193,21 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
         sourceType?: 'MEDIA' | 'FASTUP';
         folderName?: string;
         existingFolderId?: string;
+        caesiumEnabled?: boolean;
+        caesiumConfig?: CaesiumConfig;
+        saveAsDefault?: boolean;
       }
     }>('/api/gdrive/sync', async (request, reply) => {
-      const { accountId, folderPath, sourceType = 'MEDIA', folderName, existingFolderId } = request.body;
+      const { 
+        accountId, 
+        folderPath, 
+        sourceType = 'MEDIA', 
+        folderName, 
+        existingFolderId,
+        caesiumEnabled,
+        caesiumConfig,
+        saveAsDefault
+      } = request.body;
 
       if (!accountId || folderPath === undefined) {
         return reply.status(400).send({ error: 'accountId and folderPath are required' });
@@ -178,7 +219,10 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
           sourceType,
           folderPath,
           folderName,
-          existingFolderId
+          existingFolderId,
+          caesiumEnabled,
+          caesiumConfig,
+          saveAsDefault
         });
 
         // Trigger immediate background scan & sync of existing JPEGs
@@ -194,6 +238,41 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
         });
       } catch (err: any) {
         logger.error('[GDrive] Failed to create sync:', err);
+        return reply.status(500).send({ error: err.message });
+      }
+    });
+
+    // Update Caesium parameters for an active folder sync
+    folderScope.patch<{
+      Body: {
+        folderPath: string;
+        sourceType?: 'MEDIA' | 'FASTUP';
+        caesiumEnabled: boolean;
+        caesiumConfig: CaesiumConfig;
+        saveAsDefault?: boolean;
+      }
+    }>('/api/gdrive/sync/caesium', async (request, reply) => {
+      const { folderPath, sourceType = 'MEDIA', caesiumEnabled, caesiumConfig, saveAsDefault } = request.body;
+
+      if (folderPath === undefined || caesiumEnabled === undefined || !caesiumConfig) {
+        return reply.status(400).send({ error: 'folderPath, caesiumEnabled, and caesiumConfig are required' });
+      }
+
+      try {
+        const updatedSync = await GDriveService.updateCaesiumSyncConfig({
+          folderPath,
+          sourceType,
+          caesiumEnabled,
+          caesiumConfig,
+          saveAsDefault
+        });
+
+        return reply.send({
+          success: true,
+          sync: updatedSync
+        });
+      } catch (err: any) {
+        logger.error('[GDrive] Failed to update Caesium sync config:', err);
         return reply.status(500).send({ error: err.message });
       }
     });

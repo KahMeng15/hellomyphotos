@@ -35,7 +35,7 @@
 
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Play, Layers } from '@lucide/svelte';
+  import { Play, Layers, Heart } from '@lucide/svelte';
 
   let { 
     hash, 
@@ -55,7 +55,10 @@
     onclick, 
     initialAspectRatio,
     isStaged = false,
-    burstCount = 0
+    burstCount = 0,
+    isFavorite = false,
+    canFavorite = false,
+    ontogglefavorite
   }: { 
     hash: string, 
     src: string, 
@@ -74,7 +77,10 @@
     onclick?: (e: MouseEvent) => void, 
     initialAspectRatio?: number,
     isStaged?: boolean,
-    burstCount?: number
+    burstCount?: number,
+    isFavorite?: boolean,
+    canFavorite?: boolean,
+    ontogglefavorite?: (e: MouseEvent) => void
   } = $props();
   
   let canvas: HTMLCanvasElement | undefined = $state();
@@ -225,6 +231,21 @@
       <span>{burstCount}</span>
     </div>
   {/if}
+  {#if canFavorite}
+    <button 
+      type="button" 
+      class="favorite-badge-btn" 
+      class:is-favorite={isFavorite}
+      onclick={(e) => {
+        e.stopPropagation();
+        ontogglefavorite?.(e);
+      }}
+      title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+      aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+    >
+      <Heart size={14} fill={isFavorite ? '#ef4444' : 'none'} color={isFavorite ? '#ef4444' : 'white'} strokeWidth={2.2} />
+    </button>
+  {/if}
   {#if showFileName && (fileName || alt)}
     <div class="file-name {isVideo ? 'with-video' : ''}" title={fileName || alt}>
       <span>{fileName || alt}</span>
@@ -371,5 +392,50 @@
 
   img.loaded {
     opacity: 1;
+  }
+
+  .favorite-badge-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 6;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transform: scale(0.9);
+    transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    padding: 0;
+  }
+
+  .grid-item:hover .favorite-badge-btn,
+  .favorite-badge-btn.is-favorite {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .favorite-badge-btn.is-favorite {
+    background: rgba(15, 23, 42, 0.88);
+    border-color: rgba(239, 68, 68, 0.5);
+  }
+
+  .favorite-badge-btn:hover {
+    transform: scale(1.1);
+    background: rgba(15, 23, 42, 0.95);
+    border-color: rgba(255, 255, 255, 0.4);
+  }
+  
+  .favorite-badge-btn.is-favorite:hover {
+    border-color: rgba(239, 68, 68, 0.8);
   }
 </style>

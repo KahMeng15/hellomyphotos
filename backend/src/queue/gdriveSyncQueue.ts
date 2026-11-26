@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { redis } from '../config/redis';
 import { query } from '../config/db';
 import { GDriveService, FolderGDriveSyncRecord } from '../modules/gdrive/gdrive.service';
+import { CaesiumService } from '../modules/gdrive/caesium.service';
 import { STAGING_ROOT, MEDIA_ROOT } from '../utils/mediaPath';
 import { logger } from '../utils/logger';
 import fs from 'fs';
@@ -35,6 +36,7 @@ export let gdriveSyncWorker: Worker<GDriveJobData> | undefined;
 
 // Worker execution
 if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
+  CaesiumService.cleanupStaleTempDirs().catch(() => {});
   gdriveSyncWorker = new Worker<GDriveJobData>(
     'gdrive-sync',
     async (job) => {
@@ -47,7 +49,7 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
         }
 
         // Check if sync is paused or inactive
-        const syncCheck = await query(`SELECT is_active, sync_status FROM folder_gdrive_syncs WHERE id = $1`, [syncId]);
+        const syncCheck = await query(`SELECT is_active, sync_status, caesium_enabled, caesium_config FROM folder_gdrive_syncs WHERE id = $1`, [syncId]);
         if (syncCheck.rows.length === 0 || !syncCheck.rows[0].is_active || syncCheck.rows[0].sync_status === 'PAUSED') {
           logger.info(`[GDrive Worker] Skipping upload for ${fileName}: sync is paused or inactive.`);
           return;
@@ -63,36 +65,65 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
           return;
         }
 
-        const stats = fs.statSync(localFilePath);
+        const originalStats = fs.statSync(localFilePath);
+        let fileToUpload = localFilePath;
+        let tempDirToClean: string | null = null;
 
-        // Upload to Google Drive
-        const { fileId } = await GDriveService.uploadJPEG({
-          accountId,
-          gdriveFolderId,
-          localFilePath,
-          fileName
-        });
+        // Perform Caesium compression if enabled
+        if (syncCheck.rows[0].caesium_enabled && CaesiumService.isSupported(fileName)) {
+          try {
+            const caesiumConfig = syncCheck.rows[0].caesium_config || {};
+            const compressRes = await CaesiumService.compressImage(localFilePath, caesiumConfig);
+            if (compressRes && fs.existsSync(compressRes.outputPath)) {
+              tempDirToClean = compressRes.tempDir;
+              if (compressRes.outputSize < originalStats.size) {
+                fileToUpload = compressRes.outputPath;
+                logger.info(`[GDrive Worker] Caesium compressed ${fileName}: ${(originalStats.size / 1024).toFixed(1)}KB -> ${(compressRes.outputSize / 1024).toFixed(1)}KB (${compressRes.savingsPercent} saved)`);
+              } else {
+                logger.info(`[GDrive Worker] Caesium output for ${fileName} (${compressRes.outputSize}B) was not smaller than original (${originalStats.size}B). Using original.`);
+              }
+            }
+          } catch (compressErr: any) {
+            logger.warn(`[GDrive Worker] Caesium compression failed for ${fileName}, falling back to original: ${compressErr.message}`);
+          }
+        }
 
-        // Track in synced files table
-        await query(
-          `INSERT INTO gdrive_synced_files (sync_id, file_name, file_size, gdrive_file_id)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (sync_id, file_name) DO UPDATE SET
-             file_size = EXCLUDED.file_size,
-             gdrive_file_id = EXCLUDED.gdrive_file_id,
-             synced_at = NOW()`,
-          [syncId, fileName, stats.size, fileId]
-        );
+        try {
+          // Upload to Google Drive
+          const { fileId } = await GDriveService.uploadJPEG({
+            accountId,
+            gdriveFolderId,
+            localFilePath: fileToUpload,
+            fileName
+          });
 
-        // Update sync record
-        await query(
-          `UPDATE folder_gdrive_syncs 
-           SET last_synced_at = NOW(), sync_status = 'IDLE', error_message = NULL 
-           WHERE id = $1`,
-          [syncId]
-        );
+          const uploadStats = fs.statSync(fileToUpload);
 
-        logger.info(`[GDrive Worker] Successfully uploaded ${fileName} to Google Drive (${fileId})`);
+          // Track in synced files table
+          await query(
+            `INSERT INTO gdrive_synced_files (sync_id, file_name, file_size, gdrive_file_id)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (sync_id, file_name) DO UPDATE SET
+               file_size = EXCLUDED.file_size,
+               gdrive_file_id = EXCLUDED.gdrive_file_id,
+               synced_at = NOW()`,
+            [syncId, fileName, uploadStats.size, fileId]
+          );
+
+          // Update sync record
+          await query(
+            `UPDATE folder_gdrive_syncs 
+             SET last_synced_at = NOW(), sync_status = 'IDLE', error_message = NULL 
+             WHERE id = $1`,
+            [syncId]
+          );
+
+          logger.info(`[GDrive Worker] Successfully uploaded ${fileName} to Google Drive (${fileId})`);
+        } finally {
+          if (tempDirToClean) {
+            await CaesiumService.cleanupTempDir(tempDirToClean);
+          }
+        }
       }
 
       else if (data.type === 'sync-folder') {

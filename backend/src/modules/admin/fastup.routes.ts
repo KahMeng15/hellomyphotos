@@ -5,6 +5,14 @@ import { requireAuth } from '../../utils/auth';
 
 export async function fastupRoutes(fastify: FastifyInstance) {
   /**
+   * GET /api/staging/ping
+   * Unauthenticated lightweight ping endpoint to test server reachability.
+   */
+  fastify.get('/api/staging/ping', async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply.send({ status: 'ok', service: 'hellomyphotos-fastup', timestamp: new Date().toISOString() });
+  });
+
+  /**
    * POST /api/staging/otp/claim
    * Public endpoint called by FastUp Android app with a 6-digit code.
    * Exchanges OTP for persistent photographer token and predefined settings.

@@ -26,7 +26,7 @@ import { StagingService } from '../staging/staging.service';
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
-    const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt } = request.body as any;
+    const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites } = request.body as any;
     
     // Check permissions
     if (request.user?.role === 'viewer') {
@@ -49,9 +49,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const isWatermarked = watermarkEnabled ?? Boolean(watermarkTemplateId);
     
     await query(`
-      INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id]);
+      INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, allow_favorites)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id, allowFavorites ?? false]);
     
     // Automatically prioritize processing for all unprocessed items in the shared folder
     if (folderPath) {
@@ -376,7 +376,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       let filesResult;
       if (!targetPath) {
         filesResult = await query(
-          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height 
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height, is_favorite 
            FROM media_files 
            WHERE file_name ILIKE $1 ESCAPE '\\' 
            ORDER BY file_name ASC 
@@ -386,7 +386,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       } else {
         const escapedTarget = targetPath.replace(/([%_\\])/g, '\\$1');
         filesResult = await query(
-          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height 
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height, is_favorite 
            FROM media_files 
            WHERE file_name ILIKE $1 ESCAPE '\\' 
              AND (folder_path = $2 OR folder_path LIKE $3 ESCAPE '\\') 
@@ -566,18 +566,14 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       });
     }
 
-    // Fetch folder contents
-    const viewParam = ((request.query as any)?.view as string)?.toLowerCase();
-    const effectiveView = viewParam || share.default_staging_view || 'curated';
-    const curatedFilter = effectiveView === 'curated' ? 'AND (is_hero = true OR burst_group_id IS NULL)' : '';
-
+    // Fetch folder contents (always return all files so client can toggle between curated and all views instantaneously)
     const filesResult = await query(
       `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, 
               is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height, is_staged,
-              burst_group_id, is_hero, quality_score, face_count,
+              burst_group_id, is_hero, quality_score, face_count, is_favorite,
               COALESCE((SELECT COUNT(*)::int FROM media_files b WHERE b.burst_group_id = media_files.burst_group_id), 1) as burst_count
        FROM media_files 
-       WHERE folder_path = $1 AND (is_hidden_staging = false OR is_hidden_staging IS NULL) ${curatedFilter}
+       WHERE folder_path = $1 AND (is_hidden_staging = false OR is_hidden_staging IS NULL)
        ORDER BY file_name ASC`, 
       [targetPath]
     );
@@ -930,6 +926,56 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
   });
 
+  /**
+   * POST /api/shares/:token/media/:id/favorite
+   * Toggles favorite status for a media item if permitted on the share link.
+   */
+  fastify.post<{ Params: { token: string, id: string }; Body: { is_favorite?: boolean } }>('/api/shares/:token/media/:id/favorite', async (request, reply) => {
+    const { token, id } = request.params;
+    const { is_favorite } = (request.body || {}) as { is_favorite?: boolean };
+    const shareRes = await query(`SELECT * FROM shared_folders WHERE share_token = $1 AND is_active = true`, [token]);
+    if (shareRes.rows.length === 0) {
+      return reply.status(404).send({ error: 'Share not found' });
+    }
+    const share = shareRes.rows[0];
+    if (share.expires_at && new Date(share.expires_at) <= new Date()) {
+      return reply.status(401).send({ error: 'Share has expired' });
+    }
+
+    if (!share.allow_favorites) {
+      return reply.status(403).send({ error: 'Favoriting photos is not permitted on this share link' });
+    }
+
+    // Verify media belongs to shared folder, person, or single media
+    let mediaCheck;
+    if (share.folder_path) {
+      const escapedFolder = share.folder_path.replace(/([%_\\])/g, '\\$1');
+      mediaCheck = await query(
+        `SELECT id, is_favorite FROM media_files WHERE id = $1 AND (folder_path = $2 OR folder_path LIKE $3 ESCAPE '\\')`,
+        [id, share.folder_path, `${escapedFolder}/%`]
+      );
+    } else if (share.person_id) {
+      mediaCheck = await query(
+        `SELECT m.id, m.is_favorite FROM person_faces pf 
+         JOIN face_embeddings fe ON fe.id = pf.face_id 
+         JOIN media_files m ON m.id = fe.media_id 
+         WHERE pf.person_id = $1 AND m.id = $2 LIMIT 1`,
+        [share.person_id, id]
+      );
+    } else if (share.media_id) {
+      mediaCheck = await query(`SELECT id, is_favorite FROM media_files WHERE id = $1 AND id = $2`, [id, share.media_id]);
+    }
+
+    if (!mediaCheck || mediaCheck.rows.length === 0) {
+      return reply.status(404).send({ error: 'Media file not found in this share' });
+    }
+
+    const currentFav = mediaCheck.rows[0].is_favorite ?? false;
+    const nextFav = typeof is_favorite === 'boolean' ? is_favorite : !currentFav;
+    await query(`UPDATE media_files SET is_favorite = $1, updated_at = NOW() WHERE id = $2`, [nextFav, id]);
+    return reply.send({ success: true, id, is_favorite: nextFav });
+  });
+
   fastify.get<{ Params: { token: string, '*': string } }>('/api/shares/:token/*', handleShareGet);
 
   fastify.get<{ Params: { '*': string } }>('/api/shares/folder/*', { preHandler: requireAuth }, async (request, reply) => {
@@ -951,7 +997,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
 
     const result = await query(`
-      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
+      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.allow_favorites, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
              s.is_active,
              u.name as created_by_name, s.created_by, s.folder_path
       FROM shared_folders s
@@ -984,7 +1030,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const isAdmin = request.user?.role === 'admin' || request.user?.role === 'super_admin';
 
     const result = await query(`
-      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
+      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.allow_favorites, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
              s.is_active,
              u.name as created_by_name, s.created_by, s.person_id
       FROM shared_folders s
@@ -1044,7 +1090,8 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       allowDownloadImages, 
       allowDownloadFolder, 
       watermarkEnabled,
-      watermarkTemplateId
+      watermarkTemplateId,
+      allowFavorites
     } = request.body as { 
       isActive?: boolean; 
       expiresAt?: string | null;
@@ -1052,6 +1099,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       allowDownloadFolder?: boolean;
       watermarkEnabled?: boolean;
       watermarkTemplateId?: string | null;
+      allowFavorites?: boolean;
     };
 
     if (request.user?.role === 'viewer') {
@@ -1100,6 +1148,11 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     if (typeof watermarkEnabled === 'boolean') {
       updates.push(`watermark_enabled = $${idx++}`);
       values.push(watermarkEnabled);
+    }
+
+    if (typeof allowFavorites === 'boolean') {
+      updates.push(`allow_favorites = $${idx++}`);
+      values.push(allowFavorites);
     }
 
     if (watermarkTemplateId !== undefined) {

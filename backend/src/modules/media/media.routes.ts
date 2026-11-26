@@ -16,7 +16,7 @@ const defaultMediaDir = fs.existsSync('/app/media') ? '/app/media' : path.resolv
 const MEDIA_ROOT = path.resolve(process.env.MEDIA_ROOT || defaultMediaDir);
 import { resolveMediaFullPath } from '../../utils/mediaPath';
 
-import { verifyMediaAccess } from '../../utils/auth';
+import { verifyMediaAccess, requireAuth, hasFolderAccess } from '../../utils/auth';
 import { thumbnailQueue } from '../../queue/thumbnailQueue';
 import { videoQueue } from '../../queue/videoQueue';
 import { getClientIp } from '../../utils/getIp';
@@ -527,6 +527,23 @@ export async function mediaRoutes(fastify: FastifyInstance) {
     } catch (e: any) {
       return reply.status(500).send({ error: 'Failed to parse EXIF', details: e.message });
     }
+  });
+
+  fastify.post<{ Params: { id: string }, Body: { is_favorite?: boolean } }>('/api/media/:id/favorite', { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params;
+    const { is_favorite } = (request.body || {}) as { is_favorite?: boolean };
+    const mediaRes = await query(`SELECT id, folder_path, is_favorite FROM media_files WHERE id = $1`, [id]);
+    if (mediaRes.rows.length === 0) {
+      return reply.status(404).send({ error: 'Media file not found' });
+    }
+    const media = mediaRes.rows[0];
+    if (media.folder_path && !hasFolderAccess(request.user!, media.folder_path)) {
+      return reply.status(403).send({ error: 'Forbidden: You do not have access to this folder' });
+    }
+    const currentFav = media.is_favorite ?? false;
+    const nextFav = typeof is_favorite === 'boolean' ? is_favorite : !currentFav;
+    await query(`UPDATE media_files SET is_favorite = $1, updated_at = NOW() WHERE id = $2`, [nextFav, id]);
+    return reply.send({ success: true, id, is_favorite: nextFav });
   });
 
 }

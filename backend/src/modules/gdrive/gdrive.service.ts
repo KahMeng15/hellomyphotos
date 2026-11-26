@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { query } from '../../config/db';
 import { logger } from '../../utils/logger';
+import { CaesiumService, CaesiumConfig } from './caesium.service';
 
 export interface GoogleAccountRecord {
   id: string;
@@ -28,6 +29,8 @@ export interface FolderGDriveSyncRecord {
   last_synced_at: string | null;
   error_message: string | null;
   created_at: string;
+  caesium_enabled?: boolean;
+  caesium_config?: CaesiumConfig | null;
 }
 
 export class GDriveService {
@@ -282,13 +285,25 @@ export class GDriveService {
 
     const fileStream = fs.createReadStream(params.localFilePath);
 
+    const ext = path.extname(params.fileName).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+      '.tiff': 'image/tiff',
+      '.tif': 'image/tiff'
+    };
+    const mimeType = mimeMap[ext] || 'image/jpeg';
+
     const uploadRes = await drive.files.create({
       requestBody: {
         name: params.fileName,
         parents: [params.gdriveFolderId]
       },
       media: {
-        mimeType: 'image/jpeg',
+        mimeType,
         body: fileStream
       },
       fields: 'id, name, size'
@@ -339,13 +354,35 @@ export class GDriveService {
     folderPath: string;
     folderName?: string;
     existingFolderId?: string;
+    caesiumEnabled?: boolean;
+    caesiumConfig?: CaesiumConfig;
+    saveAsDefault?: boolean;
   }): Promise<FolderGDriveSyncRecord> {
     const existing = await this.getSyncConfig(params.folderPath, params.sourceType);
 
+    const caesiumEnabled = params.caesiumEnabled !== undefined 
+      ? Boolean(params.caesiumEnabled) 
+      : (existing?.caesium_enabled ?? false);
+    const caesiumConfig = params.caesiumConfig || existing?.caesium_config || {};
+
+    if (params.saveAsDefault && params.caesiumConfig) {
+      await CaesiumService.saveDefaultConfig({
+        ...params.caesiumConfig,
+        enabled: caesiumEnabled
+      }).catch(err => logger.warn(`[GDrive] Failed to save default Caesium config: ${err.message}`));
+    }
+
     if (existing && !params.existingFolderId) {
-      // If already configured and account matches, return existing
+      // If already configured and account matches, update caesium params and return
       if (existing.account_id === params.accountId && existing.gdrive_folder_id) {
-        return existing;
+        const upd = await query(
+          `UPDATE folder_gdrive_syncs 
+           SET caesium_enabled = $1, caesium_config = $2 
+           WHERE id = $3 
+           RETURNING *`,
+          [caesiumEnabled, JSON.stringify(caesiumConfig), existing.id]
+        );
+        return upd.rows[0];
       }
     }
 
@@ -388,8 +425,8 @@ export class GDriveService {
 
     const res = await query(
       `INSERT INTO folder_gdrive_syncs 
-         (account_id, source_type, folder_path, gdrive_folder_id, gdrive_folder_name, gdrive_link, is_active, auto_sync, sync_status)
-       VALUES ($1, $2, $3, $4, $5, $6, true, true, 'IDLE')
+         (account_id, source_type, folder_path, gdrive_folder_id, gdrive_folder_name, gdrive_link, is_active, auto_sync, sync_status, caesium_enabled, caesium_config)
+       VALUES ($1, $2, $3, $4, $5, $6, true, true, 'IDLE', $7, $8)
        ON CONFLICT (folder_path, source_type) DO UPDATE SET
          account_id = EXCLUDED.account_id,
          gdrive_folder_id = EXCLUDED.gdrive_folder_id,
@@ -397,9 +434,44 @@ export class GDriveService {
          gdrive_link = EXCLUDED.gdrive_link,
          is_active = true,
          sync_status = 'IDLE',
-         error_message = NULL
+         error_message = NULL,
+         caesium_enabled = EXCLUDED.caesium_enabled,
+         caesium_config = EXCLUDED.caesium_config
        RETURNING *`,
-      [params.accountId, params.sourceType, params.folderPath, targetFolderId, targetFolderName, targetWebViewLink]
+      [params.accountId, params.sourceType, params.folderPath, targetFolderId, targetFolderName, targetWebViewLink, caesiumEnabled, JSON.stringify(caesiumConfig)]
+    );
+
+    return res.rows[0];
+  }
+
+  /**
+   * Update Caesium image compressor settings for a folder sync.
+   */
+  static async updateCaesiumSyncConfig(params: {
+    folderPath: string;
+    sourceType: 'MEDIA' | 'FASTUP';
+    caesiumEnabled: boolean;
+    caesiumConfig: CaesiumConfig;
+    saveAsDefault?: boolean;
+  }): Promise<FolderGDriveSyncRecord> {
+    const existing = await this.getSyncConfig(params.folderPath, params.sourceType);
+    if (!existing) {
+      throw new Error('Google Drive sync is not configured for this folder');
+    }
+
+    if (params.saveAsDefault) {
+      await CaesiumService.saveDefaultConfig({
+        ...params.caesiumConfig,
+        enabled: params.caesiumEnabled
+      }).catch(err => logger.warn(`[GDrive] Failed to save default Caesium config: ${err.message}`));
+    }
+
+    const res = await query(
+      `UPDATE folder_gdrive_syncs 
+       SET caesium_enabled = $1, caesium_config = $2 
+       WHERE id = $3 
+       RETURNING *`,
+      [Boolean(params.caesiumEnabled), JSON.stringify(params.caesiumConfig), existing.id]
     );
 
     return res.rows[0];

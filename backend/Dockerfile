@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # which is required to decode iOS 17 HEIC files.
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         ca-certificates \
+        curl \
         ffmpeg \
         libva-drm2 \
         libva2 \
@@ -17,6 +18,18 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
         libheif-plugin-libde265 \
         libheif-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Caesium CLT binary
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then CAESIUM_ARCH="x86_64-unknown-linux-musl"; \
+    elif [ "$ARCH" = "aarch64" ]; then CAESIUM_ARCH="aarch64-unknown-linux-musl"; \
+    fi && \
+    if [ -n "$CAESIUM_ARCH" ]; then \
+      curl -sSL "https://github.com/Lymphatus/caesium-clt/releases/download/v1.5.0/caesiumclt-v1.5.0-${CAESIUM_ARCH}.tar.gz" | tar -xz -C /tmp && \
+      mv /tmp/caesiumclt-v1.5.0-${CAESIUM_ARCH}/caesiumclt /usr/local/bin/caesiumclt && \
+      chmod +x /usr/local/bin/caesiumclt && \
+      rm -rf /tmp/caesiumclt-*; \
+    fi
 
 WORKDIR /app
 COPY package*.json ./
@@ -47,5 +60,6 @@ RUN npm install --omit=dev \
     && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /usr/local/bin/heic-primary-decode /usr/local/bin/heic-primary-decode
+COPY --from=builder /usr/local/bin/caesiumclt /usr/local/bin/caesiumclt
 EXPOSE 3000
 CMD ["node", "dist/server.js"]

@@ -4,7 +4,7 @@ import { slide } from 'svelte/transition';
   import BlurhashImage from '$lib/components/BlurhashImage.svelte';
   import CoverImage from '$lib/components/CoverImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
-  import { getThumbnailUrl, getPreviewUrl, getStreamUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, regenerateImages, regenerateVideos, regenerateFolderWatermarks, searchFolderContent, type MediaFile, type DirectoryInfo } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, getStreamUrl, setFolderCover, getFolderZipUrl, setFolderDescription, rescanFolder, rescanFolderML, regenerateImages, regenerateVideos, regenerateFolderWatermarks, searchFolderContent, toggleFavorite, type MediaFile, type DirectoryInfo } from '$lib/api/media';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
   import { getSortDate, getRawDate } from '$lib/utils/date';
   import { createShare, getActiveShares, revokeShare, updateShare, getAccessRequests, respondAccessRequest, getWatermarkTemplatesForShare, type ShareData, type AccessRequest, type WatermarkTemplateOption } from '$lib/api/shares';
@@ -17,9 +17,9 @@ import { slide } from 'svelte/transition';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
   import { currentUser } from '$lib/stores/auth';
   import { updatePreferences } from '$lib/api/auth';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2, Sparkles, Layers, Cloud, ExternalLink, FolderPlus, Pause, Play, QrCode, Unlink, Radio } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2, Sparkles, Layers, Cloud, ExternalLink, FolderPlus, Pause, Play, QrCode, Unlink, Radio, Heart, SlidersHorizontal, RotateCcw, Minimize2 } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
-  import { getFolderGDriveSync, enableFolderGDriveSync, triggerFolderGDriveSync, togglePauseFolderGDriveSync, disableFolderGDriveSync, listGoogleAccounts, listGoogleDriveFolders, type FolderSyncInfo, type GoogleAccount } from '$lib/api/gdrive';
+  import { getFolderGDriveSync, enableFolderGDriveSync, triggerFolderGDriveSync, togglePauseFolderGDriveSync, disableFolderGDriveSync, listGoogleAccounts, listGoogleDriveFolders, getCaesiumSettings, updateFolderCaesiumSettings, type FolderSyncInfo, type GoogleAccount, type CaesiumConfig } from '$lib/api/gdrive';
   import QRCode from 'qrcode';
   
   let { data }: { data: PageData } = $props();
@@ -57,6 +57,29 @@ import { slide } from 'svelte/transition';
   let isDeletingGDrive = $state(false);
   let gdriveActiveTab: 'sync' | 'new' = $state('sync');
   let gdriveCopied = $state(false);
+
+  // Caesium Image Compression State
+  let caesiumSettings = $state<{ isAvailable: boolean; version?: string; binaryPath?: string; defaultConfig: CaesiumConfig } | null>(null);
+  let caesiumEnabled = $state(true);
+  let caesiumMode = $state<'lossy' | 'lossless' | 'max_size'>('lossy');
+  let caesiumQuality = $state(80);
+  let caesiumMaxSize = $state('1MB');
+  let caesiumWidth = $state<number | null>(null);
+  let caesiumHeight = $state<number | null>(null);
+  let caesiumKeepExif = $state(true);
+  let caesiumSaveAsDefault = $state(true);
+
+  // Active sync Caesium editing state
+  let isEditingCaesium = $state(false);
+  let editCaesiumEnabled = $state(false);
+  let editCaesiumMode = $state<'lossy' | 'lossless' | 'max_size'>('lossy');
+  let editCaesiumQuality = $state(80);
+  let editCaesiumMaxSize = $state('1MB');
+  let editCaesiumWidth = $state<number | null>(null);
+  let editCaesiumHeight = $state<number | null>(null);
+  let editCaesiumKeepExif = $state(true);
+  let editCaesiumSaveAsDefault = $state(false);
+  let isSavingCaesium = $state(false);
 
   // Folder Google Drive QR Code Modal State
   let showGDriveQrModal = $state(false);
@@ -110,12 +133,16 @@ import { slide } from 'svelte/transition';
     isGDriveLoading = true;
     try {
       const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
-      const [syncData, accounts] = await Promise.all([
+      const [syncData, accounts, caesiumInfo] = await Promise.all([
         getFolderGDriveSync(data.folderPath, srcType),
-        listGoogleAccounts().catch(() => [])
+        listGoogleAccounts().catch(() => []),
+        getCaesiumSettings().catch(() => null)
       ]);
       gdriveSyncInfo = syncData;
       gdriveAccounts = accounts;
+      if (caesiumInfo) {
+        caesiumSettings = caesiumInfo;
+      }
       if (accounts.length > 0 && !selectedGDriveAccount) {
         selectedGDriveAccount = accounts[0].id;
       }
@@ -125,10 +152,97 @@ import { slide } from 'svelte/transition';
       if (selectedGDriveAccount) {
         loadRemoteDriveFolders(selectedGDriveAccount);
       }
+
+      if (syncData.synced && syncData.sync) {
+        editCaesiumEnabled = syncData.sync.caesium_enabled ?? false;
+        const cfg = (syncData.sync.caesium_config || {}) as Partial<CaesiumConfig>;
+        editCaesiumMode = cfg.mode || 'lossy';
+        editCaesiumQuality = cfg.quality ?? 80;
+        editCaesiumMaxSize = cfg.max_size || '1MB';
+        editCaesiumWidth = cfg.width ?? null;
+        editCaesiumHeight = cfg.height ?? null;
+        editCaesiumKeepExif = cfg.keep_exif ?? true;
+      } else if (caesiumInfo?.defaultConfig) {
+        // Pre-fill parameters with remembered defaults for zero-friction recycling
+        const def = caesiumInfo.defaultConfig;
+        caesiumEnabled = def.enabled ?? true;
+        caesiumMode = def.mode || 'lossy';
+        caesiumQuality = def.quality ?? 80;
+        caesiumMaxSize = def.max_size || '1MB';
+        caesiumWidth = def.width ?? null;
+        caesiumHeight = def.height ?? null;
+        caesiumKeepExif = def.keep_exif ?? true;
+      }
     } catch (e: any) {
       console.warn('Could not load GDrive sync info:', e.message);
     } finally {
       isGDriveLoading = false;
+    }
+  }
+
+  function applyRememberedDefaultsForNew() {
+    if (!caesiumSettings?.defaultConfig) return;
+    const def = caesiumSettings.defaultConfig;
+    caesiumEnabled = def.enabled ?? true;
+    caesiumMode = def.mode || 'lossy';
+    caesiumQuality = def.quality ?? 80;
+    caesiumMaxSize = def.max_size || '1MB';
+    caesiumWidth = def.width ?? null;
+    caesiumHeight = def.height ?? null;
+    caesiumKeepExif = def.keep_exif ?? true;
+    toast.success('Applied remembered Caesium parameters');
+  }
+
+  function applyRememberedDefaultsForEdit() {
+    if (!caesiumSettings?.defaultConfig) return;
+    const def = caesiumSettings.defaultConfig;
+    editCaesiumEnabled = def.enabled ?? true;
+    editCaesiumMode = def.mode || 'lossy';
+    editCaesiumQuality = def.quality ?? 80;
+    editCaesiumMaxSize = def.max_size || '1MB';
+    editCaesiumWidth = def.width ?? null;
+    editCaesiumHeight = def.height ?? null;
+    editCaesiumKeepExif = def.keep_exif ?? true;
+    toast.success('Applied remembered Caesium parameters');
+  }
+
+  async function handleSaveCaesiumSettings() {
+    if (!data.folderPath || !gdriveSyncInfo?.sync) return;
+    isSavingCaesium = true;
+    try {
+      const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
+      const config: CaesiumConfig = {
+        enabled: editCaesiumEnabled,
+        mode: editCaesiumMode,
+        quality: editCaesiumQuality,
+        max_size: editCaesiumMaxSize,
+        width: editCaesiumWidth,
+        height: editCaesiumHeight,
+        keep_exif: editCaesiumKeepExif,
+        keep_dates: true
+      };
+
+      const res = await updateFolderCaesiumSettings({
+        folderPath: data.folderPath,
+        sourceType: srcType,
+        caesiumEnabled: editCaesiumEnabled,
+        caesiumConfig: config,
+        saveAsDefault: editCaesiumSaveAsDefault
+      });
+
+      if (gdriveSyncInfo.sync) {
+        gdriveSyncInfo.sync.caesium_enabled = res.sync.caesium_enabled;
+        gdriveSyncInfo.sync.caesium_config = res.sync.caesium_config;
+      }
+      if (editCaesiumSaveAsDefault && caesiumSettings) {
+        caesiumSettings.defaultConfig = config;
+      }
+      isEditingCaesium = false;
+      toast.success('Caesium compression settings updated!');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update Caesium settings');
+    } finally {
+      isSavingCaesium = false;
     }
   }
 
@@ -144,14 +258,31 @@ import { slide } from 'svelte/transition';
     isEnablingGDrive = true;
     try {
       const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
+      const config: CaesiumConfig = {
+        enabled: caesiumEnabled,
+        mode: caesiumMode,
+        quality: caesiumQuality,
+        max_size: caesiumMaxSize,
+        width: caesiumWidth,
+        height: caesiumHeight,
+        keep_exif: caesiumKeepExif,
+        keep_dates: true
+      };
+
       const res = await enableFolderGDriveSync({
         accountId: selectedGDriveAccount,
         folderPath: data.folderPath || '',
         sourceType: srcType,
         folderName: gdriveMode === 'new' ? (gdriveFolderNameInput || (data.folderPath || 'Photos')) : undefined,
-        existingFolderId: gdriveMode === 'existing' ? selectedExistingDriveFolderId : undefined
+        existingFolderId: gdriveMode === 'existing' ? selectedExistingDriveFolderId : undefined,
+        caesiumEnabled,
+        caesiumConfig: config,
+        saveAsDefault: caesiumSaveAsDefault
       });
       gdriveSyncInfo = { synced: true, sync: res.sync };
+      if (caesiumSaveAsDefault && caesiumSettings) {
+        caesiumSettings.defaultConfig = config;
+      }
       toast.success('Google Drive sync enabled! Link generated.');
     } catch (e: any) {
       toast.error(e.message || 'Failed to enable Google Drive sync');
@@ -227,6 +358,7 @@ import { slide } from 'svelte/transition';
   // Share Modal State
   let shareAllowDownloadImages = $state(true);
   let shareAllowDownloadFolder = $state(true);
+  let shareAllowFavorites = $state(false);
   let shareExpiryMode: 'duration' | 'date' | 'never' = $state('duration');
   let shareExpiryValue = $state(7);
   let shareExpiryUnit = $state('days');
@@ -262,6 +394,7 @@ import { slide } from 'svelte/transition';
   let editExpiryDateTime = $state('');
   let editAllowDownloadImages = $state(true);
   let editAllowDownloadFolder = $state(true);
+  let editAllowFavorites = $state(false);
   let editIsActive = $state(true);
   let isSavingShareEdit = $state(false);
 
@@ -456,7 +589,8 @@ import { slide } from 'svelte/transition';
         shareAllowDownloadFolder,
         isWatermarked,
         expiresAt,
-        shareWatermarkTemplateId || null
+        shareWatermarkTemplateId || null,
+        shareAllowFavorites
       );
       toast.success('Share link created successfully!');
       newlyCreatedShareToken = token;
@@ -533,6 +667,7 @@ import { slide } from 'svelte/transition';
     extendingToken = null;
     editAllowDownloadImages = share.allow_download_images ?? true;
     editAllowDownloadFolder = share.allow_download_folder ?? true;
+    editAllowFavorites = share.allow_favorites ?? false;
     editIsActive = share.is_active !== false;
 
     if (!share.expires_at) {
@@ -578,6 +713,7 @@ import { slide } from 'svelte/transition';
         expiresAt: finalExpiresAt,
         allowDownloadImages: editAllowDownloadImages,
         allowDownloadFolder: editAllowDownloadFolder,
+        allowFavorites: editAllowFavorites,
         isActive: editIsActive
       });
 
@@ -878,11 +1014,22 @@ import { slide } from 'svelte/transition';
 
   let showFolderViewMenu = $state(false);
 
-  function getAspectRatio(file: { exif_json?: any }): number | undefined {
+  function getAspectRatio(file: any): number | undefined {
+    if (file.img_width && file.img_height && file.img_width > 0 && file.img_height > 0) {
+      return file.img_width / file.img_height;
+    }
     const exif = file.exif_json;
     if (exif) {
-      const w = exif.ExifImageWidth || exif.ImageWidth;
-      const h = exif.ExifImageHeight || exif.ImageHeight;
+      let w = exif.ExifImageWidth || exif.ImageWidth || exif.width;
+      let h = exif.ExifImageHeight || exif.ImageHeight || exif.height;
+      const orient = exif.Orientation;
+      const isRotated90 = (typeof orient === 'number' && [5, 6, 7, 8].includes(orient)) ||
+        (typeof orient === 'string' && (orient.includes('90') || orient.includes('270') || orient.includes('Rotate 90') || orient.includes('Rotate 270')));
+      if (isRotated90 && w && h) {
+        const temp = w;
+        w = h;
+        h = temp;
+      }
       if (w && h && w > 0 && h > 0) return w / h;
     }
     return undefined;
@@ -959,6 +1106,7 @@ import { slide } from 'svelte/transition';
   }
 
   let folderCurationMode = $state<'curated' | 'all'>('all');
+  let showOnlyFavorites = $state(false);
 
   let hasBurstPhotos = $derived(displayedFiles.some((f: any) => f.burst_group_id || (f.burst_count && f.burst_count > 1)));
 
@@ -968,13 +1116,40 @@ import { slide } from 'svelte/transition';
       : displayedFiles
   );
 
-  let sortedFiles = $derived([...curatedFiles].sort((a, b) => {
+  let favoriteFilteredFiles = $derived(
+    showOnlyFavorites
+      ? curatedFiles.filter((f: any) => f.is_favorite)
+      : curatedFiles
+  );
+
+  let sortedFiles = $derived([...favoriteFilteredFiles].sort((a, b) => {
     if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);
     if (sortMode === 'oldest') return getSortDate(a) - getSortDate(b);
     if (sortMode === 'a-z') return a.file_name.localeCompare(b.file_name);
     if (sortMode === 'z-a') return b.file_name.localeCompare(a.file_name);
     return 0;
   }));
+
+  function handleFavoriteUpdated(updatedId: string, isFav: boolean) {
+    if (data.files) {
+      data.files = data.files.map((f: any) => f.id === updatedId ? { ...f, is_favorite: isFav } : f);
+    }
+  }
+
+  async function handleToggleThumbnailFavorite(file: any) {
+    const targetState = !file.is_favorite;
+    handleFavoriteUpdated(file.id, targetState);
+    try {
+      const res = await toggleFavorite(file.id, targetState);
+      if (res.is_favorite !== targetState) {
+        handleFavoriteUpdated(file.id, res.is_favorite);
+      }
+      toast.success(res.is_favorite ? 'Added to favorites' : 'Removed from favorites');
+    } catch (err: any) {
+      handleFavoriteUpdated(file.id, !targetState);
+      toast.error(err.message || 'Failed to update favorite status');
+    }
+  }
 
   function handleHeroUpdated(updatedHeroId: string, isVisible?: boolean) {
     if (data.files) {
@@ -1440,6 +1615,17 @@ import { slide } from 'svelte/transition';
           >
             <Layers size={18} />
           </button>
+
+          <button 
+            type="button" 
+            class="icon-btn favorites-icon-btn" 
+            class:active={showOnlyFavorites} 
+            onclick={() => showOnlyFavorites = !showOnlyFavorites} 
+            title={showOnlyFavorites ? 'Favorites view: showing favorited photos only (click for all)' : 'Favorites: show favorites only'}
+            aria-label="Toggle favorites only"
+          >
+            <Heart size={18} fill={showOnlyFavorites ? 'currentColor' : 'none'} />
+          </button>
         {/if}
 
         {#if isFolderOnly}
@@ -1757,6 +1943,16 @@ import { slide } from 'svelte/transition';
           <div class="col-res">{getFileDimensions(file)}</div>
           <div class="col-size">{formatBytes(file.size_bytes)}</div>
           <div class="col-actions" onclick={(e) => e.stopPropagation()}>
+            <button 
+              type="button"
+              class="compact-action-btn" 
+              class:is-fav={file.is_favorite}
+              onclick={() => handleToggleThumbnailFavorite(file)}
+              title={file.is_favorite ? "Remove from favorites" : "Add to favorites"}
+              aria-label="Toggle favorite"
+            >
+              <Heart size={15} fill={file.is_favorite ? '#ef4444' : 'none'} color={file.is_favorite ? '#ef4444' : 'currentColor'} />
+            </button>
             <a 
               href={`${getStreamUrl(file.id)}?download=1`} 
               download={file.file_name} 
@@ -1789,10 +1985,26 @@ import { slide } from 'svelte/transition';
         priority={i < 8}
         initialAspectRatio={getAspectRatio(file)}
         burstCount={folderCurationMode === 'curated' ? file.burst_count : undefined}
+        isFavorite={file.is_favorite ?? false}
+        canFavorite={true}
+        ontogglefavorite={() => handleToggleThumbnailFavorite(file)}
       />
     {/each}
   </div>
 {/if}
+{#if showOnlyFavorites && sortedFiles.length === 0}
+  <div class="empty-favorites-state">
+    <div class="empty-favorites-icon">
+      <Heart size={36} strokeWidth={1.5} />
+    </div>
+    <p class="empty-title">No favorites in this folder</p>
+    <p class="empty-subtitle">Click the heart icon on any photo or press F in the viewer to mark your favorites.</p>
+    <button class="btn" onclick={() => showOnlyFavorites = false} style="margin-top: 14px; background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: white;">
+      Show All Photos
+    </button>
+  </div>
+{/if}
+
 {#if visibleCount < sortedFiles.length}
   <div use:infiniteScroll style="height: 20px; width: 100%;"></div>
 {/if}
@@ -1803,6 +2015,8 @@ import { slide } from 'svelte/transition';
     media={sortedFiles[selectedMediaIndex]} 
     showHiddenAlternates={true}
     allowHeroSelection={true}
+    canFavorite={true}
+    onfavoriteupdated={handleFavoriteUpdated}
     onheroupdated={handleHeroUpdated}
     onclose={closeLightbox}
     onnext={nextMedia}
@@ -1910,9 +2124,14 @@ import { slide } from 'svelte/transition';
           <label for="allowDlsImg" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading individual images</label>
         </div>
 
-        <div class="form-group" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+        <div class="form-group" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
           <input type="checkbox" id="allowDlsFolder" bind:checked={shareAllowDownloadFolder} style="width: 18px; height: 18px;" />
           <label for="allowDlsFolder" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading the entire folder (ZIP)</label>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+          <input type="checkbox" id="allowFavs" bind:checked={shareAllowFavorites} style="width: 18px; height: 18px;" />
+          <label for="allowFavs" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos and filter favorites</label>
         </div>
 
         <div class="form-group" style="margin-bottom: 18px;">
@@ -2013,6 +2232,9 @@ import { slide } from 'svelte/transition';
                             Folder DL Only
                           {:else}
                             View Only
+                          {/if}
+                          {#if share.allow_favorites}
+                            <span style="color: #f43f5e; font-weight: 500;">· Favs</span>
                           {/if}
                         </span>
                       </div>
@@ -2119,6 +2341,11 @@ import { slide } from 'svelte/transition';
                         <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
                           <input type="checkbox" id="editDlFolder-{share.share_token}" bind:checked={editAllowDownloadFolder} style="width: 15px; height: 15px;" />
                           <label for="editDlFolder-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow downloading entire folder (ZIP)</label>
+                        </div>
+
+                        <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editDlFav-{share.share_token}" bind:checked={editAllowFavorites} style="width: 15px; height: 15px;" />
+                          <label for="editDlFav-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos</label>
                         </div>
 
                         <div style="display: flex; align-items: center; gap: 8px;">
@@ -2263,6 +2490,11 @@ import { slide } from 'svelte/transition';
                         <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
                           <input type="checkbox" id="editExpDlFolder-{share.share_token}" bind:checked={editAllowDownloadFolder} style="width: 15px; height: 15px;" />
                           <label for="editExpDlFolder-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow downloading entire folder (ZIP)</label>
+                        </div>
+
+                        <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editExpDlFav-{share.share_token}" bind:checked={editAllowFavorites} style="width: 15px; height: 15px;" />
+                          <label for="editExpDlFav-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos</label>
                         </div>
 
                         <div style="display: flex; align-items: center; gap: 8px;">
@@ -2677,6 +2909,209 @@ import { slide } from 'svelte/transition';
             </div>
           </div>
         </div>
+
+        <!-- Caesium Compression Configuration for Active Sync -->
+        <div style="margin-top: 14px; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 14px; border-radius: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: {isEditingCaesium ? '12px' : '0'};">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <Minimize2 size={16} color="#60a5fa" />
+                <span style="font-weight: 500; font-size: 0.9rem; color: #f4f4f5;">Caesium Compression</span>
+                {#if gdriveSyncInfo.sync.caesium_enabled}
+                  <span style="font-size: 0.68rem; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); padding: 1px 6px; border-radius: 4px;">
+                    Active
+                  </span>
+                {:else}
+                  <span style="font-size: 0.68rem; background: rgba(255,255,255,0.1); color: #a1a1aa; padding: 1px 6px; border-radius: 4px;">
+                    Off (Full Size)
+                  </span>
+                {/if}
+              </div>
+              <div style="font-size: 0.75rem; color: #a1a1aa; margin-top: 2px;">
+                {#if gdriveSyncInfo.sync.caesium_enabled}
+                  {#if (gdriveSyncInfo.sync.caesium_config?.mode || 'lossy') === 'lossless'}
+                    Lossless compression (pixel-perfect quality)
+                  {:else if gdriveSyncInfo.sync.caesium_config?.mode === 'max_size'}
+                    Target max size: {gdriveSyncInfo.sync.caesium_config?.max_size || '1MB'}
+                  {:else}
+                    Quality {gdriveSyncInfo.sync.caesium_config?.quality ?? 80}% lossy
+                  {/if}
+                  {#if gdriveSyncInfo.sync.caesium_config?.width || gdriveSyncInfo.sync.caesium_config?.height}
+                    • Max {gdriveSyncInfo.sync.caesium_config.width || 'auto'}×{gdriveSyncInfo.sync.caesium_config.height || 'auto'}px
+                  {/if}
+                  {#if gdriveSyncInfo.sync.caesium_config?.keep_exif !== false}
+                    • EXIF preserved
+                  {/if}
+                {:else}
+                  Images uploaded to Google Drive without compression
+                {/if}
+              </div>
+            </div>
+
+            <button 
+              type="button" 
+              class="btn" 
+              style="padding: 4px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: #ccc;"
+              onclick={() => isEditingCaesium = !isEditingCaesium}
+            >
+              <SlidersHorizontal size={13} style="margin-right: 4px;" />
+              {isEditingCaesium ? 'Close' : 'Configure'}
+            </button>
+          </div>
+
+          {#if isEditingCaesium}
+            <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; margin-top: 8px;">
+              <!-- Toggle Enabled -->
+              <label style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; cursor: pointer;">
+                <span style="font-size: 0.85rem; color: #eee; font-weight: 500;">Compress images before Google Drive upload</span>
+                <input type="checkbox" bind:checked={editCaesiumEnabled} style="width: 16px; height: 16px; accent-color: #3b82f6;" />
+              </label>
+
+              {#if editCaesiumEnabled}
+                <!-- Mode tabs -->
+                <div style="margin-bottom: 12px;">
+                  <label style="display: block; font-size: 0.75rem; color: #aaa; margin-bottom: 6px;">Compression Mode</label>
+                  <div style="display: flex; gap: 6px;">
+                    <button 
+                      type="button" 
+                      class="btn" 
+                      style="flex: 1; padding: 4px 8px; font-size: 0.75rem; background: {editCaesiumMode === 'lossy' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)'}; border: 1px solid {editCaesiumMode === 'lossy' ? '#3b82f6' : 'var(--glass-border)'}; color: white;"
+                      onclick={() => editCaesiumMode = 'lossy'}>
+                      Lossy (Quality)
+                    </button>
+                    <button 
+                      type="button" 
+                      class="btn" 
+                      style="flex: 1; padding: 4px 8px; font-size: 0.75rem; background: {editCaesiumMode === 'lossless' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)'}; border: 1px solid {editCaesiumMode === 'lossless' ? '#3b82f6' : 'var(--glass-border)'}; color: white;"
+                      onclick={() => editCaesiumMode = 'lossless'}>
+                      Lossless
+                    </button>
+                    <button 
+                      type="button" 
+                      class="btn" 
+                      style="flex: 1; padding: 4px 8px; font-size: 0.75rem; background: {editCaesiumMode === 'max_size' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)'}; border: 1px solid {editCaesiumMode === 'max_size' ? '#3b82f6' : 'var(--glass-border)'}; color: white;"
+                      onclick={() => editCaesiumMode = 'max_size'}>
+                      Target Size
+                    </button>
+                  </div>
+                </div>
+
+                {#if editCaesiumMode === 'lossy'}
+                  <div style="margin-bottom: 12px; background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.78rem; color: #ccc; margin-bottom: 6px;">
+                      <span>Quality Level:</span>
+                      <strong style="color: #60a5fa;">{editCaesiumQuality}%</strong>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="1" 
+                      max="100" 
+                      bind:value={editCaesiumQuality} 
+                      style="width: 100%; accent-color: #3b82f6; cursor: pointer;" 
+                    />
+                    <div style="display: flex; justify-content: space-between; font-size: 0.68rem; color: #888; margin-top: 2px;">
+                      <span>Smaller file size</span>
+                      <span>Higher visual fidelity</span>
+                    </div>
+                  </div>
+                {:else if editCaesiumMode === 'max_size'}
+                  <div style="margin-bottom: 12px;">
+                    <label style="display: block; font-size: 0.75rem; color: #aaa; margin-bottom: 4px;">Target Maximum File Size</label>
+                    <div style="display: flex; gap: 6px;">
+                      <input 
+                        type="text" 
+                        bind:value={editCaesiumMaxSize} 
+                        placeholder="e.g. 1MB, 500KB, 2MB"
+                        style="flex: 1; padding: 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.8rem;" 
+                      />
+                      {#each ['500KB', '1MB', '2MB', '5MB'] as preset}
+                        <button 
+                          type="button" 
+                          class="btn" 
+                          style="padding: 4px 8px; font-size: 0.72rem; background: rgba(255,255,255,0.06); border: 1px solid var(--glass-border); color: #aaa;"
+                          onclick={() => editCaesiumMaxSize = preset}>
+                          {preset}
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+                {:else}
+                  <div style="margin-bottom: 12px; font-size: 0.75rem; color: #aaa; background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 4px;">
+                    Lossless compression optimizes internal image structures and tables without altering any pixel data.
+                  </div>
+                {/if}
+
+                <!-- Dimensions constraint -->
+                <div style="margin-bottom: 12px;">
+                  <label style="display: block; font-size: 0.75rem; color: #aaa; margin-bottom: 4px;">Dimension Limits (Optional, maintains aspect ratio without upscaling)</label>
+                  <div style="display: flex; gap: 8px;">
+                    <div style="flex: 1;">
+                      <input 
+                        type="number" 
+                        bind:value={editCaesiumWidth} 
+                        placeholder="Max Width (px)"
+                        style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.8rem;" 
+                      />
+                    </div>
+                    <div style="flex: 1;">
+                      <input 
+                        type="number" 
+                        bind:value={editCaesiumHeight} 
+                        placeholder="Max Height (px)"
+                        style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.8rem;" 
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- EXIF Checkbox -->
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #ccc; margin-bottom: 12px; cursor: pointer;">
+                  <input type="checkbox" bind:checked={editCaesiumKeepExif} style="accent-color: #3b82f6;" />
+                  <span>Preserve EXIF metadata & camera information</span>
+                </label>
+              {/if}
+
+              <!-- Remember & Recycle Controls -->
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1);">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #aaa; cursor: pointer;">
+                  <input type="checkbox" bind:checked={editCaesiumSaveAsDefault} style="accent-color: #3b82f6;" />
+                  <span>Remember as default for other folders</span>
+                </label>
+
+                <button 
+                  type="button" 
+                  class="btn" 
+                  style="padding: 2px 8px; font-size: 0.72rem; background: transparent; border: 1px solid var(--glass-border); color: #888; display: inline-flex; align-items: center; gap: 4px;"
+                  onclick={applyRememberedDefaultsForEdit}
+                >
+                  <RotateCcw size={11} /> Use Remembered Defaults
+                </button>
+              </div>
+
+              <!-- Action buttons -->
+              <div style="display: flex; gap: 8px;">
+                <button 
+                  type="button" 
+                  class="btn" 
+                  style="flex: 1; padding: 6px; font-size: 0.8rem; background: var(--text-color); color: var(--bg-color);"
+                  onclick={handleSaveCaesiumSettings}
+                  disabled={isSavingCaesium}
+                >
+                  {isSavingCaesium ? 'Saving Settings...' : 'Save Caesium Settings'}
+                </button>
+                <button 
+                  type="button" 
+                  class="btn" 
+                  style="padding: 6px 12px; font-size: 0.8rem; background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: #ccc;"
+                  onclick={() => isEditingCaesium = false}
+                  disabled={isSavingCaesium}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          {/if}
+        </div>
       </div>
     {:else}
       <!-- Create New Google Drive Sync Section (Identical to Create New Share Link Section) -->
@@ -2783,6 +3218,152 @@ import { slide } from 'svelte/transition';
                     {/each}
                   </div>
                 {/if}
+              </div>
+            {/if}
+          </div>
+
+          <!-- Caesium Image Compressor Configuration -->
+          <div style="margin-bottom: 20px; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 14px; border-radius: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: {caesiumEnabled ? '12px' : '0'};">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <Minimize2 size={16} color="#60a5fa" />
+                  <span style="font-weight: 500; font-size: 0.9rem; color: #f4f4f5;">Caesium Image Compressor</span>
+                  {#if caesiumSettings?.isAvailable}
+                    <span style="font-size: 0.68rem; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); padding: 1px 6px; border-radius: 4px;">
+                      CLI Ready
+                    </span>
+                  {/if}
+                </div>
+                <p style="font-size: 0.75rem; color: #a1a1aa; margin: 3px 0 0 0;">
+                  Compress images before uploading to Google Drive to save Drive storage & bandwidth while leaving local originals untouched.
+                </p>
+              </div>
+              <label style="display: flex; align-items: center; cursor: pointer; margin-left: 8px;">
+                <input type="checkbox" bind:checked={caesiumEnabled} style="width: 17px; height: 17px; accent-color: #3b82f6;" />
+              </label>
+            </div>
+
+            {#if caesiumEnabled}
+              <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px; margin-top: 8px;">
+                <!-- Mode tabs -->
+                <div style="margin-bottom: 12px;">
+                  <label style="display: block; font-size: 0.75rem; color: #aaa; margin-bottom: 6px;">Compression Mode</label>
+                  <div style="display: flex; gap: 6px;">
+                    <button 
+                      type="button" 
+                      class="btn" 
+                      style="flex: 1; padding: 4px 8px; font-size: 0.75rem; background: {caesiumMode === 'lossy' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)'}; border: 1px solid {caesiumMode === 'lossy' ? '#3b82f6' : 'var(--glass-border)'}; color: white;"
+                      onclick={() => caesiumMode = 'lossy'}>
+                      Lossy (Quality)
+                    </button>
+                    <button 
+                      type="button" 
+                      class="btn" 
+                      style="flex: 1; padding: 4px 8px; font-size: 0.75rem; background: {caesiumMode === 'lossless' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)'}; border: 1px solid {caesiumMode === 'lossless' ? '#3b82f6' : 'var(--glass-border)'}; color: white;"
+                      onclick={() => caesiumMode = 'lossless'}>
+                      Lossless
+                    </button>
+                    <button 
+                      type="button" 
+                      class="btn" 
+                      style="flex: 1; padding: 4px 8px; font-size: 0.75rem; background: {caesiumMode === 'max_size' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.05)'}; border: 1px solid {caesiumMode === 'max_size' ? '#3b82f6' : 'var(--glass-border)'}; color: white;"
+                      onclick={() => caesiumMode = 'max_size'}>
+                      Target Size
+                    </button>
+                  </div>
+                </div>
+
+                {#if caesiumMode === 'lossy'}
+                  <div style="margin-bottom: 12px; background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 4px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.78rem; color: #ccc; margin-bottom: 6px;">
+                      <span>Quality Level:</span>
+                      <strong style="color: #60a5fa;">{caesiumQuality}%</strong>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="1" 
+                      max="100" 
+                      bind:value={caesiumQuality} 
+                      style="width: 100%; accent-color: #3b82f6; cursor: pointer;" 
+                    />
+                    <div style="display: flex; justify-content: space-between; font-size: 0.68rem; color: #888; margin-top: 2px;">
+                      <span>Smaller file size</span>
+                      <span>Higher visual fidelity</span>
+                    </div>
+                  </div>
+                {:else if caesiumMode === 'max_size'}
+                  <div style="margin-bottom: 12px;">
+                    <label style="display: block; font-size: 0.75rem; color: #aaa; margin-bottom: 4px;">Target Maximum File Size</label>
+                    <div style="display: flex; gap: 6px;">
+                      <input 
+                        type="text" 
+                        bind:value={caesiumMaxSize} 
+                        placeholder="e.g. 1MB, 500KB, 2MB"
+                        style="flex: 1; padding: 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.8rem;" 
+                      />
+                      {#each ['500KB', '1MB', '2MB', '5MB'] as preset}
+                        <button 
+                          type="button" 
+                          class="btn" 
+                          style="padding: 4px 8px; font-size: 0.72rem; background: rgba(255,255,255,0.06); border: 1px solid var(--glass-border); color: #aaa;"
+                          onclick={() => caesiumMaxSize = preset}>
+                          {preset}
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+                {:else}
+                  <div style="margin-bottom: 12px; font-size: 0.75rem; color: #aaa; background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: 4px;">
+                    Lossless compression optimizes internal image structures and tables without altering any pixel data.
+                  </div>
+                {/if}
+
+                <!-- Dimensions constraint -->
+                <div style="margin-bottom: 12px;">
+                  <label style="display: block; font-size: 0.75rem; color: #aaa; margin-bottom: 4px;">Dimension Limits (Optional, maintains aspect ratio without upscaling)</label>
+                  <div style="display: flex; gap: 8px;">
+                    <div style="flex: 1;">
+                      <input 
+                        type="number" 
+                        bind:value={caesiumWidth} 
+                        placeholder="Max Width (px)"
+                        style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.8rem;" 
+                      />
+                    </div>
+                    <div style="flex: 1;">
+                      <input 
+                        type="number" 
+                        bind:value={caesiumHeight} 
+                        placeholder="Max Height (px)"
+                        style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.8rem;" 
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- EXIF Checkbox -->
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #ccc; margin-bottom: 12px; cursor: pointer;">
+                  <input type="checkbox" bind:checked={caesiumKeepExif} style="accent-color: #3b82f6;" />
+                  <span>Preserve EXIF metadata & camera information</span>
+                </label>
+
+                <!-- Remember & Recycle Controls -->
+                <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px dashed rgba(255,255,255,0.1);">
+                  <label style="display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: #aaa; cursor: pointer;">
+                    <input type="checkbox" bind:checked={caesiumSaveAsDefault} style="accent-color: #3b82f6;" />
+                    <span>Remember parameters for other folders</span>
+                  </label>
+
+                  <button 
+                    type="button" 
+                    class="btn" 
+                    style="padding: 2px 8px; font-size: 0.72rem; background: transparent; border: 1px solid var(--glass-border); color: #888; display: inline-flex; align-items: center; gap: 4px;"
+                    onclick={applyRememberedDefaultsForNew}
+                  >
+                    <RotateCcw size={11} /> Reset to Remembered
+                  </button>
+                </div>
               </div>
             {/if}
           </div>
@@ -3749,5 +4330,38 @@ import { slide } from 'svelte/transition';
     color: #facc15;
     background: rgba(234, 179, 8, 0.18);
     border-color: rgba(234, 179, 8, 0.4);
+  }
+
+  .favorites-icon-btn.active {
+    color: #f43f5e;
+    background: rgba(244, 63, 94, 0.18);
+    border-color: rgba(244, 63, 94, 0.4);
+  }
+
+  .empty-favorites-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+    color: #a1a1aa;
+    width: 100%;
+  }
+
+  .empty-favorites-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(244, 63, 94, 0.12);
+    color: #f43f5e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+  }
+
+  .compact-action-btn.is-fav {
+    color: #f43f5e;
   }
 </style>

@@ -113,11 +113,22 @@
     }
   }
 
-  function getAspectRatio(file: { exif_json?: any }): number | undefined {
+  function getAspectRatio(file: any): number | undefined {
+    if (file.img_width && file.img_height && file.img_width > 0 && file.img_height > 0) {
+      return file.img_width / file.img_height;
+    }
     const exif = file.exif_json;
     if (exif) {
-      const w = exif.ExifImageWidth || exif.ImageWidth || exif.width;
-      const h = exif.ExifImageHeight || exif.ImageHeight || exif.height;
+      let w = exif.ExifImageWidth || exif.ImageWidth || exif.width;
+      let h = exif.ExifImageHeight || exif.ImageHeight || exif.height;
+      const orient = exif.Orientation;
+      const isRotated90 = (typeof orient === 'number' && [5, 6, 7, 8].includes(orient)) ||
+        (typeof orient === 'string' && (orient.includes('90') || orient.includes('270') || orient.includes('Rotate 90') || orient.includes('Rotate 270')));
+      if (isRotated90 && w && h) {
+        const temp = w;
+        w = h;
+        h = temp;
+      }
       if (w && h && w > 0 && h > 0) return w / h;
     }
     return undefined;

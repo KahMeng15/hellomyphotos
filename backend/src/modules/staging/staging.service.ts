@@ -200,6 +200,16 @@ export class StagingService {
       if (exifJson) {
         width = exifJson.ImageWidth || exifJson.ExifImageWidth || exifJson.width || null;
         height = exifJson.ImageHeight || exifJson.ExifImageHeight || exifJson.height || null;
+
+        // If photo has 90 or 270 degree rotation, swap width and height so stored dimensions match visual portrait orientation
+        const orient = exifJson.Orientation;
+        const isRotated90 = (typeof orient === 'number' && [5, 6, 7, 8].includes(orient)) ||
+          (typeof orient === 'string' && (orient.includes('90') || orient.includes('270') || orient.includes('Rotate 90') || orient.includes('Rotate 270')));
+        if (isRotated90 && width && height) {
+          const temp = width;
+          width = height;
+          height = temp;
+        }
       }
     } catch {
       // Non-critical EXIF extraction failure

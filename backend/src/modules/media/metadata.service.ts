@@ -130,8 +130,17 @@ export class MetadataService {
             const modifyDate = parseExifDateTime(rawData.ModifyDate || rawData.modifyDate, offset);
             const timestamp = dtOriginal || createDate || modifyDate || null;
 
-            const width = rawData.ExifImageWidth || rawData.ImageWidth || rawData.width || rawData.OrientedWidth || null;
-            const height = rawData.ExifImageHeight || rawData.ImageHeight || rawData.height || rawData.OrientedHeight || null;
+            let width = rawData.ExifImageWidth || rawData.ImageWidth || rawData.width || rawData.OrientedWidth || null;
+            let height = rawData.ExifImageHeight || rawData.ImageHeight || rawData.height || rawData.OrientedHeight || null;
+
+            const orient = rawData.Orientation;
+            const isRotated90 = (typeof orient === 'number' && [5, 6, 7, 8].includes(orient)) ||
+              (typeof orient === 'string' && (orient.includes('90') || orient.includes('270') || orient.includes('Rotate 90') || orient.includes('Rotate 270')));
+            if (isRotated90 && width && height) {
+              const temp = width;
+              width = height;
+              height = temp;
+            }
 
             exifJson = {
               camera,

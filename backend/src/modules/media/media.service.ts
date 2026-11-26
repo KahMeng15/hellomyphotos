@@ -82,6 +82,7 @@ export class MediaService {
       let preview1080!: Buffer;
       try {
         preview1080 = await sharp(sharpInput, { unlimited: true })
+          .rotate()
           .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 80 })
           .toBuffer();
@@ -152,6 +153,7 @@ export class MediaService {
 
             if (previewBuffer && previewBuffer.length > 0) {
               preview1080 = await sharp(previewBuffer, { unlimited: true })
+                .rotate()
                 .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
                 .webp({ quality: 80 })
                 .toBuffer();
@@ -164,6 +166,7 @@ export class MediaService {
         } else {
           sharpInput = await runHeicFallback();
           preview1080 = await sharp(sharpInput, { unlimited: true })
+            .rotate()
             .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
             .webp({ quality: 80 })
             .toBuffer();

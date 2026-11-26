@@ -2,13 +2,13 @@
   import { onMount, onDestroy } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import type { MediaFile } from '$lib/api/media';
-  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces, repairMedia, getMediaQueueStatus, fetchAlternates, setHeroPhoto, togglePhotoVisibility, API_BASE } from '$lib/api/media';
+  import { getPreviewUrl, getStreamUrl, getThumbnailUrl, fetchMediaFaces, repairMedia, getMediaQueueStatus, fetchAlternates, setHeroPhoto, togglePhotoVisibility, toggleFavorite, API_BASE } from '$lib/api/media';
   import { createShare } from '$lib/api/shares';
   import { copyToClipboard } from '$lib/utils/clipboard';
   import BlurhashImage from './BlurhashImage.svelte';
   import Modal from './Modal.svelte';
   import { toast } from '$lib/stores/toast';
-  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut, Clock, Layers, Eye, EyeOff, Cloud, ExternalLink, Copy, QrCode } from '@lucide/svelte';
+  import { Download, Share2, Info, MoreHorizontal, X, ChevronLeft, ChevronRight, Check, ZoomIn, ZoomOut, Clock, Layers, Eye, EyeOff, Cloud, ExternalLink, Copy, QrCode, Heart } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { formatDate, getRawDate } from '$lib/utils/date';
   import { tracker } from '$lib/utils/analyticsTracker';
@@ -25,11 +25,13 @@
     baseFolderPath, folderCoverId,
     showHiddenAlternates = true,
     allowHeroSelection = false,
+    canFavorite = true,
     onclose,
     onnext,
     onprev,
     onsetcover,
-    onheroupdated
+    onheroupdated,
+    onfavoriteupdated
   }: { 
     media: MediaFile, 
     allowDownload?: boolean, 
@@ -40,11 +42,13 @@
     folderCoverId?: string | null,
     showHiddenAlternates?: boolean,
     allowHeroSelection?: boolean,
+    canFavorite?: boolean,
     onclose?: () => void,
     onnext?: () => void,
     onprev?: () => void,
     onsetcover?: (id: string) => void,
-    onheroupdated?: (heroId: string, isVisible?: boolean) => void
+    onheroupdated?: (heroId: string, isVisible?: boolean) => void,
+    onfavoriteupdated?: (id: string, isFavorite: boolean) => void
   } = $props();
 
   let activeMedia = $state(media);
@@ -132,6 +136,25 @@
 
   function switchActiveMedia(alt: MediaFile) {
     activeMedia = alt;
+  }
+
+  let isTogglingFavorite = $state(false);
+  async function handleToggleFavorite() {
+    if (isTogglingFavorite || !canFavorite) return;
+    isTogglingFavorite = true;
+    const targetState = !activeMedia.is_favorite;
+    try {
+      const res = await toggleFavorite(activeMedia.id, targetState, token);
+      const newFav = res.is_favorite;
+      activeMedia = { ...activeMedia, is_favorite: newFav };
+      alternates = alternates.map(a => a.id === activeMedia.id ? { ...a, is_favorite: newFav } : a);
+      toast.success(newFav ? 'Added to favorites' : 'Removed from favorites');
+      onfavoriteupdated?.(activeMedia.id, newFav);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update favorite status');
+    } finally {
+      isTogglingFavorite = false;
+    }
   }
 
   const rawDate = $derived(getRawDate(media));
@@ -349,10 +372,12 @@
       return;
     }
 
-    // Fullscreen: 'f' or 'F'
+    // Favorite: 'f' or 'F'
     if (e.key === 'f' || e.key === 'F') {
       e.preventDefault();
-      toggleFullscreen();
+      if (canFavorite) {
+        handleToggleFavorite();
+      }
       return;
     }
 
@@ -886,6 +911,18 @@
         <button class="icon-btn {showInfo ? 'active' : ''}" onclick={toggleInfo} title="Info (I)">
           <Info size={20} strokeWidth={2} />
         </button>
+        {#if canFavorite}
+          <button 
+            type="button"
+            class="icon-btn favorite-btn" 
+            class:is-favorite={activeMedia.is_favorite} 
+            onclick={handleToggleFavorite} 
+            title={activeMedia.is_favorite ? "Favorited (F)" : "Favorite (F)"}
+            aria-label="Toggle favorite"
+          >
+            <Heart size={20} strokeWidth={2} fill={activeMedia.is_favorite ? '#ef4444' : 'none'} color={activeMedia.is_favorite ? '#ef4444' : 'currentColor'} />
+          </button>
+        {/if}
         {#if !isSharedView && isGDriveSynced && gdriveLink}
           <div style="position: relative;" use:clickOutside={() => showGDriveMenu = false}>
             <button 
@@ -1926,6 +1963,12 @@
   .burst-icon-btn.active {
     background: rgba(255, 255, 255, 0.2);
     color: #ffffff;
+  }
+  .favorite-btn.is-favorite {
+    color: #ef4444;
+  }
+  .favorite-btn.is-favorite:hover {
+    color: #f87171;
   }
   .burst-icon-count {
     position: absolute;

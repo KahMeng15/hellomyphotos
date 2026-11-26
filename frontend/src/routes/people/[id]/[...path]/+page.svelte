@@ -97,11 +97,22 @@
     return '—';
   }
 
-  function getAspectRatio(file: { exif_json?: any }): number | undefined {
+  function getAspectRatio(file: any): number | undefined {
+    if (file.img_width && file.img_height && file.img_width > 0 && file.img_height > 0) {
+      return file.img_width / file.img_height;
+    }
     const exif = file.exif_json;
     if (exif) {
-      const w = exif.ExifImageWidth || exif.ImageWidth;
-      const h = exif.ExifImageHeight || exif.ImageHeight;
+      let w = exif.ExifImageWidth || exif.ImageWidth;
+      let h = exif.ExifImageHeight || exif.ImageHeight;
+      const orient = exif.Orientation;
+      const isRotated90 = (typeof orient === 'number' && [5, 6, 7, 8].includes(orient)) ||
+        (typeof orient === 'string' && (orient.includes('90') || orient.includes('270') || orient.includes('Rotate 90') || orient.includes('Rotate 270')));
+      if (isRotated90 && w && h) {
+        const temp = w;
+        w = h;
+        h = temp;
+      }
       if (w && h && w > 0 && h > 0) return w / h;
     }
     return undefined;
@@ -363,6 +374,7 @@
   }
   let shareAllowDownloadImages = $state(true);
   let shareAllowDownloadFolder = $state(true);
+  let shareAllowFavorites = $state(false);
   let shareExpiryMode: 'duration' | 'date' | 'never' = $state('duration');
   let shareExpiryValue = $state(7);
   let shareExpiryUnit = $state('days');
@@ -392,6 +404,7 @@
   let editExpiryDateTime = $state('');
   let editAllowDownloadImages = $state(true);
   let editAllowDownloadFolder = $state(true);
+  let editAllowFavorites = $state(false);
   let editIsActive = $state(true);
   let isSavingShareEdit = $state(false);
 
@@ -451,7 +464,8 @@
         shareAllowDownloadFolder,
         isWatermarked,
         expiresAt,
-        shareWatermarkTemplateId || null
+        shareWatermarkTemplateId || null,
+        shareAllowFavorites
       );
       toast.success('Share link created successfully!');
       newlyCreatedShareToken = token;
@@ -528,6 +542,7 @@
     extendingToken = null;
     editAllowDownloadImages = share.allow_download_images ?? true;
     editAllowDownloadFolder = share.allow_download_folder ?? true;
+    editAllowFavorites = share.allow_favorites ?? false;
     editIsActive = share.is_active !== false;
 
     if (!share.expires_at) {
@@ -573,6 +588,7 @@
         expiresAt: finalExpiresAt,
         allowDownloadImages: editAllowDownloadImages,
         allowDownloadFolder: editAllowDownloadFolder,
+        allowFavorites: editAllowFavorites,
         isActive: editIsActive
       });
 
@@ -1298,9 +1314,14 @@
       <label for="personShareAllowDlImg" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading individual images</label>
     </div>
 
-    <div class="form-group" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+    <div class="form-group" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
       <input type="checkbox" id="personShareAllowDlFolder" bind:checked={shareAllowDownloadFolder} style="width: 18px; height: 18px;" />
       <label for="personShareAllowDlFolder" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading the entire folder (ZIP)</label>
+    </div>
+
+    <div class="form-group" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+      <input type="checkbox" id="personShareAllowFavs" bind:checked={shareAllowFavorites} style="width: 18px; height: 18px;" />
+      <label for="personShareAllowFavs" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos and filter favorites</label>
     </div>
 
     <div class="form-group" style="margin-bottom: 22px;">
@@ -1401,6 +1422,9 @@
                       {:else}
                         View Only
                       {/if}
+                      {#if share.allow_favorites}
+                        <span style="color: #f43f5e; font-weight: 500;">· Favs</span>
+                      {/if}
                     </span>
                   </div>
                 </div>
@@ -1497,6 +1521,11 @@
                     <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
                       <input type="checkbox" id="editPersonDlFolder-{share.share_token}" bind:checked={editAllowDownloadFolder} style="width: 15px; height: 15px;" />
                       <label for="editPersonDlFolder-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow downloading entire gallery (ZIP)</label>
+                    </div>
+
+                    <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                      <input type="checkbox" id="editPersonFav-{share.share_token}" bind:checked={editAllowFavorites} style="width: 15px; height: 15px;" />
+                      <label for="editPersonFav-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos</label>
                     </div>
 
                     <div style="display: flex; align-items: center; gap: 8px;">
@@ -1641,6 +1670,11 @@
                     <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
                       <input type="checkbox" id="editPersonExpDlFolder-{share.share_token}" bind:checked={editAllowDownloadFolder} style="width: 15px; height: 15px;" />
                       <label for="editPersonExpDlFolder-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow downloading entire gallery (ZIP)</label>
+                    </div>
+
+                    <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                      <input type="checkbox" id="editPersonExpFav-{share.share_token}" bind:checked={editAllowFavorites} style="width: 15px; height: 15px;" />
+                      <label for="editPersonExpFav-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos</label>
                     </div>
 
                     <div style="display: flex; align-items: center; gap: 8px;">

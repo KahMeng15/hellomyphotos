@@ -5,7 +5,8 @@ import { slide } from 'svelte/transition';
   import CoverImage from '$lib/components/CoverImage.svelte';
   import Lightbox from '$lib/components/Lightbox.svelte';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
-  import { getThumbnailUrl, getPreviewUrl, getStreamUrl, setFolderCover, getFolderZipUrl, setFolderDescription } from '$lib/api/media';
+  import { getThumbnailUrl, getPreviewUrl, getStreamUrl, setFolderCover, getFolderZipUrl, setFolderDescription, toggleFavorite } from '$lib/api/media';
+  import { toast } from '$lib/stores/toast';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
   import { getSortDate, getRawDate } from '$lib/utils/date';
   import { createShare, getActiveShares, revokeShare, submitAccessRequest, searchShareContent, type ShareData } from '$lib/api/shares';
@@ -14,7 +15,7 @@ import { slide } from 'svelte/transition';
   import { page } from '$app/state';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder, AlertCircle, List, Image as ImageIcon, Film, Search, Loader2, Radio, RefreshCw, Sparkles, Layers } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder, AlertCircle, List, Image as ImageIcon, Film, Search, Loader2, Radio, RefreshCw, Sparkles, Layers, Heart } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { getTurnstileSitekey } from '$lib/api/turnstile';
   import { API_BASE } from '$lib/api/media';
@@ -345,11 +346,19 @@ import { slide } from 'svelte/transition';
   let displayedFiles = $derived(isSearching ? searchFiles : (data.files || []));
 
   let stagingViewMode = $state<'curated' | 'all'>((data.share as any)?.default_staging_view || 'all');
+  let showOnlyFavorites = $state(false);
+  let canFavorite = $derived(Boolean((data.share as any)?.allow_favorites));
 
   let curatedFiles = $derived(
     stagingViewMode === 'curated'
       ? displayedFiles.filter((f: any) => f.is_hero || !f.burst_group_id)
       : displayedFiles
+  );
+
+  let favoriteFilteredFiles = $derived(
+    showOnlyFavorites && canFavorite
+      ? curatedFiles.filter((f: any) => f.is_favorite)
+      : curatedFiles
   );
 
   let isFolderOnly = $derived(!personName && displayedFiles.length === 0 && displayedDirectories.length > 0);
@@ -360,13 +369,35 @@ import { slide } from 'svelte/transition';
     return 0;
   }));
 
-  let sortedFiles = $derived([...curatedFiles].sort((a, b) => {
+  let sortedFiles = $derived([...favoriteFilteredFiles].sort((a, b) => {
     if (sortMode === 'newest') return getSortDate(b) - getSortDate(a);
     if (sortMode === 'oldest') return getSortDate(a) - getSortDate(b);
     if (sortMode === 'a-z') return a.file_name.localeCompare(b.file_name);
     if (sortMode === 'z-a') return b.file_name.localeCompare(a.file_name);
     return 0;
   }));
+
+  function handleFavoriteUpdated(updatedId: string, isFav: boolean) {
+    if (data.files) {
+      data.files = data.files.map((f: any) => f.id === updatedId ? { ...f, is_favorite: isFav } : f);
+    }
+  }
+
+  async function handleToggleThumbnailFavorite(file: any) {
+    if (!canFavorite) return;
+    const targetState = !file.is_favorite;
+    handleFavoriteUpdated(file.id, targetState);
+    try {
+      const res = await toggleFavorite(file.id, targetState, data.token);
+      if (res.is_favorite !== targetState) {
+        handleFavoriteUpdated(file.id, res.is_favorite);
+      }
+      toast.success(res.is_favorite ? 'Added to favorites' : 'Removed from favorites');
+    } catch (err: any) {
+      handleFavoriteUpdated(file.id, !targetState);
+      toast.error(err.message || 'Failed to update favorite status');
+    }
+  }
 
   function handleHeroUpdated(updatedHeroId: string, isVisible?: boolean) {
     if (data.files) {
@@ -398,6 +429,27 @@ import { slide } from 'svelte/transition';
   }
   
   let selectedMediaIndex: number | null = $state(null);
+
+  function getAspectRatio(file: any): number | undefined {
+    if (file.img_width && file.img_height && file.img_width > 0 && file.img_height > 0) {
+      return file.img_width / file.img_height;
+    }
+    const exif = file.exif_json;
+    if (exif) {
+      let w = exif.ExifImageWidth || exif.ImageWidth || exif.width;
+      let h = exif.ExifImageHeight || exif.ImageHeight || exif.height;
+      const orient = exif.Orientation;
+      const isRotated90 = (typeof orient === 'number' && [5, 6, 7, 8].includes(orient)) ||
+        (typeof orient === 'string' && (orient.includes('90') || orient.includes('270') || orient.includes('Rotate 90') || orient.includes('Rotate 270')));
+      if (isRotated90 && w && h) {
+        const temp = w;
+        w = h;
+        h = temp;
+      }
+      if (w && h && w > 0 && h > 0) return w / h;
+    }
+    return undefined;
+  }
 
   function encodePath(p: string) {
     return p.split('/').map(s => encodeURIComponent(s)).join('/');
@@ -1073,6 +1125,19 @@ import { slide } from 'svelte/transition';
           </button>
         {/if}
 
+        {#if canFavorite && displayedFiles.length > 0}
+          <button 
+            type="button" 
+            class="icon-btn favorites-icon-btn" 
+            class:active={showOnlyFavorites} 
+            onclick={() => showOnlyFavorites = !showOnlyFavorites} 
+            title={showOnlyFavorites ? 'Favorites view: showing favorited photos only (click for all)' : 'Favorites: show favorites only'}
+            aria-label="Toggle favorites only"
+          >
+            <Heart size={18} fill={showOnlyFavorites ? 'currentColor' : 'none'} />
+          </button>
+        {/if}
+
         {#if isFolderOnly}
           <div class="dropdown-container" use:clickOutside={() => showFolderViewMenu = false}>
             <button class="icon-btn" onclick={() => { showFolderViewMenu = !showFolderViewMenu; showSortMenu = false; showViewMenu = false; }} title="View (V)">
@@ -1326,17 +1391,31 @@ import { slide } from 'svelte/transition';
           <div class="col-date">{formatFileDate(file)}</div>
           <div class="col-res">{getFileDimensions(file)}</div>
           <div class="col-size">{formatBytes(file.size_bytes)}</div>
-          {#if data.share.allow_download_images}
+          {#if data.share.allow_download_images || canFavorite}
             <div class="col-actions" onclick={(e) => e.stopPropagation()}>
-              <a 
-                href={`${getStreamUrl(file.id, data.token)}${getStreamUrl(file.id, data.token).includes('?') ? '&' : '?'}download=1`} 
-                download={file.file_name} 
-                class="compact-action-btn" 
-                title="Download"
-                aria-label="Download"
-              >
-                <Download size={15} />
-              </a>
+              {#if canFavorite}
+                <button 
+                  type="button"
+                  class="compact-action-btn" 
+                  class:is-fav={file.is_favorite}
+                  onclick={() => handleToggleThumbnailFavorite(file)}
+                  title={file.is_favorite ? "Remove from favorites" : "Add to favorites"}
+                  aria-label="Toggle favorite"
+                >
+                  <Heart size={15} fill={file.is_favorite ? '#ef4444' : 'none'} color={file.is_favorite ? '#ef4444' : 'currentColor'} />
+                </button>
+              {/if}
+              {#if data.share.allow_download_images}
+                <a 
+                  href={`${getStreamUrl(file.id, data.token)}${getStreamUrl(file.id, data.token).includes('?') ? '&' : '?'}download=1`} 
+                  download={file.file_name} 
+                  class="compact-action-btn" 
+                  title="Download"
+                  aria-label="Download"
+                >
+                  <Download size={15} />
+                </a>
+              {/if}
             </div>
           {/if}
         </div>
@@ -1357,14 +1436,31 @@ import { slide } from 'svelte/transition';
         onclick={() => openLightbox(i)}
         objectFit={viewMode.includes('square') ? 'cover' : 'contain'}
         square={viewMode.includes('square')}
+        initialAspectRatio={getAspectRatio(file)}
         targetHeight={viewMode.includes('small') ? (windowWidth <= 768 ? 100 : 150) : viewMode.includes('large') ? (windowWidth <= 768 ? 200 : 350) : 250}
         priority={i < 8}
         burstCount={stagingViewMode === 'curated' ? file.burst_count : undefined}
+        isFavorite={file.is_favorite ?? false}
+        canFavorite={canFavorite}
+        ontogglefavorite={() => handleToggleThumbnailFavorite(file)}
       />
     {/each}
   </div>
 {/if}
 {/key}
+
+{#if showOnlyFavorites && sortedFiles.length === 0}
+  <div class="empty-favorites-state">
+    <div class="empty-favorites-icon">
+      <Heart size={36} strokeWidth={1.5} />
+    </div>
+    <p class="empty-title">No favorites in this folder</p>
+    <p class="empty-subtitle">Click the heart icon on any photo or press F in the viewer to mark your favorites.</p>
+    <button class="btn" onclick={() => showOnlyFavorites = false} style="margin-top: 14px; background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: white;">
+      Show All Photos
+    </button>
+  </div>
+{/if}
 
 {#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
   <Lightbox 
@@ -1377,6 +1473,8 @@ import { slide } from 'svelte/transition';
     baseFolderPath={data.baseFolderPath} 
     showHiddenAlternates={(data.share as any)?.show_hidden_alternates ?? true}
     allowHeroSelection={(data.share as any)?.allow_hero_selection ?? false}
+    canFavorite={canFavorite}
+    onfavoriteupdated={handleFavoriteUpdated}
     onheroupdated={handleHeroUpdated}
     onclose={closeLightbox} 
     onnext={nextMedia} 
@@ -2169,5 +2267,38 @@ import { slide } from 'svelte/transition';
     color: #facc15;
     background: rgba(234, 179, 8, 0.18);
     border-color: rgba(234, 179, 8, 0.4);
+  }
+
+  .favorites-icon-btn.active {
+    color: #f43f5e;
+    background: rgba(244, 63, 94, 0.18);
+    border-color: rgba(244, 63, 94, 0.4);
+  }
+
+  .empty-favorites-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+    color: #a1a1aa;
+    width: 100%;
+  }
+
+  .empty-favorites-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(244, 63, 94, 0.12);
+    color: #f43f5e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+  }
+
+  .compact-action-btn.is-fav {
+    color: #f43f5e;
   }
 </style>

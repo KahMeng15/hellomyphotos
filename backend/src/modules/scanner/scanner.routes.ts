@@ -331,7 +331,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       let filesResult;
       if (!folder) {
         filesResult = await query(
-          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height 
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height, is_favorite 
            FROM media_files 
            WHERE file_name ILIKE $1 ESCAPE '\\' 
            ORDER BY file_name ASC 
@@ -341,7 +341,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
       } else {
         const escapedFolder = folder.replace(/([%_\\])/g, '\\$1');
         filesResult = await query(
-          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height 
+          `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height, is_favorite 
            FROM media_files 
            WHERE file_name ILIKE $1 ESCAPE '\\' 
              AND (folder_path = $2 OR folder_path LIKE $3 ESCAPE '\\') 
@@ -534,7 +534,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
     const result = await query(
       `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, 
               is_transcoded, transcoded_mp4_path, transcoded_webm_path, created_at, updated_at, img_width, img_height, 
-              is_staged, is_hidden_staging, burst_group_id, is_hero, quality_score, face_count,
+              is_staged, is_hidden_staging, burst_group_id, is_hero, quality_score, face_count, is_favorite,
               COALESCE((SELECT COUNT(*)::int FROM media_files b WHERE b.burst_group_id = media_files.burst_group_id), 1) as burst_count
        FROM media_files 
        WHERE folder_path = $1 AND (is_hidden_staging = false OR is_hidden_staging IS NULL) 

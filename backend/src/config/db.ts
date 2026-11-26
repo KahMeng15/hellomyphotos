@@ -154,6 +154,7 @@ const SCHEMA_STATEMENTS = [
   )`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='person_id') THEN ALTER TABLE shared_folders ADD COLUMN person_id UUID REFERENCES people(id) ON DELETE SET NULL; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='is_active') THEN ALTER TABLE shared_folders ADD COLUMN is_active BOOLEAN DEFAULT true; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_favorites') THEN ALTER TABLE shared_folders ADD COLUMN allow_favorites BOOLEAN DEFAULT false; END IF; END $$;`,
   `DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shared_folders_created_by_fkey' AND confdeltype = 'c') THEN
       ALTER TABLE shared_folders DROP CONSTRAINT shared_folders_created_by_fkey;
@@ -199,6 +200,8 @@ const SCHEMA_STATEMENTS = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='img_height') THEN ALTER TABLE media_files ADD COLUMN img_height INTEGER; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='processing_error') THEN ALTER TABLE media_files ADD COLUMN processing_error TEXT; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='failed_attempts') THEN ALTER TABLE media_files ADD COLUMN failed_attempts INTEGER DEFAULT 0; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='is_favorite') THEN ALTER TABLE media_files ADD COLUMN is_favorite BOOLEAN DEFAULT false; END IF; END $$;`,
+  `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_media_files_folder_favorite ON media_files(folder_path, is_favorite)`,
 
   `CREATE TABLE IF NOT EXISTS folder_settings (
     folder_path TEXT PRIMARY KEY,
@@ -462,6 +465,8 @@ const SCHEMA_STATEMENTS = [
     synced_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     PRIMARY KEY (sync_id, file_name)
   )`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_gdrive_syncs' AND column_name='caesium_enabled') THEN ALTER TABLE folder_gdrive_syncs ADD COLUMN caesium_enabled BOOLEAN DEFAULT false; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_gdrive_syncs' AND column_name='caesium_config') THEN ALTER TABLE folder_gdrive_syncs ADD COLUMN caesium_config JSONB DEFAULT '{}'::jsonb; END IF; END $$;`,
   `CREATE INDEX IF NOT EXISTS idx_folder_gdrive_syncs_path ON folder_gdrive_syncs(folder_path, source_type)`,
 
 ];

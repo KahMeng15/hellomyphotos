@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { API_BASE } from '$lib/api/media';
-  import { ChevronLeft, Settings, Cpu, HardDrive, ShieldCheck, Save, Clock, Eye, Cloud, Trash2, CheckCircle, AlertTriangle } from '@lucide/svelte';
+  import { ChevronLeft, Settings, Cpu, HardDrive, ShieldCheck, Save, Clock, Eye, Cloud, Trash2, CheckCircle, AlertTriangle, Minimize2, Check } from '@lucide/svelte';
   import { toast } from '$lib/stores/toast';
-  import { listGoogleAccounts, disconnectGoogleAccount, getGoogleAuthUrl, type GoogleAccount } from '$lib/api/gdrive';
+  import { listGoogleAccounts, disconnectGoogleAccount, getGoogleAuthUrl, getCaesiumSettings, updateCaesiumDefaultSettings, type GoogleAccount, type CaesiumConfig } from '$lib/api/gdrive';
   import { page } from '$app/state';
 
   let settings = $state<any>({
@@ -22,6 +22,64 @@
   let googleAccounts = $state<GoogleAccount[]>([]);
   let loadingGDrive = $state(false);
   let disconnectingId = $state<string | null>(null);
+
+  // Caesium default settings state
+  let caesiumInfo = $state<{ isAvailable: boolean; version?: string; binaryPath?: string; defaultConfig: CaesiumConfig } | null>(null);
+  let loadingCaesium = $state(false);
+  let savingCaesium = $state(false);
+  let defCaesiumEnabled = $state(true);
+  let defCaesiumMode = $state<'lossy' | 'lossless' | 'max_size'>('lossy');
+  let defCaesiumQuality = $state(80);
+  let defCaesiumMaxSize = $state('1MB');
+  let defCaesiumWidth = $state<number | null>(null);
+  let defCaesiumHeight = $state<number | null>(null);
+  let defCaesiumKeepExif = $state(true);
+
+  async function loadCaesiumSettings() {
+    loadingCaesium = true;
+    try {
+      const data = await getCaesiumSettings();
+      caesiumInfo = data;
+      if (data.defaultConfig) {
+        defCaesiumEnabled = data.defaultConfig.enabled ?? true;
+        defCaesiumMode = data.defaultConfig.mode || 'lossy';
+        defCaesiumQuality = data.defaultConfig.quality ?? 80;
+        defCaesiumMaxSize = data.defaultConfig.max_size || '1MB';
+        defCaesiumWidth = data.defaultConfig.width ?? null;
+        defCaesiumHeight = data.defaultConfig.height ?? null;
+        defCaesiumKeepExif = data.defaultConfig.keep_exif ?? true;
+      }
+    } catch (e: any) {
+      console.warn('Could not load Caesium settings:', e.message);
+    } finally {
+      loadingCaesium = false;
+    }
+  }
+
+  async function handleSaveCaesiumDefaults() {
+    savingCaesium = true;
+    try {
+      const config: CaesiumConfig = {
+        enabled: defCaesiumEnabled,
+        mode: defCaesiumMode,
+        quality: defCaesiumQuality,
+        max_size: defCaesiumMaxSize,
+        width: defCaesiumWidth,
+        height: defCaesiumHeight,
+        keep_exif: defCaesiumKeepExif,
+        keep_dates: true
+      };
+      await updateCaesiumDefaultSettings(config);
+      if (caesiumInfo) {
+        caesiumInfo.defaultConfig = config;
+      }
+      toast.success('Default Caesium compression parameters saved!');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to save Caesium default settings');
+    } finally {
+      savingCaesium = false;
+    }
+  }
 
   async function loadGDriveAccounts() {
     loadingGDrive = true;
@@ -72,6 +130,7 @@
   onMount(() => {
     loadSettings();
     loadGDriveAccounts();
+    loadCaesiumSettings();
 
     // Check query params for OAuth result
     const searchParams = new URLSearchParams(window.location.search);
@@ -356,6 +415,141 @@
                 </div>
               {/each}
             </div>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Default Caesium Compression Parameters Card -->
+      <div class="card">
+        <div class="card-header">
+          <Minimize2 size={20} class="icon" color="#60a5fa" />
+          <div style="flex: 1;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <h3 style="margin: 0;">Default Caesium Image Compressor</h3>
+              {#if caesiumInfo?.isAvailable}
+                <span style="font-size: 0.7rem; background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); padding: 2px 8px; border-radius: 4px;">
+                  {caesiumInfo.version || 'CLI Ready'}
+                </span>
+              {:else}
+                <span style="font-size: 0.7rem; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); padding: 2px 8px; border-radius: 4px;">
+                  CLI Not Found
+                </span>
+              {/if}
+            </div>
+            <p style="margin: 2px 0 0 0; font-size: 0.8rem; color: #a1a1aa;">
+              Remembered preset applied automatically when enabling Google Drive sync on any folder.
+            </p>
+          </div>
+        </div>
+        <div class="card-body">
+          {#if loadingCaesium}
+            <div style="padding: 1rem; text-align: center; color: #71717a;">Loading Caesium settings...</div>
+          {:else}
+            <div class="form-group" style="margin-bottom: 1rem;">
+              <label style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;">
+                <span style="font-size: 0.9rem; color: #f4f4f5; font-weight: 500;">Enable by default for new Google Drive syncs</span>
+                <input type="checkbox" bind:checked={defCaesiumEnabled} style="width: 17px; height: 17px; accent-color: #3b82f6;" />
+              </label>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 1rem;">
+              <label style="display: block; font-size: 0.8rem; color: #a1a1aa; margin-bottom: 6px;">Compression Mode</label>
+              <div style="display: flex; gap: 6px;">
+                <button 
+                  type="button" 
+                  class="btn sm secondary" 
+                  style="flex: 1; {defCaesiumMode === 'lossy' ? 'background: rgba(59, 130, 246, 0.25); border-color: #3b82f6; color: white;' : ''}"
+                  onclick={() => defCaesiumMode = 'lossy'}>
+                  Lossy (Quality)
+                </button>
+                <button 
+                  type="button" 
+                  class="btn sm secondary" 
+                  style="flex: 1; {defCaesiumMode === 'lossless' ? 'background: rgba(59, 130, 246, 0.25); border-color: #3b82f6; color: white;' : ''}"
+                  onclick={() => defCaesiumMode = 'lossless'}>
+                  Lossless
+                </button>
+                <button 
+                  type="button" 
+                  class="btn sm secondary" 
+                  style="flex: 1; {defCaesiumMode === 'max_size' ? 'background: rgba(59, 130, 246, 0.25); border-color: #3b82f6; color: white;' : ''}"
+                  onclick={() => defCaesiumMode = 'max_size'}>
+                  Target Size
+                </button>
+              </div>
+            </div>
+
+            {#if defCaesiumMode === 'lossy'}
+              <div class="form-group" style="margin-bottom: 1rem; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 6px;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #f4f4f5; margin-bottom: 6px;">
+                  <span>Default Quality:</span>
+                  <strong style="color: #60a5fa;">{defCaesiumQuality}%</strong>
+                </div>
+                <input 
+                  type="range" 
+                  min="1" 
+                  max="100" 
+                  bind:value={defCaesiumQuality} 
+                  style="width: 100%; accent-color: #3b82f6; cursor: pointer;" 
+                />
+              </div>
+            {:else if defCaesiumMode === 'max_size'}
+              <div class="form-group" style="margin-bottom: 1rem;">
+                <label style="display: block; font-size: 0.8rem; color: #a1a1aa; margin-bottom: 4px;">Target Maximum File Size</label>
+                <div style="display: flex; gap: 6px;">
+                  <input 
+                    type="text" 
+                    bind:value={defCaesiumMaxSize} 
+                    placeholder="e.g. 1MB, 500KB, 2MB"
+                    style="flex: 1; padding: 6px 10px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; font-size: 0.85rem;" 
+                  />
+                  {#each ['500KB', '1MB', '2MB', '5MB'] as preset}
+                    <button 
+                      type="button" 
+                      class="btn sm secondary" 
+                      style="padding: 4px 8px; font-size: 0.75rem;"
+                      onclick={() => defCaesiumMaxSize = preset}>
+                      {preset}
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            <div class="form-group" style="margin-bottom: 1rem;">
+              <label style="display: block; font-size: 0.8rem; color: #a1a1aa; margin-bottom: 4px;">Default Dimension Limits (Optional)</label>
+              <div style="display: flex; gap: 8px;">
+                <input 
+                  type="number" 
+                  bind:value={defCaesiumWidth} 
+                  placeholder="Max Width (px)"
+                  style="flex: 1; padding: 6px 10px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; font-size: 0.85rem;" 
+                />
+                <input 
+                  type="number" 
+                  bind:value={defCaesiumHeight} 
+                  placeholder="Max Height (px)"
+                  style="flex: 1; padding: 6px 10px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 4px; font-size: 0.85rem;" 
+                />
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 1.25rem;">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #ccc; cursor: pointer;">
+                <input type="checkbox" bind:checked={defCaesiumKeepExif} style="accent-color: #3b82f6;" />
+                <span>Preserve EXIF metadata & camera information</span>
+              </label>
+            </div>
+
+            <button 
+              class="btn primary sm" 
+              style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;"
+              onclick={handleSaveCaesiumDefaults}
+              disabled={savingCaesium}
+            >
+              <Save size={14} />
+              {savingCaesium ? 'Saving...' : 'Save Remembered Defaults'}
+            </button>
           {/if}
         </div>
       </div>
