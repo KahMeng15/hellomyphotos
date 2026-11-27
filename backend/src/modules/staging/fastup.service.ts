@@ -6,10 +6,18 @@ import { redis, deleteKeysByPattern } from '../../config/redis';
 import { STAGING_ROOT, MEDIA_ROOT, CACHE_ROOT } from '../../utils/mediaPath';
 import { sanitizeSessionId } from './staging.service';
 import { invalidateShareCache } from '../../utils/auth';
+import { getClientIp } from '../../utils/getIp';
 import { thumbnailQueue } from '../../queue/thumbnailQueue';
 import { metadataQueue } from '../../queue/metadataQueue';
 import { smartSearchQueue } from '../../queue/smartSearchQueue';
 import { faceDetectionQueue } from '../../queue/faceDetectionQueue';
+
+/**
+ * Computes a SHA-256 hash for secure at-rest token storage and constant-time-like lookup.
+ */
+export function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token.trim()).digest('hex');
+}
 
 export interface PredefinedSettings {
   serverUrl?: string;
@@ -82,52 +90,27 @@ export function isPrivateIp(ip: string): boolean {
 }
 
 /**
- * Resolves the client IP accurately:
- * 1. Explicit IP sent by FastUp device (e.g. 10.0.0.44) or x-device-ip header
- * 2. Public IP from Cloudflare/reverse proxy headers (cf-connecting-ip, x-real-ip, x-forwarded-for)
- * 3. Local LAN IP if connecting on private network
- * 4. Filters out Docker internal bridge and Mac VM gateway IPs (192.168.65.x, 172.19.x.x)
+ * Resolves the client IP accurately using verified proxy-aware IP resolution (Fastify trustProxy).
+ * If explicitIp or device header is provided (e.g. from local camera tether), it is only used
+ * for diagnostic/activity logging, while ensuring fallback to proxy-verified IP.
  */
 export function resolveClientIp(request: any, explicitIp?: string): string {
-  if (explicitIp && explicitIp.trim() && !isDockerOrInternalIp(explicitIp.trim())) {
-    return explicitIp.trim();
+  // Use proxy-aware verified client IP as the trusted source of truth
+  const verifiedIp = request ? getClientIp(request) : '127.0.0.1';
+
+  // If request comes from private network or localhost, and device provided its own LAN IP,
+  // allow it for display/telemetry purposes.
+  if (isPrivateIp(verifiedIp) || verifiedIp === '127.0.0.1' || verifiedIp === 'localhost') {
+    if (explicitIp && explicitIp.trim() && !isDockerOrInternalIp(explicitIp.trim())) {
+      return explicitIp.trim();
+    }
+    const deviceHeader = (request?.headers?.['x-device-ip'] || request?.headers?.['x-client-ip'] || request?.headers?.['x-client-local-ip']) as string | undefined;
+    if (deviceHeader && deviceHeader.trim() && !isDockerOrInternalIp(deviceHeader.trim())) {
+      return deviceHeader.trim();
+    }
   }
 
-  const deviceHeader = (request?.headers?.['x-device-ip'] || request?.headers?.['x-client-ip'] || request?.headers?.['x-client-local-ip']) as string | undefined;
-  if (deviceHeader && deviceHeader.trim() && !isDockerOrInternalIp(deviceHeader.trim())) {
-    return deviceHeader.trim();
-  }
-
-  const cfIp = request?.headers?.['cf-connecting-ip'] as string | undefined;
-  if (cfIp && cfIp.trim() && !isDockerOrInternalIp(cfIp.trim())) {
-    return cfIp.trim();
-  }
-
-  const realIp = request?.headers?.['x-real-ip'] as string | undefined;
-  if (realIp && realIp.trim() && !isDockerOrInternalIp(realIp.trim())) {
-    return realIp.trim();
-  }
-
-  const xff = request?.headers?.['x-forwarded-for'] as string | undefined;
-  if (xff) {
-    const parts = xff.split(',').map((s: string) => s.trim()).filter(Boolean);
-    const publicIp = parts.find((ip: string) => !isDockerOrInternalIp(ip) && !isPrivateIp(ip));
-    if (publicIp) return publicIp;
-
-    const nonDocker = parts.find((ip: string) => !isDockerOrInternalIp(ip));
-    if (nonDocker) return nonDocker;
-  }
-
-  const reqIp = request?.ip ? request.ip.replace(/^::ffff:/, '') : '';
-  if (reqIp && !isDockerOrInternalIp(reqIp)) {
-    return reqIp;
-  }
-
-  if (deviceHeader && deviceHeader.trim()) {
-    return deviceHeader.trim();
-  }
-
-  return reqIp || '127.0.0.1';
+  return verifiedIp;
 }
 
 export class ScopeSecurity {
@@ -244,8 +227,9 @@ export class FastUpService {
     const randomNum = crypto.randomInt(100000, 999999);
     const otpCode = randomNum.toString();
 
-    // Generate persistent bearer token
+    // Generate persistent bearer token and its SHA-256 hash
     const token = 'ph_tok_' + crypto.randomBytes(24).toString('hex');
+    const tokenHash = hashToken(token);
 
     const expiresAt = new Date(Date.now() + validityHours * 3600 * 1000);
     const otpExpiresAt = new Date(Date.now() + 3600 * 1000); // OTP must be claimed within 1 hour
@@ -257,11 +241,12 @@ export class FastUpService {
 
     const res = await query(
       `INSERT INTO photographer_tokens 
-       (token, otp_code, otp_expires_at, photographer_name, folder_path, scope_folders, settings_json, is_active, expires_at, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9)
+       (token, token_hash, otp_code, otp_expires_at, photographer_name, folder_path, scope_folders, settings_json, is_active, expires_at, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9, $10)
        RETURNING id, token, otp_code, photographer_name, folder_path, scope_folders, settings_json, is_active, expires_at, created_at`,
       [
         token,
+        tokenHash,
         otpCode,
         otpExpiresAt,
         photogName,
@@ -531,15 +516,23 @@ export class FastUpService {
 
   /**
    * Revokes or deletes a photographer's token immediately.
-   * Supports both database UUID id and raw token string.
+   * Supports database UUID id, raw token string, or token hash.
    */
   static async revokeToken(identifier: string) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
-    const whereCol = isUuid ? 'id' : 'token';
-    const res = await query(
-      `DELETE FROM photographer_tokens WHERE ${whereCol} = $1 RETURNING id, photographer_name, folder_path`,
-      [identifier]
-    );
+    let res;
+    if (isUuid) {
+      res = await query(
+        `DELETE FROM photographer_tokens WHERE id = $1 RETURNING id, photographer_name, folder_path`,
+        [identifier]
+      );
+    } else {
+      const tHash = hashToken(identifier);
+      res = await query(
+        `DELETE FROM photographer_tokens WHERE token = $1 OR token_hash = $2 RETURNING id, photographer_name, folder_path`,
+        [identifier, tHash]
+      );
+    }
     if (res.rows.length > 0) {
       const deleted = res.rows[0];
       FastUpService.logActivity({

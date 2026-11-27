@@ -139,17 +139,20 @@
   }
 
   let isTogglingFavorite = $state(false);
-  async function handleToggleFavorite() {
+  async function handleToggleFavorite(targetItem?: MediaFile) {
     if (isTogglingFavorite || !canFavorite) return;
+    const itemToToggle = targetItem || activeMedia;
     isTogglingFavorite = true;
-    const targetState = !activeMedia.is_favorite;
+    const targetState = !itemToToggle.is_favorite;
     try {
-      const res = await toggleFavorite(activeMedia.id, targetState, token);
+      const res = await toggleFavorite(itemToToggle.id, targetState, token);
       const newFav = res.is_favorite;
-      activeMedia = { ...activeMedia, is_favorite: newFav };
-      alternates = alternates.map(a => a.id === activeMedia.id ? { ...a, is_favorite: newFav } : a);
+      if (itemToToggle.id === activeMedia.id) {
+        activeMedia = { ...activeMedia, is_favorite: newFav };
+      }
+      alternates = alternates.map(a => a.id === itemToToggle.id ? { ...a, is_favorite: newFav } : a);
       toast.success(newFav ? 'Added to favorites' : 'Removed from favorites');
-      onfavoriteupdated?.(activeMedia.id, newFav);
+      onfavoriteupdated?.(itemToToggle.id, newFav);
     } catch (err: any) {
       toast.error(err.message || 'Failed to update favorite status');
     } finally {
@@ -916,7 +919,7 @@
             type="button"
             class="icon-btn favorite-btn" 
             class:is-favorite={activeMedia.is_favorite} 
-            onclick={handleToggleFavorite} 
+            onclick={() => handleToggleFavorite()} 
             title={activeMedia.is_favorite ? "Favorited (F)" : "Favorite (F)"}
             aria-label="Toggle favorite"
           >
@@ -1364,6 +1367,18 @@
                   </div>
 
                   <div class="burst-stack-actions-row">
+                    {#if canFavorite}
+                      <button
+                        type="button"
+                        class="btn-sm btn-burst-fav {alt.is_favorite ? 'is-fav' : ''}"
+                        onclick={() => handleToggleFavorite(alt)}
+                        title={alt.is_favorite ? "Favorited (click to unfavorite)" : "Add to favorites"}
+                        aria-label="Toggle favorite"
+                      >
+                        <Heart size={13} fill={alt.is_favorite ? '#ef4444' : 'none'} color={alt.is_favorite ? '#ef4444' : 'currentColor'} strokeWidth={2} />
+                      </button>
+                    {/if}
+
                     <button 
                       type="button" 
                       class="visibility-toggle-btn {alt.is_hero ? 'is-shown' : 'is-hidden'}"
@@ -1945,6 +1960,16 @@
     to { opacity: 1; transform: translateY(0); }
   }
   @media (max-width: 640px) {
+    .top-bar {
+      padding: 10px 12px;
+      gap: 6px;
+      max-width: 100vw;
+    }
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      flex-shrink: 0;
+    }
     .lightbox-staging-notice {
       bottom: 16px;
       left: 16px;
@@ -2206,6 +2231,30 @@
   .visibility-toggle-btn.is-hidden:hover {
     background: rgba(148, 163, 184, 0.22);
     color: #cbd5e1;
+  }
+
+  .btn-burst-fav {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #e2e8f0;
+    padding: 3px 6px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-burst-fav:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .btn-burst-fav.is-fav {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #ef4444;
+  }
+  .btn-burst-fav.is-fav:hover {
+    background: rgba(239, 68, 68, 0.25);
   }
 
   .btn-hero {

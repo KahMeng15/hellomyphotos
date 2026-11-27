@@ -25,43 +25,57 @@ if (!fs.existsSync(STAGING_ROOT)) {
  * as well as temporary files uploaded to live tethered sessions (STAGING_ROOT).
  */
 export function resolveMediaFullPath(folderPath: string | null | undefined, fileName: string): string {
-  const fp = (folderPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const cleanFolder = path.normalize(folderPath || '').replace(/^(\.\.[\/\\])+/, '').replace(/^[/\\]+/, '');
+  const cleanFileName = path.basename(fileName);
+  const fp = cleanFolder.replace(/\\/g, '/');
 
   // 1. Explicit 'staging/' prefix in folderPath (e.g. 'staging/sessionId')
   if (fp.startsWith('staging/') || fp === 'staging') {
     const sub = fp.replace(/^staging\/?/, '');
-    return path.join(STAGING_ROOT, sub, fileName);
+    const p = path.resolve(STAGING_ROOT, sub, cleanFileName);
+    if (p.startsWith(STAGING_ROOT)) {
+      return p;
+    }
   }
 
   // 2. Direct presence in staging directory
-  const stagingCandidate = path.join(STAGING_ROOT, fp, fileName);
-  if (fs.existsSync(stagingCandidate)) {
+  const stagingCandidate = path.resolve(STAGING_ROOT, fp, cleanFileName);
+  if (stagingCandidate.startsWith(STAGING_ROOT) && fs.existsSync(stagingCandidate)) {
     return stagingCandidate;
   }
 
   // 3. Fallback to standard permanent media library
-  return path.join(MEDIA_ROOT, fp, fileName);
+  const mediaCandidate = path.resolve(MEDIA_ROOT, fp, cleanFileName);
+  if (mediaCandidate.startsWith(MEDIA_ROOT)) {
+    return mediaCandidate;
+  }
+
+  return stagingCandidate;
 }
 
 /**
  * Checks if a media file exists on disk, and whether it resides in STAGING_ROOT.
  */
 export function checkMediaExists(folderPath: string | null | undefined, fileName: string): { exists: boolean; isStaged: boolean; fullPath: string } {
-  const fp = (folderPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const cleanFolder = path.normalize(folderPath || '').replace(/^(\.\.[\/\\])+/, '').replace(/^[/\\]+/, '');
+  const cleanFileName = path.basename(fileName);
+  const fp = cleanFolder.replace(/\\/g, '/');
 
   if (fp.startsWith('staging/') || fp === 'staging') {
     const sub = fp.replace(/^staging\/?/, '');
-    const p = path.join(STAGING_ROOT, sub, fileName);
-    if (fs.existsSync(p)) return { exists: true, isStaged: true, fullPath: p };
+    const p = path.resolve(STAGING_ROOT, sub, cleanFileName);
+    if (p.startsWith(STAGING_ROOT) && fs.existsSync(p)) {
+      return { exists: true, isStaged: true, fullPath: p };
+    }
   }
 
-  const stagingPath = path.join(STAGING_ROOT, fp, fileName);
-  if (fs.existsSync(stagingPath)) {
+  const stagingPath = path.resolve(STAGING_ROOT, fp, cleanFileName);
+  if (stagingPath.startsWith(STAGING_ROOT) && fs.existsSync(stagingPath)) {
     return { exists: true, isStaged: true, fullPath: stagingPath };
   }
 
-  const mediaPath = path.join(MEDIA_ROOT, fp, fileName);
-  if (fs.existsSync(mediaPath)) {
+  const mediaPath = path.resolve(MEDIA_ROOT, fp, cleanFileName);
+  if (mediaPath.startsWith(MEDIA_ROOT) && fs.existsSync(mediaPath)) {
     return { exists: true, isStaged: false, fullPath: mediaPath };
   }
 

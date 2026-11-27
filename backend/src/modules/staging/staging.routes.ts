@@ -4,7 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { pipeline } from 'stream/promises';
 import { StagingService, sanitizeSessionId } from './staging.service';
-import { FastUpService, resolveClientIp, ScopeSecurity } from './fastup.service';
+import { FastUpService, resolveClientIp, ScopeSecurity, hashToken } from './fastup.service';
 import { STAGING_ROOT } from '../../utils/mediaPath';
 import { requireAuth } from '../../utils/auth';
 import { query } from '../../config/db';
@@ -36,12 +36,13 @@ export async function requireStagingAuth(request: FastifyRequest, reply: Fastify
 
   if (candidateToken) {
     try {
+      const tokenHash = hashToken(candidateToken);
       const tokenRes = await query(
         `SELECT id, photographer_name, folder_path, scope_folders, is_active, expires_at, last_seen_at 
          FROM photographer_tokens 
-         WHERE token = $1
+         WHERE token_hash = $1 OR token = $2
          LIMIT 1`,
-        [candidateToken]
+        [tokenHash, candidateToken]
       );
 
       if (tokenRes.rows.length > 0) {

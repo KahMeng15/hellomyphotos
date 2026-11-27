@@ -4,7 +4,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # We use node:22-trixie-slim as the base image so we get a modern libheif (v1.19+) natively,
 # which is required to decode iOS 17 HEIC files.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y zstd libzstd1 2>/dev/null || true \
+    && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         ffmpeg \
@@ -42,7 +43,8 @@ FROM node:26-trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y zstd libzstd1 2>/dev/null || true \
+    && apt-get install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
         libva-drm2 \

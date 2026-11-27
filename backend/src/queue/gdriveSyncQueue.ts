@@ -17,6 +17,7 @@ export interface GDriveJobData {
   gdriveFolderId?: string;
   localFilePath?: string;
   fileName?: string;
+  relativePath?: string; // subfolder path relative to synced root (e.g. "subfolder/event")
   folderPath?: string;
   sourceType?: 'MEDIA' | 'FASTUP';
 }
@@ -45,7 +46,7 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
       const data = job.data;
 
       if (data.type === 'upload-file') {
-        const { syncId, accountId, gdriveFolderId, localFilePath, fileName } = data;
+        const { syncId, accountId, gdriveFolderId, localFilePath, fileName, relativePath = '' } = data;
         if (!syncId || !accountId || !gdriveFolderId || !localFilePath || !fileName) {
           throw new Error('Missing required upload parameters');
         }
@@ -98,7 +99,12 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
           }
 
           if (effectiveTemplate) {
-            let metadata: any = { file_name: fileName, folder_path: syncRow.folder_path };
+            const effectiveRelativePath = relativePath.replace(/^\/+|\/+$/g, '');
+            const targetDbFolderPath = effectiveRelativePath
+              ? (syncRow.folder_path ? `${syncRow.folder_path}/${effectiveRelativePath}` : effectiveRelativePath)
+              : syncRow.folder_path;
+
+            let metadata: any = { file_name: fileName, folder_path: targetDbFolderPath };
             try {
               const metaRes = await query(
                 `SELECT id, file_name, folder_path, created_at,
@@ -113,7 +119,7 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
                  FROM media_files 
                  WHERE file_name = $1 AND (folder_path = $2 OR folder_path LIKE $3)
                  LIMIT 1`,
-                [fileName, syncRow.folder_path, `${syncRow.folder_path}/%`]
+                [fileName, targetDbFolderPath, `${targetDbFolderPath}/%`]
               );
               if (metaRes.rows.length > 0) {
                 metadata = metaRes.rows[0];
@@ -160,25 +166,37 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
             }
           }
 
+          // Resolve destination folder on Google Drive (creating subfolder hierarchy if relativePath is present)
+          let targetFolderId = gdriveFolderId;
+          const cleanRelPath = relativePath.replace(/^\/+|\/+$/g, '').trim();
+          if (cleanRelPath) {
+            targetFolderId = await GDriveService.getOrCreateSubfolderPath({
+              accountId,
+              parentFolderId: gdriveFolderId,
+              relativePath: cleanRelPath
+            });
+          }
+
           // 3. Upload to Google Drive
           const { fileId } = await GDriveService.uploadJPEG({
             accountId,
-            gdriveFolderId,
+            gdriveFolderId: targetFolderId,
             localFilePath: fileToUpload,
             fileName
           });
 
           const uploadStats = fs.statSync(fileToUpload);
 
-          // Track in synced files table
+          // Track in synced files table (handling relative_path)
           await query(
-            `INSERT INTO gdrive_synced_files (sync_id, file_name, file_size, gdrive_file_id)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO gdrive_synced_files (sync_id, file_name, file_size, gdrive_file_id, relative_path)
+             VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (sync_id, file_name) DO UPDATE SET
                file_size = EXCLUDED.file_size,
                gdrive_file_id = EXCLUDED.gdrive_file_id,
+               relative_path = EXCLUDED.relative_path,
                synced_at = NOW()`,
-            [syncId, fileName, uploadStats.size, fileId]
+            [syncId, fileName, uploadStats.size, fileId, cleanRelPath]
           );
 
           // Update sync record
@@ -214,34 +232,50 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
 
         await query(`UPDATE folder_gdrive_syncs SET sync_status = 'SYNCING' WHERE id = $1`, [syncConfig.id]);
 
-        // Get local files matching JPEG
-        let filesToUpload: Array<{ fileName: string; fullPath: string }> = [];
+        // Helper function to recursively find all JPEG files with relative paths
+        const scanDirectoryRecursively = async (baseDir: string, currentRelative = ''): Promise<Array<{ fileName: string; fullPath: string; relativePath: string }>> => {
+          const results: Array<{ fileName: string; fullPath: string; relativePath: string }> = [];
+          const dirToRead = currentRelative ? path.join(baseDir, currentRelative) : baseDir;
+          if (!fs.existsSync(dirToRead)) return results;
+
+          let dirents: fs.Dirent[] = [];
+          try {
+            dirents = await fs.promises.readdir(dirToRead, { withFileTypes: true });
+          } catch (e: any) {
+            logger.warn(`[GDrive Sync] Could not read directory ${dirToRead}: ${e.message}`);
+            return results;
+          }
+
+          for (const dirent of dirents) {
+            if (dirent.name.startsWith('.')) continue; // skip hidden files
+
+            if (dirent.isDirectory()) {
+              const nextRel = currentRelative ? `${currentRelative}/${dirent.name}` : dirent.name;
+              const subResults = await scanDirectoryRecursively(baseDir, nextRel);
+              results.push(...subResults);
+            } else if (dirent.isFile() && GDriveService.isJPEG(dirent.name)) {
+              results.push({
+                fileName: dirent.name,
+                fullPath: path.join(dirToRead, dirent.name),
+                relativePath: currentRelative
+              });
+            }
+          }
+          return results;
+        };
+
+        // Get local files matching JPEG recursively
+        let filesToUpload: Array<{ fileName: string; fullPath: string; relativePath: string }> = [];
 
         if (sourceType === 'FASTUP') {
           const sessionDir = path.join(STAGING_ROOT, folderPath);
           if (fs.existsSync(sessionDir)) {
-            const dirents = await fs.promises.readdir(sessionDir, { withFileTypes: true });
-            for (const dirent of dirents) {
-              if (dirent.isFile() && GDriveService.isJPEG(dirent.name)) {
-                filesToUpload.push({
-                  fileName: dirent.name,
-                  fullPath: path.join(sessionDir, dirent.name)
-                });
-              }
-            }
+            filesToUpload = await scanDirectoryRecursively(sessionDir);
           }
         } else {
           const targetDir = folderPath ? path.join(MEDIA_ROOT, folderPath) : MEDIA_ROOT;
           if (fs.existsSync(targetDir)) {
-            const dirents = await fs.promises.readdir(targetDir, { withFileTypes: true });
-            for (const dirent of dirents) {
-              if (dirent.isFile() && GDriveService.isJPEG(dirent.name)) {
-                filesToUpload.push({
-                  fileName: dirent.name,
-                  fullPath: path.join(targetDir, dirent.name)
-                });
-              }
-            }
+            filesToUpload = await scanDirectoryRecursively(targetDir);
           }
         }
 
@@ -253,7 +287,8 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
             accountId: syncConfig.account_id,
             gdriveFolderId: syncConfig.gdrive_folder_id,
             localFilePath: file.fullPath,
-            fileName: file.fileName
+            fileName: file.fileName,
+            relativePath: file.relativePath
           });
         }
 
@@ -269,7 +304,7 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
 
         // Fetch all tracked files for this sync
         const tracked = await query(
-          `SELECT file_name, gdrive_file_id FROM gdrive_synced_files WHERE sync_id = $1`,
+          `SELECT file_name, relative_path, gdrive_file_id FROM gdrive_synced_files WHERE sync_id = $1`,
           [syncId]
         );
 
@@ -281,10 +316,11 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
         const targetDir = folder_path ? path.join(MEDIA_ROOT, folder_path) : MEDIA_ROOT;
 
         for (const row of tracked.rows) {
-          const localPath = path.join(targetDir, row.file_name);
+          const rel = (row.relative_path || '').replace(/^\/+|\/+$/g, '');
+          const localPath = rel ? path.join(targetDir, rel, row.file_name) : path.join(targetDir, row.file_name);
           if (!fs.existsSync(localPath)) {
             // File was deleted / omitted during reconciliation -> Delete from Google Drive
-            logger.info(`[GDrive Worker] Deleting missing file from Drive: ${row.file_name}`);
+            logger.info(`[GDrive Worker] Deleting missing file from Drive: ${rel ? `${rel}/` : ''}${row.file_name}`);
             await GDriveService.deleteGDriveFile(accountId, row.gdrive_file_id);
             await query(`DELETE FROM gdrive_synced_files WHERE sync_id = $1 AND file_name = $2`, [syncId, row.file_name]);
           }

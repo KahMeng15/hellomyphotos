@@ -1047,6 +1047,9 @@ export class WatermarkService {
       return await encodeOutput(image.composite([{ input: trimmedPng, top, left }]));
     } catch (error) {
       console.error('[WatermarkService] Failed to apply watermark, falling back to original:', error);
+      if (!resolvedPath.startsWith(CACHE_ROOT) && !resolvedPath.startsWith(MEDIA_ROOT) && !resolvedPath.startsWith(STAGING_ROOT)) {
+        throw new Error('Access denied to image path');
+      }
       return fs.promises.readFile(resolvedPath);
     }
   }

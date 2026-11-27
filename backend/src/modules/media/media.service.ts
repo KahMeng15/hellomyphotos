@@ -160,7 +160,7 @@ export class MediaService {
               rawExtracted = true;
             }
           } catch (rawErr: any) {
-            console.warn(`[MediaService] RAW preview extraction error for ${fullPath}:`, rawErr.message);
+            console.warn('[MediaService] RAW preview extraction error for %s: %s', String(fullPath), String(rawErr?.message));
           }
           if (!rawExtracted) throw err;
         } else {
@@ -217,7 +217,7 @@ export class MediaService {
       return { blurhash: bHash, has1080p: true, has480p: true };
 
     } catch (err: any) {
-      console.error(`[MediaService] Failed to process image ${fullPath}:`, err.message);
+      console.error('[MediaService] Failed to process image %s: %s', String(fullPath), String(err?.message));
       throw err;
     } finally {
       if (cleanupTmp) {

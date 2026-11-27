@@ -30,7 +30,7 @@ export async function runTier3Tests(): Promise<{ passed: number; failed: number;
   const { url } = await ensureServerStarted();
   const { headers } = await ensureTestAdminUser();
 
-  console.log('\n--- Running Tier 3: Cross-Feature Interactions Tests (3 Tests) ---');
+  console.log('\n--- Running Tier 3: Cross-Feature Interactions Tests (5 Tests) ---');
 
   await test('T3.01: End-to-End processing pipeline chain across all feature stages', async () => {
     await setExecutionMode('pipeline');
@@ -79,8 +79,8 @@ export async function runTier3Tests(): Promise<{ passed: number; failed: number;
     const res = await fetch(`${url}/api/admin/queues`, { headers });
     if (!res.ok) throw new Error('Failed to fetch admin queues endpoint');
     const data = await res.json();
-    if (!data.queues || Object.keys(data.queues).length !== 9) {
-      throw new Error(`Expected 9 queues in response, found ${Object.keys(data.queues || {}).length}`);
+    if (!data.queues || Object.keys(data.queues).length !== 10) {
+      throw new Error(`Expected 10 queues in response, found ${Object.keys(data.queues || {}).length}`);
     }
   });
 
@@ -99,6 +99,75 @@ export async function runTier3Tests(): Promise<{ passed: number; failed: number;
 
     // Switch back to pipeline
     await setExecutionMode('pipeline');
+  });
+
+  await test('T3.04: Shared folder password protection, internal labels, and favorite filtering permissions', async () => {
+    // 1. Create a password-protected share with allow_filter_favorites enabled and custom label
+    const createShareRes = await fetch(`${url}/api/shares`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        folderPath: 'e2e_test_dir',
+        allowFavorites: true,
+        allowFilterFavorites: true,
+        password: 'SecureSharePassword123!',
+        label: 'VIP Wedding Client'
+      })
+    });
+    if (!createShareRes.ok) throw new Error(`Create share failed with ${createShareRes.status}`);
+    const shareData = await createShareRes.json();
+    const token = shareData.shareToken || shareData.share_token;
+    if (!token) throw new Error('Share creation did not return a shareToken');
+
+    // 2. Fetch public share metadata: should indicate password protection and permission flags
+    const publicMetaRes = await fetch(`${url}/api/shares/${token}`);
+    if (!publicMetaRes.ok) throw new Error(`Public share get failed with ${publicMetaRes.status}`);
+    const publicMeta = await publicMetaRes.json();
+
+    if (!publicMeta.has_password) throw new Error('Expected has_password to be true');
+    if (!publicMeta.allow_favorites) throw new Error('Expected allow_favorites to be true');
+    if (!publicMeta.allow_filter_favorites) throw new Error('Expected allow_filter_favorites to be true');
+
+    // 3. Admin share list should return the internal label and allow_filter_favorites setting
+    const adminSharesRes = await fetch(`${url}/api/admin/shares`, { headers });
+    if (!adminSharesRes.ok) throw new Error(`Admin shares failed with ${adminSharesRes.status}`);
+    const adminShares = await adminSharesRes.json();
+    const foundShare = (adminShares.shares || []).find((s: any) => s.share_token === token);
+    if (!foundShare) throw new Error('Created share was not found in admin shares list');
+    if (foundShare.label !== 'VIP Wedding Client') {
+      throw new Error(`Expected label "VIP Wedding Client", got "${foundShare.label}"`);
+    }
+    if (foundShare.allow_filter_favorites !== true) {
+      throw new Error('Expected allow_filter_favorites to be true in admin shares list');
+    }
+
+    // 4. Update share to toggle allow_filter_favorites
+    const updateRes = await fetch(`${url}/api/shares/${foundShare.id}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        allowFilterFavorites: false
+      })
+    });
+    if (!updateRes.ok) throw new Error(`Failed to update share allow_filter_favorites: ${updateRes.status}`);
+
+    const verifyUpdateRes = await fetch(`${url}/api/shares/${token}`);
+    const verifyMeta = await verifyUpdateRes.json();
+    if (verifyMeta.allow_filter_favorites !== false) {
+      throw new Error('Expected allow_filter_favorites to be false after PATCH update');
+    }
+  });
+
+  await test('T3.05: FastUp OTP claim brute-force lockout rate limiting protection', async () => {
+    // Attempt invalid OTPs to verify security lockout logic does not 500
+    const failRes = await fetch(`${url}/api/staging/otp/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ otp: '000000' })
+    });
+    if (failRes.status !== 400 && failRes.status !== 429) {
+      throw new Error(`Expected HTTP 400 or 429 for invalid OTP, received ${failRes.status}`);
+    }
   });
 
   await cleanupTestData();

@@ -149,12 +149,12 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
           [sync.id]
         );
 
-        // Get total local JPEG count (distinct file names to match gdrive_synced_files primary key)
+        // Get total local JPEG count across folder and all its subfolders
         let totalLocalJpegs = 0;
         try {
           if (sourceType === 'FASTUP') {
             const cRes = await query(
-              `SELECT COUNT(DISTINCT file_name) as count FROM media_files 
+              `SELECT COUNT(id) as count FROM media_files 
                WHERE (folder_path = $1 OR folder_path LIKE $2) 
                  AND is_staged = true 
                  AND (file_name ILIKE '%.jpg' OR file_name ILIKE '%.jpeg')`,
@@ -163,7 +163,7 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
             totalLocalJpegs = parseInt(cRes.rows[0]?.count || '0', 10);
           } else {
             const cRes = await query(
-              `SELECT COUNT(DISTINCT file_name) as count FROM media_files 
+              `SELECT COUNT(id) as count FROM media_files 
                WHERE (folder_path = $1 OR folder_path LIKE $2) 
                  AND (file_name ILIKE '%.jpg' OR file_name ILIKE '%.jpeg')`,
               [folderPath, `${folderPath}/%`]

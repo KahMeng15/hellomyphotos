@@ -2,22 +2,44 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { FastUpService, resolveClientIp } from '../staging/fastup.service';
 import { StagingService } from '../staging/staging.service';
 import { requireAuth } from '../../utils/auth';
+import { getClientIp } from '../../utils/getIp';
+import { getLockoutStatus, recordFailedAttempt, clearLockout } from '../../utils/lockout';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 export async function fastupRoutes(fastify: FastifyInstance) {
   /**
    * GET /api/staging/ping
    * Unauthenticated lightweight ping endpoint to test server reachability.
+   * Does not leak internal system architecture details to unauthenticated scanners.
    */
   fastify.get('/api/staging/ping', async (_request: FastifyRequest, reply: FastifyReply) => {
-    return reply.send({ status: 'ok', service: 'hellomyphotos-fastup', timestamp: new Date().toISOString() });
+    return reply.send({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
   /**
    * POST /api/staging/otp/claim
    * Public endpoint called by FastUp Android app with a 6-digit code.
    * Exchanges OTP for persistent photographer token and predefined settings.
+   * Protected with the global login lockout policy to prevent brute-forcing.
    */
   fastify.post('/api/staging/otp/claim', async (request: FastifyRequest, reply: FastifyReply) => {
+    const verifiedIp = getClientIp(request);
+    const lockoutKey = `login_attempts:fastup_otp:${verifiedIp}`;
+    const lockout = await getLockoutStatus(lockoutKey);
+
+    if (lockout.isLockedOut) {
+      AnalyticsService.logVisit({
+        actionType: 'blocked_login_lockout',
+        ip: verifiedIp,
+        userAgent: request.headers['user-agent'] as string | undefined,
+        path: request.url,
+        metadata: { reason: 'otp_locked_out', remainingMinutes: lockout.remainingMinutes }
+      });
+      return reply.status(429).send({
+        error: `Too many failed OTP attempts. Please try again in ${lockout.remainingMinutes} minute(s).`
+      });
+    }
+
     const { otp, clientIp: explicitIp } = (request.body as any) || {};
     if (!otp) {
       return reply.status(400).send({ error: 'Missing 6-digit OTP code' });
@@ -26,9 +48,36 @@ export async function fastupRoutes(fastify: FastifyInstance) {
     try {
       const clientIp = resolveClientIp(request, explicitIp);
       const claimed = await FastUpService.claimOtp(String(otp), clientIp);
+      // Clear lockout attempts on successful claim
+      await clearLockout(lockoutKey);
       return reply.send(claimed);
     } catch (err: any) {
-      return reply.status(400).send({ error: err.message || 'Failed to claim OTP' });
+      const record = await recordFailedAttempt(lockout);
+      if (record.isLockedOut) {
+        AnalyticsService.logVisit({
+          actionType: 'blocked_login_lockout',
+          ip: verifiedIp,
+          userAgent: request.headers['user-agent'] as string | undefined,
+          path: request.url,
+          metadata: { reason: 'otp_max_tries_exceeded', maxTries: lockout.maxTries }
+        });
+        return reply.status(429).send({
+          error: `Too many failed OTP attempts. Please try again in ${record.remainingMinutes} minute(s).`
+        });
+      }
+
+      AnalyticsService.logVisit({
+        actionType: 'blocked_access',
+        ip: verifiedIp,
+        userAgent: request.headers['user-agent'] as string | undefined,
+        path: request.url,
+        metadata: { context: 'otp_claim_failed', attempts: (lockout.attempts || 0) + 1, remainingTries: record.remainingTries }
+      });
+
+      return reply.status(400).send({
+        error: err.message || 'Failed to claim OTP',
+        remainingTries: record.remainingTries
+      });
     }
   });
 

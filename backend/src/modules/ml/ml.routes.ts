@@ -245,11 +245,12 @@ export async function mlRoutes(fastify: FastifyInstance) {
       await query(`DELETE FROM people WHERE id = ANY($1)`, [sourcePersonIds]);
 
       // 6. Delete cached face thumbnails for source persons
-      const facesDir = path.join(CACHE_ROOT, 'faces');
+      const facesDir = path.resolve(CACHE_ROOT, 'faces');
       for (const sId of sourcePersonIds) {
         try {
-          const thumbPath = path.join(facesDir, `${sId}.webp`);
-          if (fs.existsSync(thumbPath)) await fs.promises.unlink(thumbPath);
+          const safePersonId = path.basename(sId);
+          const thumbPath = path.resolve(facesDir, `${safePersonId}.webp`);
+          if (thumbPath.startsWith(facesDir) && fs.existsSync(thumbPath)) await fs.promises.unlink(thumbPath);
         } catch {}
       }
 

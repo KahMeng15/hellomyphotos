@@ -422,6 +422,7 @@ import { slide } from 'svelte/transition';
   let shareAllowDownloadImages = $state(true);
   let shareAllowDownloadFolder = $state(true);
   let shareAllowFavorites = $state(false);
+  let shareAllowFilterFavorites = $state(false);
   let shareLabel = $state('');
   let sharePassword = $state('');
   let showSharePassword = $state(false);
@@ -461,6 +462,7 @@ import { slide } from 'svelte/transition';
   let editAllowDownloadImages = $state(true);
   let editAllowDownloadFolder = $state(true);
   let editAllowFavorites = $state(false);
+  let editAllowFilterFavorites = $state(false);
   let editSharePassword = $state('');
   let editRemovePassword = $state(false);
   let showEditSharePassword = $state(false);
@@ -674,7 +676,9 @@ import { slide } from 'svelte/transition';
         shareWatermarkTemplateId || null,
         shareAllowFavorites,
         sharePassword.trim() || null,
-        shareLabel.trim() || null
+        shareLabel.trim() || null,
+        null,
+        shareAllowFilterFavorites
       );
       toast.success('Share link created successfully!');
       newlyCreatedShareToken = token;
@@ -754,6 +758,7 @@ import { slide } from 'svelte/transition';
     editAllowDownloadImages = share.allow_download_images ?? true;
     editAllowDownloadFolder = share.allow_download_folder ?? true;
     editAllowFavorites = share.allow_favorites ?? false;
+    editAllowFilterFavorites = share.allow_filter_favorites ?? false;
     editIsActive = share.is_active !== false;
     editShareLabel = share.label || '';
     editCreatedAtDateTime = share.created_at ? toDateTimeLocal(new Date(share.created_at)) : '';
@@ -805,6 +810,7 @@ import { slide } from 'svelte/transition';
         allowDownloadImages: editAllowDownloadImages,
         allowDownloadFolder: editAllowDownloadFolder,
         allowFavorites: editAllowFavorites,
+        allowFilterFavorites: editAllowFilterFavorites,
         isActive: editIsActive,
         password: editSharePassword.trim() || undefined,
         removePassword: editRemovePassword || undefined,
@@ -1095,6 +1101,7 @@ import { slide } from 'svelte/transition';
       if ($currentUser.preferences.folderSortMode) sortMode = $currentUser.preferences.folderSortMode as SortMode;
       if ($currentUser.preferences.folderViewMode) viewMode = $currentUser.preferences.folderViewMode as ViewMode;
       if ($currentUser.preferences.folderFolderViewMode) folderViewMode = $currentUser.preferences.folderFolderViewMode as FolderViewMode;
+      if ($currentUser.preferences.folderCurationMode) folderCurationMode = $currentUser.preferences.folderCurationMode as 'curated' | 'all';
       if ($currentUser.preferences.showFileNames !== undefined) showFileNames = !!$currentUser.preferences.showFileNames;
     }
   });
@@ -1102,6 +1109,7 @@ import { slide } from 'svelte/transition';
   $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderSortMode', sortMode); });
   $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderViewMode', viewMode); });
   $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderFolderViewMode', folderViewMode); });
+  $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('folderCurationMode', folderCurationMode); });
   $effect(() => { if (hasSyncedPreferences || !$currentUser) savePref('showFileNames', showFileNames); });
 
   let showSortMenu = $state(false);
@@ -1562,6 +1570,7 @@ import { slide } from 'svelte/transition';
     sortMode = loadPref<SortMode>('folderSortMode', (data as any).defaultSortMode || 'newest');
     viewMode = loadPref<ViewMode>('folderViewMode', (data as any).defaultViewMode || 'small-fit');
     folderViewMode = loadPref<FolderViewMode>('folderFolderViewMode', (data as any).defaultFolderViewMode || 'small-grid');
+    folderCurationMode = loadPref<'curated' | 'all'>('folderCurationMode', 'all');
     showFileNames = loadPref<boolean>('showFileNames', false);
 
     if (data.isProcessing) {
@@ -1653,7 +1662,21 @@ import { slide } from 'svelte/transition';
               {/each}
             </div>
           {/if}
-          <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+          <div class="folder-title-row">
+            <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
+            <span class="count mobile-count">
+              {#if isSearching && isSearchLoading}
+                <span>Searching...</span>
+              {:else if displayedDirectories.length > 0}
+                <span>{displayedDirectories.length} {displayedDirectories.length === 1 ? 'folder' : 'folders'}</span>
+                {#if displayedFiles.length > 0}
+                  <span>& {displayedFiles.length} {displayedFiles.length === 1 ? 'item' : 'items'}</span>
+                {/if}
+              {:else}
+                <span>{displayedFiles.length} {displayedFiles.length === 1 ? 'item' : 'items'}</span>
+              {/if}
+            </span>
+          </div>
           {#if data.folderDescription}
             <p class="folder-description" style="margin-top: 12px; color: #a1a1aa; font-size: 1rem; max-width: 600px; line-height: 1.5;">{data.folderDescription}</p>
           {/if}
@@ -1667,9 +1690,9 @@ import { slide } from 'svelte/transition';
         {#if data.folderPath}
           <a href="/folder/{data.folderPath.split('/').slice(0, -1).join('/')}" 
              class="icon-btn mobile-only-back" 
-             style="opacity: {scrollProgress === 1 ? 1 : 0}; width: {scrollProgress === 1 ? '36px' : '0'}; padding: {scrollProgress === 1 ? '8px' : '0'}; margin-right: {scrollProgress === 1 ? '0' : '-8px'}; overflow: hidden; transition: width 0.2s, opacity 0.2s, margin 0.2s, padding 0.2s; pointer-events: {scrollProgress === 1 ? 'auto' : 'none'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" 
+             style="opacity: {scrollProgress === 1 ? 1 : 0}; width: {scrollProgress === 1 ? '30px' : '0'}; padding: {scrollProgress === 1 ? '4px' : '0'}; margin-right: {scrollProgress === 1 ? '0' : '-8px'}; overflow: hidden; transition: width 0.2s, opacity 0.2s, margin 0.2s, padding 0.2s; pointer-events: {scrollProgress === 1 ? 'auto' : 'none'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" 
              title="Go to parent folder (Backspace)">
-            <ChevronLeft size={24} />
+            <ChevronLeft size={20} />
           </a>
         {/if}
         {#if $currentUser?.role === 'admin' || $currentUser?.role === 'super_admin'}
@@ -1792,7 +1815,7 @@ import { slide } from 'svelte/transition';
         </button>
       </div>
       
-      <span class="count" style="display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 4px;">
+      <span class="count desktop-count" style="display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 4px;">
         {#if isSearching && isSearchLoading}
           <span style="white-space: nowrap; color: #a1a1aa;">Searching...</span>
         {:else if displayedDirectories.length > 0}
@@ -2224,9 +2247,14 @@ import { slide } from 'svelte/transition';
           <label for="allowDlsFolder" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow downloading the entire folder (ZIP)</label>
         </div>
 
-        <div class="form-group" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+        <div class="form-group" style="margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
           <input type="checkbox" id="allowFavs" bind:checked={shareAllowFavorites} style="width: 18px; height: 18px;" />
-          <label for="allowFavs" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos and filter favorites</label>
+          <label for="allowFavs" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos</label>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px;">
+          <input type="checkbox" id="allowFilterFavs" bind:checked={shareAllowFilterFavorites} style="width: 18px; height: 18px;" />
+          <label for="allowFilterFavs" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow visitors to filter favorites</label>
         </div>
 
         <!-- Label for Internal Reference -->
@@ -2360,69 +2388,70 @@ import { slide } from 'svelte/transition';
                 <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px;">
                   <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                     <div style="flex: 1; min-width: 0;">
-                      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                        <span style="font-family: monospace; color: #e4e4e7; font-weight: 500;">...{share.share_token.substring(0, 8)}</span>
-                        {#if share.label}
-                          <span style="background: rgba(147, 51, 234, 0.2); color: #d8b4fe; border: 1px solid rgba(147, 51, 234, 0.35); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;" title="Internal reference label">
-                            <Tag size={10} />
-                            {share.label}
-                          </span>
-                        {/if}
+                      <!-- Main Title: Label (or Share Link if no label) + Status Badge -->
+                      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+                        <span style="color: #f4f4f5; font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                          {share.label || 'Share Link'}
+                        </span>
                         {#if share.is_active === false}
-                          <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
+                          <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; flex-shrink: 0;">
                             Disabled
                           </span>
                         {:else}
-                          <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
+                          <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; flex-shrink: 0;">
                             Active
                           </span>
                         {/if}
-                        {#if share.has_password}
-                          <span style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;">
-                            <Lock size={10} />
-                            Password
-                          </span>
-                        {/if}
                       </div>
 
-                      <div style="font-size: 0.8rem; color: #e4e4e7; margin-bottom: 2px;">
-                        {#if share.expires_at}
-                          <span style="color: #60a5fa; font-weight: 500;">Expiring in {getNearestExpiryDuration(share.expires_at)}</span>
-                        {:else}
-                          <span style="color: #a1a1aa;">Never expires</span>
-                        {/if}
+                      <!-- Subheading: Back of the link (...token) -->
+                      <div style="font-family: monospace; color: #a1a1aa; font-size: 0.78rem; margin-bottom: 6px;">
+                        ...{share.share_token.slice(-8)}
                       </div>
 
-                      <div style="font-size: 0.72rem; color: #888; display: flex; gap: 10px; flex-wrap: wrap;">
-                        {#if share.expires_at}
-                          <span style="display: flex; align-items: center; gap: 4px;">
-                            <Clock size={11} />
-                            {formatShareDate(share.expires_at)}
-                          </span>
+                      <!-- Dates: Creation & Expiration -->
+                      <div style="font-size: 0.75rem; color: #a1a1aa; display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px;">
+                        {#if share.created_at}
+                          <div>
+                            <span style="color: #71717a;">Created:</span> {formatShareDate(share.created_at)}
+                          </div>
                         {/if}
-                        <span style="display: flex; align-items: center; gap: 4px;">
-                          <User size={11} />
-                          {share.created_by_name || 'Unknown'}
-                        </span>
-                        <span>
-                          {#if share.allow_download_images && share.allow_download_folder}
-                            Full DLs
-                          {:else if share.allow_download_images}
-                            Images DL Only
-                          {:else if share.allow_download_folder}
-                            Folder DL Only
+                        <div>
+                          <span style="color: #71717a;">Expires:</span>
+                          {#if share.expires_at}
+                            <span style="color: #60a5fa;">{formatShareDate(share.expires_at)} ({getNearestExpiryDuration(share.expires_at)})</span>
                           {:else}
-                            View Only
+                            <span>Never expires</span>
                           {/if}
-                          {#if share.allow_favorites}
-                            <span style="color: #f43f5e; font-weight: 500;">· Favs</span>
-                          {/if}
-                          {#if share.has_password}
-                            <span style="color: #fbbf24; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;">
-                              · <Lock size={10} /> Password Protected
-                            </span>
+                        </div>
+                      </div>
+
+                      <!-- Bottom Settings: Watermark, Download, Password (same colour, no icons) -->
+                      <div style="font-size: 0.73rem; line-height: 1.25; color: #94a3b8; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                        <span>
+                          Download:
+                          {#if share.allow_download_images && share.allow_download_folder}
+                            Full
+                          {:else if share.allow_download_images}
+                            Images Only
+                          {:else if share.allow_download_folder}
+                            Folder Only
+                          {:else}
+                            Disabled
                           {/if}
                         </span>
+                        {#if share.watermark_enabled}
+                          <span style="color: #52525b;">•</span>
+                          <span>Watermark: {share.watermark_template_name || 'Enabled'}</span>
+                        {/if}
+                        {#if share.has_password}
+                          <span style="color: #52525b;">•</span>
+                          <span>Password Protected</span>
+                        {/if}
+                        {#if share.allow_favorites}
+                          <span style="color: #52525b;">•</span>
+                          <span>Favorites Allowed</span>
+                        {/if}
                       </div>
 
                       {#if share.folder_path !== data.folderPath}
@@ -2549,6 +2578,11 @@ import { slide } from 'svelte/transition';
                           <label for="editDlFav-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos</label>
                         </div>
 
+                        <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editDlFilterFav-{share.share_token}" bind:checked={editAllowFilterFavorites} style="width: 15px; height: 15px;" />
+                          <label for="editDlFilterFav-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow visitors to filter favorites</label>
+                        </div>
+
                         <div style="display: flex; align-items: center; gap: 8px;">
                           <input type="checkbox" id="editActive-{share.share_token}" bind:checked={editIsActive} style="width: 15px; height: 15px;" />
                           <label for="editActive-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Link is active (enabled)</label>
@@ -2662,38 +2696,60 @@ import { slide } from 'svelte/transition';
               {#each expiredSharesList as share}
                 <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(239, 68, 68, 0.2); padding: 12px; border-radius: 6px;">
                   <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-                    <div>
-                      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                        <span style="font-family: monospace; color: #a1a1aa; font-weight: 500;">...{share.share_token.substring(0, 8)}</span>
-                        {#if share.label}
-                          <span style="background: rgba(147, 51, 234, 0.2); color: #d8b4fe; border: 1px solid rgba(147, 51, 234, 0.35); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;" title="Internal reference label">
-                            <Tag size={10} />
-                            {share.label}
-                          </span>
-                        {/if}
-                        <span style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
+                    <div style="flex: 1; min-width: 0;">
+                      <!-- Main Title: Label (or Share Link if no label) + Status Badge -->
+                      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+                        <span style="color: #f4f4f5; font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                          {share.label || 'Share Link'}
+                        </span>
+                        <span style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; flex-shrink: 0;">
                           Expired
                         </span>
-                        {#if share.has_password}
-                          <span style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;">
-                            <Lock size={10} />
-                            Password
-                          </span>
-                        {/if}
                       </div>
-                      <div style="font-size: 0.75rem; color: #888; display: flex; gap: 10px; flex-wrap: wrap;">
-                        <span style="display: flex; align-items: center; gap: 4px; color: #f87171;">
-                          <Clock size={11} />
-                          Expired on {formatShareDate(share.expires_at)}
+
+                      <!-- Subheading: Back of the link (...token) -->
+                      <div style="font-family: monospace; color: #a1a1aa; font-size: 0.78rem; margin-bottom: 6px;">
+                        ...{share.share_token.slice(-8)}
+                      </div>
+
+                      <!-- Dates: Creation & Expiration -->
+                      <div style="font-size: 0.75rem; color: #a1a1aa; display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px;">
+                        {#if share.created_at}
+                          <div>
+                            <span style="color: #71717a;">Created:</span> {formatShareDate(share.created_at)}
+                          </div>
+                        {/if}
+                        <div>
+                          <span style="color: #71717a;">Expired:</span>
+                          <span style="color: #f87171;">{formatShareDate(share.expires_at)}</span>
+                        </div>
+                      </div>
+
+                      <!-- Bottom Settings: Watermark, Download, Password (same colour, no icons) -->
+                      <div style="font-size: 0.73rem; line-height: 1.25; color: #94a3b8; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                        <span>
+                          Download:
+                          {#if share.allow_download_images && share.allow_download_folder}
+                            Full
+                          {:else if share.allow_download_images}
+                            Images Only
+                          {:else if share.allow_download_folder}
+                            Folder Only
+                          {:else}
+                            Disabled
+                          {/if}
                         </span>
-                        <span style="display: flex; align-items: center; gap: 4px;">
-                          <User size={11} />
-                          {share.created_by_name || 'Unknown'}
-                        </span>
+                        {#if share.watermark_enabled}
+                          <span style="color: #52525b;">•</span>
+                          <span>Watermark: {share.watermark_template_name || 'Enabled'}</span>
+                        {/if}
                         {#if share.has_password}
-                          <span style="color: #fbbf24; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;">
-                            · <Lock size={10} /> Password Protected
-                          </span>
+                          <span style="color: #52525b;">•</span>
+                          <span>Password Protected</span>
+                        {/if}
+                        {#if share.allow_favorites}
+                          <span style="color: #52525b;">•</span>
+                          <span>Favorites Allowed</span>
                         {/if}
                       </div>
                     </div>
@@ -2812,6 +2868,11 @@ import { slide } from 'svelte/transition';
                         <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
                           <input type="checkbox" id="editExpDlFav-{share.share_token}" bind:checked={editAllowFavorites} style="width: 15px; height: 15px;" />
                           <label for="editExpDlFav-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos</label>
+                        </div>
+
+                        <div style="margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+                          <input type="checkbox" id="editExpDlFilterFav-{share.share_token}" bind:checked={editAllowFilterFavorites} style="width: 15px; height: 15px;" />
+                          <label for="editExpDlFilterFav-{share.share_token}" style="font-size: 0.78rem; color: #ccc; cursor: pointer;">Allow visitors to filter favorites</label>
                         </div>
 
                         <div style="display: flex; align-items: center; gap: 8px;">
@@ -4043,6 +4104,21 @@ import { slide } from 'svelte/transition';
     overflow: hidden;
   }
   
+  .folder-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .mobile-count {
+    display: none;
+  }
+
+  .desktop-count {
+    display: flex;
+  }
+
   .header-content h2 {
     display: flex;
     flex-direction: column;
@@ -4645,12 +4721,20 @@ import { slide } from 'svelte/transition';
     }
     .header-right {
       flex-direction: row;
-      justify-content: space-between;
+      justify-content: flex-end;
       align-items: center;
       width: 100%;
     }
-    .count {
-      text-align: right;
+    .desktop-count {
+      display: none !important;
+    }
+    .mobile-count {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 4px;
+      font-size: 0.85rem;
+      color: #a1a1aa;
+      white-space: nowrap;
     }
     .grid.small-square {
       grid-template-columns: repeat(3, 1fr);
@@ -4660,7 +4744,20 @@ import { slide } from 'svelte/transition';
       opacity: calc(1 - var(--scroll-prog));
       overflow: hidden;
     }
+    .toolbar {
+      gap: 3px;
+    }
+    .toolbar .icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+    }
+    .toolbar .icon-btn :global(svg) {
+      width: 16px;
+      height: 16px;
+    }
     .toolbar .dropdown-menu {
+      top: 36px;
       right: auto;
       left: 0;
     }

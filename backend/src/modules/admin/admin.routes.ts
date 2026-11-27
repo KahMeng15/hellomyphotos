@@ -1655,7 +1655,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
         SELECT s.id, s.folder_path, s.media_id, s.person_id, s.share_token, s.allow_download,
                s.allow_download_images, s.allow_download_folder, s.watermark_enabled,
                s.watermark_template_id, s.strip_gps_on_download, s.is_active, s.expires_at,
-               s.created_by, s.created_at, s.allow_favorites,
+               s.created_by, s.created_at, s.allow_favorites, s.allow_filter_favorites,
                (s.password_hash IS NOT NULL) as has_password,
                s.label,
                u.email as creator_email,
@@ -1694,7 +1694,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post('/api/admin/shares', async (request, reply) => {
     try {
-      const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites, password, label, created_at, createdAt } = (request.body || {}) as any;
+      const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites, allowFilterFavorites, password, label, created_at, createdAt } = (request.body || {}) as any;
       if (!folderPath && !mediaId && !personId) {
         return reply.status(400).send({ error: 'Missing folderPath, mediaId, or personId' });
       }
@@ -1706,9 +1706,9 @@ export async function adminRoutes(fastify: FastifyInstance) {
         passwordHash = await bcrypt.hash(password.trim(), 10);
       }
       await query(`
-        INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, allow_favorites, password_hash, label, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()))
-      `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id, allowFavorites ?? false, passwordHash, label ? String(label).trim() : null, created_at || createdAt || null]);
+        INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, allow_favorites, allow_filter_favorites, password_hash, label, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15::timestamptz, NOW()))
+      `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id, allowFavorites ?? false, allowFilterFavorites ?? false, passwordHash, label ? String(label).trim() : null, created_at || createdAt || null]);
       return reply.send({ success: true, shareToken });
     } catch (e: any) {
       request.log.error(e);
@@ -1718,11 +1718,11 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.put('/api/admin/shares/:token', async (request, reply) => {
     const { token } = request.params as any;
-    const { is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, allow_favorites, password, remove_password, label, created_at, createdAt } = request.body as any;
+    const { is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, allow_favorites, allow_filter_favorites, password, remove_password, label, created_at, createdAt } = request.body as any;
     try {
       let passwordUpdateClause = '';
-      const params: any[] = [is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, allow_favorites];
-      let pIdx = 8;
+      const params: any[] = [is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, allow_favorites, allow_filter_favorites];
+      let pIdx = 9;
       if (remove_password === true || password === null) {
         passwordUpdateClause = ', password_hash = NULL';
       } else if (typeof password === 'string' && password.trim()) {
@@ -1749,7 +1749,8 @@ export async function adminRoutes(fastify: FastifyInstance) {
             allow_download_folder = COALESCE($4, allow_download_folder),
             watermark_enabled = COALESCE($5, watermark_enabled),
             watermark_template_id = COALESCE($6, watermark_template_id),
-            allow_favorites = COALESCE($7, allow_favorites)
+            allow_favorites = COALESCE($7, allow_favorites),
+            allow_filter_favorites = COALESCE($8, allow_filter_favorites)
             ${passwordUpdateClause}
             ${extraClause}
         WHERE share_token = $${pIdx}

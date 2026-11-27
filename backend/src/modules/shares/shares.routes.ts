@@ -100,7 +100,7 @@ async function getShareLockoutStatus(token: string, ip: string) {
 
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
-    const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites, password, label, createdAt } = request.body as any;
+    const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites, allowFilterFavorites, password, label, createdAt } = request.body as any;
     
     // Check permissions
     if (request.user?.role === 'viewer') {
@@ -127,9 +127,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
     
     await query(`
-      INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, allow_favorites, password_hash, label, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()))
-    `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id, allowFavorites ?? false, passwordHash, label ? String(label).trim() : null, createdAt || null]);
+      INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, allow_favorites, allow_filter_favorites, password_hash, label, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, COALESCE($15::timestamptz, NOW()))
+    `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id, allowFavorites ?? false, allowFilterFavorites ?? false, passwordHash, label ? String(label).trim() : null, createdAt || null]);
     
     // Automatically prioritize processing for all unprocessed items in the shared folder
     if (folderPath) {
@@ -1365,7 +1365,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
 
     const result = await query(`
-      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.allow_favorites, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
+      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.allow_favorites, s.allow_filter_favorites, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
              s.is_active,
              u.name as created_by_name, s.created_by, s.folder_path,
              (s.password_hash IS NOT NULL) as has_password,
@@ -1402,7 +1402,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const isAdmin = request.user?.role === 'admin' || request.user?.role === 'super_admin';
 
     const result = await query(`
-      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.allow_favorites, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
+      SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.allow_favorites, s.allow_filter_favorites, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
              s.is_active,
              u.name as created_by_name, s.created_by, s.person_id,
              (s.password_hash IS NOT NULL) as has_password,
@@ -1465,7 +1465,8 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       allowDownloadFolder, 
       watermarkEnabled,
       watermarkTemplateId,
-      allowFavorites
+      allowFavorites,
+      allowFilterFavorites
     } = request.body as { 
       isActive?: boolean; 
       expiresAt?: string | null;
@@ -1474,6 +1475,7 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       watermarkEnabled?: boolean;
       watermarkTemplateId?: string | null;
       allowFavorites?: boolean;
+      allowFilterFavorites?: boolean;
     };
 
     if (request.user?.role === 'viewer') {
@@ -1527,6 +1529,11 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     if (typeof allowFavorites === 'boolean') {
       updates.push(`allow_favorites = $${idx++}`);
       values.push(allowFavorites);
+    }
+
+    if (typeof allowFilterFavorites === 'boolean') {
+      updates.push(`allow_filter_favorites = $${idx++}`);
+      values.push(allowFilterFavorites);
     }
 
     if (watermarkTemplateId !== undefined) {

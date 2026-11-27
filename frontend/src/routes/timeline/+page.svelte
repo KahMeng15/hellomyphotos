@@ -291,6 +291,12 @@
 
   let selectedMediaIndex: number | null = $state(null);
 
+  function handleFavoriteUpdated(id: string, isFavorite: boolean) {
+    if (data.files) {
+      data.files = data.files.map(f => f.id === id ? { ...f, is_favorite: isFavorite } : f);
+    }
+  }
+
   function openLightbox(index: number) {
     selectedMediaIndex = index;
   }
@@ -578,6 +584,8 @@
 {#if selectedMediaIndex !== null && sortedFiles[selectedMediaIndex]}
   <Lightbox 
     media={sortedFiles[selectedMediaIndex]} 
+    canFavorite={true}
+    onfavoriteupdated={handleFavoriteUpdated}
     onclose={closeLightbox}
     onnext={nextMedia}
     onprev={prevMedia}

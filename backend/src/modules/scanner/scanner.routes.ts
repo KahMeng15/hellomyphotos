@@ -652,7 +652,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         if (dirNames.length === 0) {
           const dirSet = new Set<string>();
           try {
-            if (fs.existsSync(mediaFullPath)) {
+            if (mediaFullPath.startsWith(resolvedMediaRoot) && fs.existsSync(mediaFullPath)) {
               const items = await fs.promises.readdir(mediaFullPath, { withFileTypes: true });
               items.filter(item => item.isDirectory() && !item.name.startsWith('.')).forEach(i => dirSet.add(i.name));
             }
@@ -663,7 +663,7 @@ export async function scannerRoutes(fastify: FastifyInstance) {
           }
 
           try {
-            if (fs.existsSync(stagingFullPath)) {
+            if (stagingFullPath.startsWith(resolvedStagingRoot) && fs.existsSync(stagingFullPath)) {
               const items = await fs.promises.readdir(stagingFullPath, { withFileTypes: true });
               items.filter(item => item.isDirectory() && !item.name.startsWith('.')).forEach(i => dirSet.add(i.name));
             }
@@ -913,10 +913,11 @@ export async function scannerRoutes(fastify: FastifyInstance) {
         if (tokenCheck.rows.length > 0) {
           isStagedFolder = true;
         } else {
-          // Check if physical staging directory exists on disk
-          const diskStaging = path.join(STAGING_ROOT, folder);
+          // Check if physical staging directory exists on disk safely
+          const cleanSafeFolder = path.normalize(folder).replace(/^(\.\.[\/\\])+/, '').replace(/^[/\\]+/, '');
+          const diskStaging = path.resolve(STAGING_ROOT, cleanSafeFolder);
           try {
-            if (fs.existsSync(diskStaging)) {
+            if (diskStaging.startsWith(path.resolve(STAGING_ROOT)) && fs.existsSync(diskStaging)) {
               isStagedFolder = true;
             }
           } catch {}

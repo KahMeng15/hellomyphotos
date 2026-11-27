@@ -157,6 +157,7 @@ const SCHEMA_STATEMENTS = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='person_id') THEN ALTER TABLE shared_folders ADD COLUMN person_id UUID REFERENCES people(id) ON DELETE SET NULL; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='is_active') THEN ALTER TABLE shared_folders ADD COLUMN is_active BOOLEAN DEFAULT true; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_favorites') THEN ALTER TABLE shared_folders ADD COLUMN allow_favorites BOOLEAN DEFAULT false; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_filter_favorites') THEN ALTER TABLE shared_folders ADD COLUMN allow_filter_favorites BOOLEAN DEFAULT false; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='label') THEN ALTER TABLE shared_folders ADD COLUMN label TEXT; END IF; END $$;`,
   `DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shared_folders_created_by_fkey' AND confdeltype = 'c') THEN
@@ -391,6 +392,7 @@ const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS photographer_tokens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     token VARCHAR(64) UNIQUE NOT NULL,
+    token_hash VARCHAR(64),
     otp_code VARCHAR(16),
     otp_expires_at TIMESTAMP WITH TIME ZONE,
     photographer_name VARCHAR(100) NOT NULL,
@@ -404,6 +406,8 @@ const SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_photographer_otp ON photographer_tokens(otp_code) WHERE is_active = true`,
   `CREATE INDEX IF NOT EXISTS idx_photographer_token ON photographer_tokens(token) WHERE is_active = true`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='photographer_tokens' AND column_name='token_hash') THEN ALTER TABLE photographer_tokens ADD COLUMN token_hash VARCHAR(64); END IF; END $$;`,
+  `CREATE INDEX IF NOT EXISTS idx_photographer_token_hash ON photographer_tokens(token_hash) WHERE is_active = true`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='photographer_tokens' AND column_name='scope_folders') THEN ALTER TABLE photographer_tokens ADD COLUMN scope_folders TEXT[] DEFAULT '{}'::text[]; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='is_hidden_staging') THEN ALTER TABLE media_files ADD COLUMN is_hidden_staging BOOLEAN DEFAULT false; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='media_files' AND column_name='matched_media_id') THEN ALTER TABLE media_files ADD COLUMN matched_media_id UUID REFERENCES media_files(id) ON DELETE SET NULL; END IF; END $$;`,
@@ -476,7 +480,9 @@ const SCHEMA_STATEMENTS = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_gdrive_syncs' AND column_name='caesium_config') THEN ALTER TABLE folder_gdrive_syncs ADD COLUMN caesium_config JSONB DEFAULT '{}'::jsonb; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_gdrive_syncs' AND column_name='watermark_enabled') THEN ALTER TABLE folder_gdrive_syncs ADD COLUMN watermark_enabled BOOLEAN DEFAULT false; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_gdrive_syncs' AND column_name='watermark_template_id') THEN ALTER TABLE folder_gdrive_syncs ADD COLUMN watermark_template_id UUID REFERENCES watermark_templates(id) ON DELETE SET NULL; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gdrive_synced_files' AND column_name='relative_path') THEN ALTER TABLE gdrive_synced_files ADD COLUMN relative_path TEXT DEFAULT ''; END IF; END $$;`,
   `CREATE INDEX IF NOT EXISTS idx_folder_gdrive_syncs_path ON folder_gdrive_syncs(folder_path, source_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_gdrive_synced_files_sync_rel ON gdrive_synced_files(sync_id, relative_path, file_name)`,
 
 ];
 

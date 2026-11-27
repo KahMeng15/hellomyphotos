@@ -258,6 +258,60 @@ export class GDriveService {
   }
 
   /**
+   * Recursively traverses / creates a relative directory path under a parent Google Drive folder.
+   * e.g. relativePath: "ceremony/morning" under parentFolderId -> returns folderId for "morning"
+   */
+  static async getOrCreateSubfolderPath(params: {
+    accountId: string;
+    parentFolderId: string;
+    relativePath: string;
+  }): Promise<string> {
+    const cleanPath = params.relativePath.replace(/^\/+|\/+$/g, '').trim();
+    if (!cleanPath) {
+      return params.parentFolderId;
+    }
+
+    const segments = cleanPath.split('/').filter(Boolean);
+    const { client } = await this.getAuthenticatedClient(params.accountId);
+    const drive = google.drive({ version: 'v3', auth: client });
+
+    let currentParentId = params.parentFolderId;
+
+    for (const segment of segments) {
+      // Escape backslashes first, then single quotes for Google Drive search query syntax
+      const escapedName = segment.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const q = `'${currentParentId}' in parents and name = '${escapedName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+      
+      const searchRes = await drive.files.list({
+        q,
+        fields: 'files(id, name)',
+        pageSize: 1
+      });
+
+      if (searchRes.data.files && searchRes.data.files.length > 0) {
+        currentParentId = searchRes.data.files[0].id!;
+      } else {
+        // Create child subfolder
+        const createRes = await drive.files.create({
+          requestBody: {
+            name: segment,
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: [currentParentId]
+          },
+          fields: 'id, name'
+        });
+
+        if (!createRes.data.id) {
+          throw new Error(`Failed to create subfolder "${segment}" under Google Drive folder ${currentParentId}`);
+        }
+        currentParentId = createRes.data.id;
+      }
+    }
+
+    return currentParentId;
+  }
+
+  /**
    * Uploads a local JPEG image to the designated Google Drive folder.
    */
   static async uploadJPEG(params: {
@@ -573,21 +627,45 @@ export class GDriveService {
       `SELECT s.id, s.account_id, sf.gdrive_file_id
        FROM folder_gdrive_syncs s
        JOIN gdrive_synced_files sf ON sf.sync_id = s.id
-       WHERE s.folder_path = $1 AND s.source_type = $2 AND sf.file_name = $3`,
+       WHERE s.folder_path = $1 AND s.source_type = $2 AND sf.file_name = $3 AND (sf.relative_path = '' OR sf.relative_path IS NULL)`,
       [media.folder_path, sourceType, media.file_name]
     );
 
-    // 2. If not found and not staged, try parent folder sync if folder_path is nested
-    if (syncRes.rows.length === 0 && !media.is_staged) {
-      syncRes = await query(
-        `SELECT s.id, s.account_id, sf.gdrive_file_id
+    // 2. If not found, check if a parent folder sync exists that covers this nested folder_path
+    if (syncRes.rows.length === 0) {
+      // Find candidate parent syncs
+      const parentSyncs = await query(
+        `SELECT s.id, s.account_id, s.folder_path
          FROM folder_gdrive_syncs s
-         JOIN gdrive_synced_files sf ON sf.sync_id = s.id
-         WHERE sf.file_name = $1 AND s.source_type = 'MEDIA'
+         WHERE s.source_type = $1
            AND ($2 = s.folder_path OR $2 LIKE s.folder_path || '/%')
-         ORDER BY LENGTH(s.folder_path) DESC LIMIT 1`,
-        [media.file_name, media.folder_path]
+         ORDER BY LENGTH(s.folder_path) DESC`,
+        [sourceType, media.folder_path]
       );
+
+      for (const row of parentSyncs.rows) {
+        let relPath = '';
+        if (media.folder_path.length > row.folder_path.length) {
+          relPath = media.folder_path.slice(row.folder_path.length).replace(/^\/+|\/+$/g, '');
+        }
+        const matchRes = await query(
+          `SELECT sf.gdrive_file_id
+           FROM gdrive_synced_files sf
+           WHERE sf.sync_id = $1 AND sf.file_name = $2 AND COALESCE(sf.relative_path, '') = $3
+           LIMIT 1`,
+          [row.id, media.file_name, relPath]
+        );
+        if (matchRes.rows.length > 0) {
+          syncRes = {
+            rows: [{
+              id: row.id,
+              account_id: row.account_id,
+              gdrive_file_id: matchRes.rows[0].gdrive_file_id
+            }]
+          } as any;
+          break;
+        }
+      }
     }
 
     if (syncRes.rows.length === 0) {

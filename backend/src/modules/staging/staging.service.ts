@@ -29,12 +29,12 @@ export function sanitizeSessionId(sessionId: string): string {
     .split('/')
     .map(seg => seg.trim())
     .filter(seg => seg.length > 0 && seg !== '.' && seg !== '..')
-    .map(seg => seg
-      .replace(/\.{2,}/g, '_')
-      .replace(/[^a-zA-Z0-9_\-.]/g, '_')
-      .replace(/^\.+/, '')
-      .replace(/^_+|_+$/g, '')
-    )
+    .map(seg => {
+      // Remove leading dots and replace dangerous characters without polynomial regexes
+      const noLeadingDots = seg.replace(/^\.+/, '');
+      const safeChars = noLeadingDots.replace(/[^a-zA-Z0-9_\-.]/g, '_').replace(/\.{2,}/g, '_');
+      return safeChars.replace(/^_+/, '').replace(/_+$/, '');
+    })
     .filter(seg => seg.length > 0)
     .join('/');
 }
@@ -292,15 +292,21 @@ export class StagingService {
       console.warn(`[Staging] BullMQ dispatch warning for ${safeFileName}:`, err.message);
     });
 
-    // Also trigger Google Drive upload if an active sync exists for this staging session
+    // Also trigger Google Drive upload if an active sync exists for this staging session (or parent staging session)
     if (safeFileName.toLowerCase().endsWith('.jpg') || safeFileName.toLowerCase().endsWith('.jpeg')) {
       query(
-        `SELECT id, account_id, gdrive_folder_id FROM folder_gdrive_syncs 
-         WHERE folder_path = $1 AND source_type = 'FASTUP' AND is_active = true`,
+        `SELECT id, account_id, gdrive_folder_id, folder_path FROM folder_gdrive_syncs 
+         WHERE source_type = 'FASTUP' AND is_active = true
+           AND ($1 = folder_path OR $1 LIKE folder_path || '/%')
+         ORDER BY LENGTH(folder_path) DESC LIMIT 1`,
         [folderPath]
       ).then(res => {
         if (res.rows.length > 0) {
           const sync = res.rows[0];
+          let relativePath = '';
+          if (folderPath.length > sync.folder_path.length) {
+            relativePath = folderPath.slice(sync.folder_path.length).replace(/^\/+|\/+$/g, '');
+          }
           import('../../queue/gdriveSyncQueue').then(({ gdriveSyncQueue }) => {
             gdriveSyncQueue.add('upload-file', {
               type: 'upload-file',
@@ -308,7 +314,8 @@ export class StagingService {
               accountId: sync.account_id,
               gdriveFolderId: sync.gdrive_folder_id,
               localFilePath: targetFilePath,
-              fileName: safeFileName
+              fileName: safeFileName,
+              relativePath
             }).catch(e => console.warn(`[Staging GDrive] Failed to queue upload for ${safeFileName}:`, e.message));
           });
         }
@@ -775,7 +782,7 @@ export class StagingService {
     const timer = setTimeout(() => {
       this.burstClusterTimers.delete(folderPath);
       this.evaluateBurstsForFolder(folderPath).catch(err => {
-        console.warn(`[Staging] Burst clustering error for ${folderPath}:`, err.message);
+        console.warn('[Staging] Burst clustering error for %s: %s', String(folderPath), String(err?.message));
       });
     }, 1000);
 
@@ -915,9 +922,12 @@ export class StagingService {
 
         // 1. Focus sharpness using Laplacian variance on preview / 480p thumbnail
         try {
-          const thumb480 = path.join(CACHE_ROOT, '480p', `${photo.id}.webp`);
+          const safePhotoId = path.basename(photo.id);
+          const thumb480 = path.resolve(CACHE_ROOT, '480p', `${safePhotoId}.webp`);
           const fullPath = resolveMediaFullPath(photo.folder_path || cleanFolderPath, photo.file_name);
-          const targetToAnalyze = fs.existsSync(thumb480) ? thumb480 : (fs.existsSync(fullPath) ? fullPath : null);
+          const targetToAnalyze = (thumb480.startsWith(path.resolve(CACHE_ROOT)) && fs.existsSync(thumb480))
+            ? thumb480
+            : (fs.existsSync(fullPath) ? fullPath : null);
 
           if (targetToAnalyze) {
             const sharpModule = await import('sharp');
@@ -1028,7 +1038,7 @@ export class StagingService {
       const single = await query(
         `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, 
                 has_1080p, has_480p, created_at, updated_at, img_width, img_height, is_staged,
-                burst_group_id, is_hero, quality_score, face_count, 1 as burst_count
+                burst_group_id, is_hero, quality_score, face_count, is_favorite, 1 as burst_count
          FROM media_files WHERE id = $1`,
         [mediaId]
       );
@@ -1038,7 +1048,7 @@ export class StagingService {
     const peers = await query(
       `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, 
               has_1080p, has_480p, created_at, updated_at, img_width, img_height, is_staged,
-              burst_group_id, is_hero, quality_score, face_count,
+              burst_group_id, is_hero, quality_score, face_count, is_favorite,
               CASE 
                 WHEN media_files.burst_group_id IS NOT NULL THEN (
                   SELECT COUNT(*)::int 

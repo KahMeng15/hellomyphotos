@@ -337,8 +337,9 @@ export async function mediaRoutes(fastify: FastifyInstance) {
         if (!effectiveTemplate.allow_hd_download) {
           const tier = effectiveTemplate.restricted_tier || '1080p';
           const cacheTierDir = path.resolve(CACHE_ROOT, tier === '500px' ? '480p' : '1080p');
-          const tierPath = path.resolve(cacheTierDir, `${id}.webp`);
-          if (fs.existsSync(tierPath)) {
+          const safeId = path.basename(id);
+          const tierPath = path.resolve(cacheTierDir, `${safeId}.webp`);
+          if (tierPath.startsWith(cacheTierDir) && fs.existsSync(tierPath)) {
             serveImagePath = tierPath;
             const ext = file.file_name.match(/\.[^/.]+$/)?.[0] || '.jpg';
             outFileName = `${file.file_name.replace(/\.[^/.]+$/, '')}_${tier}${ext}`;

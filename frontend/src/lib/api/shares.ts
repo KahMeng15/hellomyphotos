@@ -6,6 +6,7 @@ export interface ShareData {
   allow_download_images: boolean;
   allow_download_folder: boolean;
   allow_favorites?: boolean;
+  allow_filter_favorites?: boolean;
   watermark_enabled: boolean;
   watermark_template_id?: string | null;
   watermark_template_name?: string | null;
@@ -63,13 +64,14 @@ export async function createShare(
   allowFavorites?: boolean,
   password?: string | null,
   label?: string | null,
-  createdAt?: string | null
+  createdAt?: string | null,
+  allowFilterFavorites?: boolean
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/shares`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites, password, label, createdAt })
+    body: JSON.stringify({ folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites, allowFilterFavorites, password, label, createdAt })
   });
   if (!res.ok) throw new Error('Failed to create share');
   const data = await res.json();
@@ -86,13 +88,14 @@ export async function createPersonShare(
   allowFavorites?: boolean,
   password?: string | null,
   label?: string | null,
-  createdAt?: string | null
+  createdAt?: string | null,
+  allowFilterFavorites?: boolean
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/shares`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, folderPath: null, mediaId: null, allowFavorites, password, label, createdAt })
+    body: JSON.stringify({ personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, folderPath: null, mediaId: null, allowFavorites, allowFilterFavorites, password, label, createdAt })
   });
   if (!res.ok) throw new Error('Failed to create person share');
   const data = await res.json();
@@ -121,6 +124,7 @@ export interface UpdateSharePayload {
   watermarkEnabled?: boolean;
   watermarkTemplateId?: string | null;
   allowFavorites?: boolean;
+  allowFilterFavorites?: boolean;
   password?: string | null;
   removePassword?: boolean;
   label?: string | null;
@@ -261,6 +265,8 @@ export async function updateAdminShare(token: string, payload: {
   watermark_template_id?: string | null;
   allowFavorites?: boolean;
   allow_favorites?: boolean;
+  allowFilterFavorites?: boolean;
+  allow_filter_favorites?: boolean;
   password?: string | null;
   remove_password?: boolean;
   label?: string | null;

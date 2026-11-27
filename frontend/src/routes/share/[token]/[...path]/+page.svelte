@@ -280,6 +280,9 @@ import { slide } from 'svelte/transition';
     savePref('shareFolderViewMode', folderViewMode);
   });
   $effect(() => {
+    savePref('shareStagingViewMode', stagingViewMode);
+  });
+  $effect(() => {
     savePref('showFileNames', showFileNames);
   });
   $effect(() => {
@@ -439,10 +442,11 @@ import { slide } from 'svelte/transition';
   );
   let showOnlyFavorites = $state(false);
   let canFavorite = $derived(Boolean((data.share as any)?.allow_favorites));
+  let canFilterFavorites = $derived(Boolean((data.share as any)?.allow_filter_favorites));
   let hasFavoritesInFolder = $derived((displayedFiles || []).some((f: any) => f.is_favorite));
 
   $effect(() => {
-    if (hasQueryFavorites) {
+    if (hasQueryFavorites && canFilterFavorites) {
       showOnlyFavorites = true;
     }
   });
@@ -815,6 +819,7 @@ import { slide } from 'svelte/transition';
     sortMode = loadPref<SortMode>('shareSortMode', (data as any).defaultShareSortMode || 'newest');
     viewMode = loadPref<ViewMode>('shareViewMode', (data as any).defaultShareViewMode || 'small-fit');
     folderViewMode = loadPref<FolderViewMode>('shareFolderViewMode', (data as any).defaultShareFolderViewMode || 'small-grid');
+    stagingViewMode = loadPref<'curated' | 'all'>('shareStagingViewMode', (data.share as any)?.default_staging_view || 'all');
     showFileNames = loadPref<boolean>('showFileNames', false);
 
     tracker.init({
@@ -1263,9 +1268,9 @@ import { slide } from 'svelte/transition';
           {@const targetUrl = isParentBase ? `/share/${page.params.token}` : `/share/${page.params.token}/${parentPath.substring(data.baseFolderPath.length + 1)}`}
           <a href={targetUrl} 
              class="icon-btn mobile-only-back" 
-             style="opacity: {scrollProgress === 1 ? 1 : 0}; width: {scrollProgress === 1 ? '36px' : '0'}; padding: {scrollProgress === 1 ? '8px' : '0'}; margin-right: {scrollProgress === 1 ? '0' : '-8px'}; overflow: hidden; transition: width 0.2s, opacity 0.2s, margin 0.2s, padding 0.2s; pointer-events: {scrollProgress === 1 ? 'auto' : 'none'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" 
+             style="opacity: {scrollProgress === 1 ? 1 : 0}; width: {scrollProgress === 1 ? '30px' : '0'}; padding: {scrollProgress === 1 ? '4px' : '0'}; margin-right: {scrollProgress === 1 ? '0' : '-8px'}; overflow: hidden; transition: width 0.2s, opacity 0.2s, margin 0.2s, padding 0.2s; pointer-events: {scrollProgress === 1 ? 'auto' : 'none'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box;" 
              title="Go to parent folder (Backspace)">
-            <ChevronLeft size={24} />
+            <ChevronLeft size={20} />
           </a>
         {/if}
         {#if isStagedFolder}
@@ -1303,7 +1308,7 @@ import { slide } from 'svelte/transition';
           </button>
         {/if}
 
-        {#if (canFavorite || hasFavoritesInFolder || showOnlyFavorites) && displayedFiles.length > 0}
+        {#if canFilterFavorites && displayedFiles.length > 0}
           <button 
             type="button" 
             class="icon-btn favorites-icon-btn" 
@@ -2261,7 +2266,20 @@ import { slide } from 'svelte/transition';
       opacity: calc(1 - var(--scroll-prog));
       overflow: hidden;
     }
+    .toolbar {
+      gap: 3px;
+    }
+    .toolbar .icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+    }
+    .toolbar .icon-btn :global(svg) {
+      width: 16px;
+      height: 16px;
+    }
     .toolbar .dropdown-menu {
+      top: 36px;
       right: auto;
       left: 0;
     }
