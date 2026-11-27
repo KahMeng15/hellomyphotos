@@ -31,6 +31,9 @@ export interface FolderGDriveSyncRecord {
   created_at: string;
   caesium_enabled?: boolean;
   caesium_config?: CaesiumConfig | null;
+  watermark_enabled?: boolean;
+  watermark_template_id?: string | null;
+  watermark_template_name?: string | null;
 }
 
 export class GDriveService {
@@ -338,7 +341,10 @@ export class GDriveService {
    */
   static async getSyncConfig(folderPath: string, sourceType: 'MEDIA' | 'FASTUP'): Promise<FolderGDriveSyncRecord | null> {
     const res = await query(
-      `SELECT * FROM folder_gdrive_syncs WHERE folder_path = $1 AND source_type = $2`,
+      `SELECT s.*, wt.name as watermark_template_name 
+       FROM folder_gdrive_syncs s
+       LEFT JOIN watermark_templates wt ON wt.id = s.watermark_template_id
+       WHERE s.folder_path = $1 AND s.source_type = $2`,
       [folderPath, sourceType]
     );
     return res.rows[0] || null;
@@ -357,6 +363,8 @@ export class GDriveService {
     caesiumEnabled?: boolean;
     caesiumConfig?: CaesiumConfig;
     saveAsDefault?: boolean;
+    watermarkEnabled?: boolean;
+    watermarkTemplateId?: string | null;
   }): Promise<FolderGDriveSyncRecord> {
     const existing = await this.getSyncConfig(params.folderPath, params.sourceType);
 
@@ -364,6 +372,13 @@ export class GDriveService {
       ? Boolean(params.caesiumEnabled) 
       : (existing?.caesium_enabled ?? false);
     const caesiumConfig = params.caesiumConfig || existing?.caesium_config || {};
+
+    const watermarkEnabled = params.watermarkEnabled !== undefined 
+      ? Boolean(params.watermarkEnabled) 
+      : (params.watermarkTemplateId ? true : (existing?.watermark_enabled ?? false));
+    const watermarkTemplateId = params.watermarkTemplateId !== undefined
+      ? params.watermarkTemplateId
+      : (existing?.watermark_template_id ?? null);
 
     if (params.saveAsDefault && params.caesiumConfig) {
       await CaesiumService.saveDefaultConfig({
@@ -373,14 +388,14 @@ export class GDriveService {
     }
 
     if (existing && !params.existingFolderId) {
-      // If already configured and account matches, update caesium params and return
+      // If already configured and account matches, update params and return
       if (existing.account_id === params.accountId && existing.gdrive_folder_id) {
         const upd = await query(
           `UPDATE folder_gdrive_syncs 
-           SET caesium_enabled = $1, caesium_config = $2 
-           WHERE id = $3 
+           SET caesium_enabled = $1, caesium_config = $2, watermark_enabled = $3, watermark_template_id = $4 
+           WHERE id = $5 
            RETURNING *`,
-          [caesiumEnabled, JSON.stringify(caesiumConfig), existing.id]
+          [caesiumEnabled, JSON.stringify(caesiumConfig), watermarkEnabled, watermarkTemplateId, existing.id]
         );
         return upd.rows[0];
       }
@@ -425,8 +440,8 @@ export class GDriveService {
 
     const res = await query(
       `INSERT INTO folder_gdrive_syncs 
-         (account_id, source_type, folder_path, gdrive_folder_id, gdrive_folder_name, gdrive_link, is_active, auto_sync, sync_status, caesium_enabled, caesium_config)
-       VALUES ($1, $2, $3, $4, $5, $6, true, true, 'IDLE', $7, $8)
+         (account_id, source_type, folder_path, gdrive_folder_id, gdrive_folder_name, gdrive_link, is_active, auto_sync, sync_status, caesium_enabled, caesium_config, watermark_enabled, watermark_template_id)
+       VALUES ($1, $2, $3, $4, $5, $6, true, true, 'IDLE', $7, $8, $9, $10)
        ON CONFLICT (folder_path, source_type) DO UPDATE SET
          account_id = EXCLUDED.account_id,
          gdrive_folder_id = EXCLUDED.gdrive_folder_id,
@@ -436,9 +451,11 @@ export class GDriveService {
          sync_status = 'IDLE',
          error_message = NULL,
          caesium_enabled = EXCLUDED.caesium_enabled,
-         caesium_config = EXCLUDED.caesium_config
+         caesium_config = EXCLUDED.caesium_config,
+         watermark_enabled = EXCLUDED.watermark_enabled,
+         watermark_template_id = EXCLUDED.watermark_template_id
        RETURNING *`,
-      [params.accountId, params.sourceType, params.folderPath, targetFolderId, targetFolderName, targetWebViewLink, caesiumEnabled, JSON.stringify(caesiumConfig)]
+      [params.accountId, params.sourceType, params.folderPath, targetFolderId, targetFolderName, targetWebViewLink, caesiumEnabled, JSON.stringify(caesiumConfig), watermarkEnabled, watermarkTemplateId]
     );
 
     return res.rows[0];
@@ -472,6 +489,34 @@ export class GDriveService {
        WHERE id = $3 
        RETURNING *`,
       [Boolean(params.caesiumEnabled), JSON.stringify(params.caesiumConfig), existing.id]
+    );
+
+    return res.rows[0];
+  }
+
+  /**
+   * Update Watermark settings for an active folder sync.
+   */
+  static async updateWatermarkSyncConfig(params: {
+    folderPath: string;
+    sourceType: 'MEDIA' | 'FASTUP';
+    watermarkEnabled: boolean;
+    watermarkTemplateId?: string | null;
+  }): Promise<FolderGDriveSyncRecord> {
+    const existing = await this.getSyncConfig(params.folderPath, params.sourceType);
+    if (!existing) {
+      throw new Error('Google Drive sync is not configured for this folder');
+    }
+
+    const watermarkEnabled = Boolean(params.watermarkEnabled || params.watermarkTemplateId);
+    const watermarkTemplateId = params.watermarkTemplateId || null;
+
+    const res = await query(
+      `UPDATE folder_gdrive_syncs 
+       SET watermark_enabled = $1, watermark_template_id = $2 
+       WHERE id = $3 
+       RETURNING *`,
+      [watermarkEnabled, watermarkTemplateId, existing.id]
     );
 
     return res.rows[0];

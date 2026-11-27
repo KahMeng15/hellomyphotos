@@ -9,6 +9,7 @@ import { dispatchMediaFile } from '../../queue/dispatch';
 import { thumbnailQueue } from '../../queue/thumbnailQueue';
 import { invalidateShareCache } from '../../utils/auth';
 import { MediaService } from '../media/media.service';
+import { ScopeSecurity } from './fastup.service';
 
 const RAW_EXTENSIONS = new Set([
   '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2',
@@ -91,6 +92,7 @@ export interface StagingUploadResult {
   mimeType: string;
   width?: number | null;
   height?: number | null;
+  isFavorite?: boolean;
 }
 
 export interface StagingSessionShare {
@@ -124,7 +126,8 @@ export class StagingService {
     sessionId: string,
     rawFileName: string,
     fileStreamOrBuffer: NodeJS.ReadableStream | Buffer,
-    detectedMimeType?: string
+    detectedMimeType?: string,
+    isFavorite?: boolean
   ): Promise<StagingUploadResult> {
     const safeSessionId = sanitizeSessionId(sessionId);
     if (!safeSessionId) {
@@ -238,21 +241,32 @@ export class StagingService {
 
     if (existingRow.rows.length > 0) {
       mediaId = existingRow.rows[0].id;
-      await query(
-        `UPDATE media_files 
-         SET size_bytes = $1, mime_type = $2, file_identifier = $3, exif_json = COALESCE($4, exif_json),
-             img_width = COALESCE($5, img_width), img_height = COALESCE($6, img_height),
-             has_1080p = false, has_480p = false, is_staged = true, updated_at = NOW() 
-         WHERE id = $7`,
-        [stat.size, mimeType, fileIdentifier, exifJson ? JSON.stringify(exifJson) : null, width, height, mediaId]
-      );
+      if (typeof isFavorite === 'boolean') {
+        await query(
+          `UPDATE media_files 
+           SET size_bytes = $1, mime_type = $2, file_identifier = $3, exif_json = COALESCE($4, exif_json),
+               img_width = COALESCE($5, img_width), img_height = COALESCE($6, img_height),
+               has_1080p = false, has_480p = false, is_staged = true, is_favorite = $8, updated_at = NOW() 
+           WHERE id = $7`,
+          [stat.size, mimeType, fileIdentifier, exifJson ? JSON.stringify(exifJson) : null, width, height, mediaId, isFavorite]
+        );
+      } else {
+        await query(
+          `UPDATE media_files 
+           SET size_bytes = $1, mime_type = $2, file_identifier = $3, exif_json = COALESCE($4, exif_json),
+               img_width = COALESCE($5, img_width), img_height = COALESCE($6, img_height),
+               has_1080p = false, has_480p = false, is_staged = true, updated_at = NOW() 
+           WHERE id = $7`,
+          [stat.size, mimeType, fileIdentifier, exifJson ? JSON.stringify(exifJson) : null, width, height, mediaId]
+        );
+      }
     } else {
       const insertRes = await query(
         `INSERT INTO media_files 
-         (folder_path, file_name, mime_type, size_bytes, file_identifier, exif_json, img_width, img_height, is_staged) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true) 
+         (folder_path, file_name, mime_type, size_bytes, file_identifier, exif_json, img_width, img_height, is_staged, is_favorite) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9) 
          RETURNING id`,
-        [folderPath, safeFileName, mimeType, stat.size, fileIdentifier, exifJson ? JSON.stringify(exifJson) : null, width, height]
+        [folderPath, safeFileName, mimeType, stat.size, fileIdentifier, exifJson ? JSON.stringify(exifJson) : null, width, height, isFavorite ?? false]
       );
       mediaId = insertRes.rows[0].id;
     }
@@ -317,7 +331,8 @@ export class StagingService {
       sizeBytes: stat.size,
       mimeType,
       width,
-      height
+      height,
+      isFavorite: isFavorite ?? false
     };
   }
 
@@ -338,6 +353,7 @@ export class StagingService {
       showHiddenAlternates?: boolean;
       allowHeroSelection?: boolean;
       defaultStagingView?: string;
+      allowFavorites?: boolean;
     } = {}
   ): Promise<{ shareToken: string; shareUrl: string; folderPath: string; sessionId: string; mediaId?: string | null; expiresAt: string | null }> {
     const safeSessionId = sanitizeSessionId(sessionId);
@@ -393,15 +409,17 @@ export class StagingService {
          SET allow_view_mode_toggle = COALESCE($1, allow_view_mode_toggle),
              show_hidden_alternates = COALESCE($2, show_hidden_alternates),
              allow_hero_selection = COALESCE($3, allow_hero_selection),
-             default_staging_view = COALESCE($4, default_staging_view)
-         WHERE id = $5`,
-        [options.allowViewModeToggle, options.showHiddenAlternates, options.allowHeroSelection, options.defaultStagingView, existingShare.rows[0].id]
+             default_staging_view = COALESCE($4, default_staging_view),
+             allow_favorites = COALESCE($5, allow_favorites)
+         WHERE id = $6`,
+        [options.allowViewModeToggle, options.showHiddenAlternates, options.allowHeroSelection, options.defaultStagingView, options.allowFavorites, existingShare.rows[0].id]
       );
     } else {
       shareToken = crypto.randomBytes(16).toString('base64url');
       const allowImages = options.allowDownloadImages ?? true;
       const allowFolder = options.allowDownloadFolder ?? true;
       const watermark = options.watermarkEnabled ?? Boolean(options.watermarkTemplateId);
+      const allowFavorites = options.allowFavorites ?? true;
 
       // Resolve user id if not provided
       let createdBy = options.createdBy || null;
@@ -412,9 +430,9 @@ export class StagingService {
 
       await query(
         `INSERT INTO shared_folders 
-         (folder_path, media_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, is_active, allow_view_mode_toggle, show_hidden_alternates, allow_hero_selection, default_staging_view)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11, $12, $13)`,
-        [folderPath, options.mediaId || null, shareToken, allowImages, allowFolder, watermark, options.watermarkTemplateId || null, finalExpiresAt, createdBy, allowViewModeToggle, showHiddenAlternates, allowHeroSelection, defaultStagingView]
+         (folder_path, media_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, is_active, allow_view_mode_toggle, show_hidden_alternates, allow_hero_selection, default_staging_view, allow_favorites)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11, $12, $13, $14)`,
+        [folderPath, options.mediaId || null, shareToken, allowImages, allowFolder, watermark, options.watermarkTemplateId || null, finalExpiresAt, createdBy, allowViewModeToggle, showHiddenAlternates, allowHeroSelection, defaultStagingView, allowFavorites]
       );
 
       invalidateShareCache(shareToken);
@@ -1076,5 +1094,29 @@ export class StagingService {
       is_hero: newIsHero,
       burstGroupId: current.burst_group_id || null
     };
+  }
+
+  /**
+   * Toggles or sets favorite status for a media item in staging.
+   * Enforces photographer folder scope security.
+   */
+  static async toggleFavorite(
+    mediaId: string,
+    isFavorite?: boolean,
+    photographer?: any
+  ): Promise<{ success: boolean; id: string; is_favorite: boolean }> {
+    const mediaRes = await query(`SELECT id, folder_path, is_favorite FROM media_files WHERE id = $1`, [mediaId]);
+    if (mediaRes.rows.length === 0) {
+      throw new Error('Media file not found');
+    }
+    const media = mediaRes.rows[0];
+    if (photographer && !ScopeSecurity.isPathAllowed(media.folder_path, photographer.scopes)) {
+      throw new Error(`Forbidden: Media in folder '${media.folder_path}' is outside your allowed scopes`);
+    }
+
+    const currentFav = media.is_favorite ?? false;
+    const nextFav = typeof isFavorite === 'boolean' ? isFavorite : !currentFav;
+    await query(`UPDATE media_files SET is_favorite = $1, updated_at = NOW() WHERE id = $2`, [nextFav, mediaId]);
+    return { success: true, id: mediaId, is_favorite: nextFav };
   }
 }

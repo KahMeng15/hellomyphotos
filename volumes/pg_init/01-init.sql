@@ -58,6 +58,7 @@ CREATE TABLE shared_folders (
     is_active BOOLEAN DEFAULT true,
     expires_at TIMESTAMP WITH TIME ZONE,
     password_hash TEXT,
+    label TEXT,
     created_by UUID REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

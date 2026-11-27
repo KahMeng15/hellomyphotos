@@ -15,6 +15,8 @@ export interface ShareData {
   can_manage?: boolean;
   folder_path?: string;
   is_active?: boolean;
+  has_password?: boolean;
+  label?: string | null;
 }
 
 export interface WatermarkTemplateOption {
@@ -58,12 +60,16 @@ export async function createShare(
   watermarkEnabled: boolean,
   expiresAt: string | null,
   watermarkTemplateId?: string | null,
-  allowFavorites?: boolean
+  allowFavorites?: boolean,
+  password?: string | null,
+  label?: string | null,
+  createdAt?: string | null
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/shares`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites })
+    credentials: 'include',
+    body: JSON.stringify({ folderPath, mediaId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites, password, label, createdAt })
   });
   if (!res.ok) throw new Error('Failed to create share');
   const data = await res.json();
@@ -77,12 +83,16 @@ export async function createPersonShare(
   watermarkEnabled: boolean,
   expiresAt: string | null,
   watermarkTemplateId?: string | null,
-  allowFavorites?: boolean
+  allowFavorites?: boolean,
+  password?: string | null,
+  label?: string | null,
+  createdAt?: string | null
 ): Promise<string> {
   const res = await fetch(`${API_BASE}/api/shares`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, folderPath: null, mediaId: null, allowFavorites })
+    credentials: 'include',
+    body: JSON.stringify({ personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, folderPath: null, mediaId: null, allowFavorites, password, label, createdAt })
   });
   if (!res.ok) throw new Error('Failed to create person share');
   const data = await res.json();
@@ -90,14 +100,14 @@ export async function createPersonShare(
 }
 
 export async function getActiveShares(folderPath: string): Promise<ShareData[]> {
-  const res = await fetch(`${API_BASE}/api/shares/folder/${encodeURIComponent(folderPath)}`);
+  const res = await fetch(`${API_BASE}/api/shares/folder/${encodeURIComponent(folderPath)}`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch shares');
   const data = await res.json();
   return data.shares;
 }
 
 export async function getActivePersonShares(personId: string): Promise<ShareData[]> {
-  const res = await fetch(`${API_BASE}/api/shares/person/${personId}`);
+  const res = await fetch(`${API_BASE}/api/shares/person/${personId}`, { credentials: 'include' });
   if (!res.ok) throw new Error('Failed to fetch person shares');
   const data = await res.json();
   return data.shares;
@@ -111,17 +121,44 @@ export interface UpdateSharePayload {
   watermarkEnabled?: boolean;
   watermarkTemplateId?: string | null;
   allowFavorites?: boolean;
+  password?: string | null;
+  removePassword?: boolean;
+  label?: string | null;
+  createdAt?: string | null;
+  created_at?: string | null;
 }
 
 export async function updateShare(token: string, updates: UpdateSharePayload): Promise<ShareData> {
   const res = await fetch(`${API_BASE}/api/shares/${token}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(updates)
   });
   if (!res.ok) throw new Error('Failed to update share');
   const data = await res.json();
   return data.share;
+}
+
+export async function unlockShare(
+  token: string,
+  password?: string,
+  turnstileToken?: string
+): Promise<{ success: boolean }> {
+  const res = await fetch(`${API_BASE}/api/shares/${token}/unlock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      password,
+      'cf-turnstile-response': turnstileToken
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to unlock share');
+  }
+  return data;
 }
 
 export async function revokeShare(token: string): Promise<void> {
@@ -222,7 +259,13 @@ export async function updateAdminShare(token: string, payload: {
   allow_download_folder?: boolean;
   watermark_enabled?: boolean;
   watermark_template_id?: string | null;
+  allowFavorites?: boolean;
   allow_favorites?: boolean;
+  password?: string | null;
+  remove_password?: boolean;
+  label?: string | null;
+  created_at?: string | null;
+  createdAt?: string | null;
 }): Promise<void> {
   const jwt = localStorage.getItem('token');
   const res = await fetch(`${API_BASE}/api/admin/shares/${token}`, {

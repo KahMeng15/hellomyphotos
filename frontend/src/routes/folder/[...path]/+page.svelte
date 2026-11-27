@@ -17,9 +17,10 @@ import { slide } from 'svelte/transition';
   import ZipDownloadModal from '$lib/components/ZipDownloadModal.svelte';
   import { currentUser } from '$lib/stores/auth';
   import { updatePreferences } from '$lib/api/auth';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2, Sparkles, Layers, Cloud, ExternalLink, FolderPlus, Pause, Play, QrCode, Unlink, Radio, Heart, SlidersHorizontal, RotateCcw, Minimize2 } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, Check, Copy, Trash2, Clock, MoreVertical, Folder, User, BarChart3, Power, Calendar, Mail, RefreshCw, AlertCircle, Pencil, List, Image as ImageIcon, Film, Search, X, Loader2, Sparkles, Layers, Cloud, ExternalLink, FolderPlus, Pause, Play, QrCode, Unlink, Radio, Heart, SlidersHorizontal, RotateCcw, Minimize2, Shield, Lock, Key, Eye, EyeOff, Tag } from '@lucide/svelte';
+  import { generateNaturalPassword } from '$lib/utils/passwordGenerator';
   import { clickOutside } from '$lib/actions/clickOutside';
-  import { getFolderGDriveSync, enableFolderGDriveSync, triggerFolderGDriveSync, togglePauseFolderGDriveSync, disableFolderGDriveSync, listGoogleAccounts, listGoogleDriveFolders, getCaesiumSettings, updateFolderCaesiumSettings, type FolderSyncInfo, type GoogleAccount, type CaesiumConfig } from '$lib/api/gdrive';
+  import { getFolderGDriveSync, enableFolderGDriveSync, triggerFolderGDriveSync, togglePauseFolderGDriveSync, disableFolderGDriveSync, listGoogleAccounts, listGoogleDriveFolders, getCaesiumSettings, updateFolderCaesiumSettings, updateFolderWatermarkSettings, type FolderSyncInfo, type GoogleAccount, type CaesiumConfig } from '$lib/api/gdrive';
   import QRCode from 'qrcode';
   
   let { data }: { data: PageData } = $props();
@@ -80,6 +81,12 @@ import { slide } from 'svelte/transition';
   let editCaesiumKeepExif = $state(true);
   let editCaesiumSaveAsDefault = $state(false);
   let isSavingCaesium = $state(false);
+
+  // Google Drive Watermark State
+  let gdriveWatermarkTemplateId = $state<string>('');
+  let isEditingGDriveWatermark = $state(false);
+  let editGDriveWatermarkTemplateId = $state<string>('');
+  let isSavingGDriveWatermark = $state(false);
 
   // Folder Google Drive QR Code Modal State
   let showGDriveQrModal = $state(false);
@@ -153,7 +160,21 @@ import { slide } from 'svelte/transition';
         loadRemoteDriveFolders(selectedGDriveAccount);
       }
 
+      if (watermarkTemplates.length === 0) {
+        getWatermarkTemplatesForShare().then(wData => {
+          watermarkTemplates = wData.templates || [];
+          shareGlobalEnforced = Boolean(wData.globalEnforced);
+          const gTpl = watermarkTemplates.find(t => t.id === wData.globalTemplateId);
+          shareGlobalTemplateName = gTpl?.name || 'Default';
+          if (shareGlobalEnforced && wData.globalTemplateId) {
+            shareWatermarkTemplateId = wData.globalTemplateId;
+            gdriveWatermarkTemplateId = wData.globalTemplateId;
+          }
+        }).catch(() => {});
+      }
+
       if (syncData.synced && syncData.sync) {
+        editGDriveWatermarkTemplateId = syncData.sync.watermark_template_id || '';
         editCaesiumEnabled = syncData.sync.caesium_enabled ?? false;
         const cfg = (syncData.sync.caesium_config || {}) as Partial<CaesiumConfig>;
         editCaesiumMode = cfg.mode || 'lossy';
@@ -246,6 +267,34 @@ import { slide } from 'svelte/transition';
     }
   }
 
+  async function handleSaveGDriveWatermarkSettings() {
+    if (!data.folderPath || !gdriveSyncInfo?.sync) return;
+    isSavingGDriveWatermark = true;
+    try {
+      const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
+      const isWatermarked = shareGlobalEnforced || Boolean(editGDriveWatermarkTemplateId);
+      const res = await updateFolderWatermarkSettings({
+        folderPath: data.folderPath,
+        sourceType: srcType,
+        watermarkEnabled: isWatermarked,
+        watermarkTemplateId: editGDriveWatermarkTemplateId || null
+      });
+
+      if (gdriveSyncInfo.sync) {
+        gdriveSyncInfo.sync.watermark_enabled = res.sync.watermark_enabled;
+        gdriveSyncInfo.sync.watermark_template_id = res.sync.watermark_template_id;
+        const matchedTpl = watermarkTemplates.find(t => t.id === res.sync.watermark_template_id);
+        gdriveSyncInfo.sync.watermark_template_name = matchedTpl?.name || (res.sync.watermark_enabled ? 'Default Template' : null);
+      }
+      isEditingGDriveWatermark = false;
+      toast.success('Watermark settings updated for Google Drive sync!');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update watermark settings');
+    } finally {
+      isSavingGDriveWatermark = false;
+    }
+  }
+
   async function handleEnableGDriveSync() {
     if (!selectedGDriveAccount) {
       toast.error('Please select a Google Account');
@@ -269,6 +318,7 @@ import { slide } from 'svelte/transition';
         keep_dates: true
       };
 
+      const isWatermarked = shareGlobalEnforced || Boolean(gdriveWatermarkTemplateId);
       const res = await enableFolderGDriveSync({
         accountId: selectedGDriveAccount,
         folderPath: data.folderPath || '',
@@ -277,7 +327,9 @@ import { slide } from 'svelte/transition';
         existingFolderId: gdriveMode === 'existing' ? selectedExistingDriveFolderId : undefined,
         caesiumEnabled,
         caesiumConfig: config,
-        saveAsDefault: caesiumSaveAsDefault
+        saveAsDefault: caesiumSaveAsDefault,
+        watermarkEnabled: isWatermarked,
+        watermarkTemplateId: gdriveWatermarkTemplateId || null
       });
       gdriveSyncInfo = { synced: true, sync: res.sync };
       if (caesiumSaveAsDefault && caesiumSettings) {
@@ -328,8 +380,15 @@ import { slide } from 'svelte/transition';
   }
 
   // Delete & Unlink Handlers
-  async function handleUnlinkGDriveSync() {
-    if (!confirm('Unlink Google Drive sync? Existing files and folder will remain safe in your Google Drive.')) return;
+  let showUnlinkGDriveModal = $state(false);
+  let showDeleteGDriveModal = $state(false);
+
+  function handleUnlinkGDriveSync() {
+    showUnlinkGDriveModal = true;
+  }
+
+  async function confirmUnlinkGDriveSync() {
+    showUnlinkGDriveModal = false;
     try {
       const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
       await disableFolderGDriveSync(data.folderPath || '', srcType, false);
@@ -340,8 +399,12 @@ import { slide } from 'svelte/transition';
     }
   }
 
-  async function handleDeleteGDriveFolder() {
-    if (!confirm('⚠️ PERMANENTLY DELETE Google Drive folder?\n\nThis will delete the folder and ALL photos inside it on your Google Drive. Your local photos on this server will NOT be touched.')) return;
+  function handleDeleteGDriveFolder() {
+    showDeleteGDriveModal = true;
+  }
+
+  async function confirmDeleteGDriveFolder() {
+    showDeleteGDriveModal = false;
     isDeletingGDrive = true;
     try {
       const srcType = isStagedFolder ? 'FASTUP' : 'MEDIA';
@@ -359,6 +422,9 @@ import { slide } from 'svelte/transition';
   let shareAllowDownloadImages = $state(true);
   let shareAllowDownloadFolder = $state(true);
   let shareAllowFavorites = $state(false);
+  let shareLabel = $state('');
+  let sharePassword = $state('');
+  let showSharePassword = $state(false);
   let shareExpiryMode: 'duration' | 'date' | 'never' = $state('duration');
   let shareExpiryValue = $state(7);
   let shareExpiryUnit = $state('days');
@@ -395,8 +461,24 @@ import { slide } from 'svelte/transition';
   let editAllowDownloadImages = $state(true);
   let editAllowDownloadFolder = $state(true);
   let editAllowFavorites = $state(false);
+  let editSharePassword = $state('');
+  let editRemovePassword = $state(false);
+  let showEditSharePassword = $state(false);
   let editIsActive = $state(true);
+  let editShareLabel = $state('');
+  let editCreatedAtDateTime = $state('');
   let isSavingShareEdit = $state(false);
+
+  function handleGenerateSharePassword() {
+    sharePassword = generateNaturalPassword(3);
+    showSharePassword = true;
+  }
+
+  function handleGenerateEditSharePassword() {
+    editSharePassword = generateNaturalPassword(3);
+    editRemovePassword = false;
+    showEditSharePassword = true;
+  }
 
   // Access request response state
   let respondingRequestId = $state<string | null>(null);
@@ -590,10 +672,14 @@ import { slide } from 'svelte/transition';
         isWatermarked,
         expiresAt,
         shareWatermarkTemplateId || null,
-        shareAllowFavorites
+        shareAllowFavorites,
+        sharePassword.trim() || null,
+        shareLabel.trim() || null
       );
       toast.success('Share link created successfully!');
       newlyCreatedShareToken = token;
+      sharePassword = '';
+      shareLabel = '';
       await loadAllSharesAndRequests();
     } catch (e) {
       console.error(e);
@@ -669,6 +755,11 @@ import { slide } from 'svelte/transition';
     editAllowDownloadFolder = share.allow_download_folder ?? true;
     editAllowFavorites = share.allow_favorites ?? false;
     editIsActive = share.is_active !== false;
+    editShareLabel = share.label || '';
+    editCreatedAtDateTime = share.created_at ? toDateTimeLocal(new Date(share.created_at)) : '';
+    editSharePassword = '';
+    editRemovePassword = false;
+    showEditSharePassword = false;
 
     if (!share.expires_at) {
       editExpiryMode = 'never';
@@ -714,7 +805,11 @@ import { slide } from 'svelte/transition';
         allowDownloadImages: editAllowDownloadImages,
         allowDownloadFolder: editAllowDownloadFolder,
         allowFavorites: editAllowFavorites,
-        isActive: editIsActive
+        isActive: editIsActive,
+        password: editSharePassword.trim() || undefined,
+        removePassword: editRemovePassword || undefined,
+        label: editShareLabel.trim() || null,
+        createdAt: editCreatedAtDateTime ? new Date(editCreatedAtDateTime).toISOString() : undefined
       });
 
       toast.success('Share link parameters updated!');
@@ -2134,11 +2229,85 @@ import { slide } from 'svelte/transition';
           <label for="allowFavs" style="font-size: 0.875rem; color: #ccc; cursor: pointer;">Allow visitors to favorite photos and filter favorites</label>
         </div>
 
+        <!-- Label for Internal Reference -->
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label for="shareLabelInput" style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 0.875rem; color: #ccc;">
+            <Tag size={14} color="#c084fc" />
+            <span>Label (Internal Reference, Optional)</span>
+          </label>
+          <input
+            id="shareLabelInput"
+            type="text"
+            bind:value={shareLabel}
+            placeholder="e.g. Wedding Client, Instagram Link, Vendor Preview"
+            style="width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.875rem;"
+          />
+        </div>
+
+        <!-- Password Protection (Optional) -->
+        <div class="form-group" style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label for="sharePwdInput" style="font-size: 0.875rem; color: #ccc; display: flex; align-items: center; gap: 6px;">
+              <Lock size={14} color="#60a5fa" />
+              <span>Password Protection (Optional)</span>
+            </label>
+            <button
+              type="button"
+              class="btn"
+              style="padding: 3px 8px; font-size: 0.75rem; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); display: flex; align-items: center; gap: 4px;"
+              onclick={handleGenerateSharePassword}
+              title="Generate a natural language password"
+            >
+              <Sparkles size={12} />
+              <span>Generate Password</span>
+            </button>
+          </div>
+          <div style="position: relative; display: flex; align-items: center;">
+            <input
+              id="sharePwdInput"
+              type={showSharePassword ? 'text' : 'password'}
+              bind:value={sharePassword}
+              placeholder="Leave empty for no password"
+              style="width: 100%; padding: 8px 68px 8px 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.875rem; font-family: monospace;"
+            />
+            <div style="position: absolute; right: 4px; display: flex; gap: 4px; align-items: center;">
+              {#if sharePassword}
+                <button
+                  type="button"
+                  class="icon-btn"
+                  style="padding: 4px; color: #a1a1aa;"
+                  onclick={() => { copyToClipboard(sharePassword); toast.success('Password copied!'); }}
+                  title="Copy password"
+                >
+                  <Copy size={14} />
+                </button>
+              {/if}
+              <button
+                type="button"
+                class="icon-btn"
+                style="padding: 4px; color: #a1a1aa;"
+                onclick={() => showSharePassword = !showSharePassword}
+                title={showSharePassword ? "Hide password" : "Show password"}
+              >
+                {#if showSharePassword}
+                  <EyeOff size={14} />
+                {:else}
+                  <Eye size={14} />
+                {/if}
+              </button>
+            </div>
+          </div>
+          <p style="font-size: 0.72rem; color: #888; margin-top: 4px; margin-bottom: 0;">
+            If set, visitors must enter this password to view photos.
+          </p>
+        </div>
+
         <div class="form-group" style="margin-bottom: 18px;">
           <label style="display: block; margin-bottom: 6px; font-size: 0.875rem; color: #ccc;">Watermark Protection</label>
           {#if shareGlobalEnforced}
             <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 8px 12px; border-radius: 6px;">
-              <span>🔒 Enforced Globally by Admin ({shareGlobalTemplateName})</span>
+              <Lock size={15} color="#38bdf8" />
+              <span>Enforced Globally by Admin ({shareGlobalTemplateName})</span>
             </div>
           {:else}
             <select
@@ -2193,6 +2362,12 @@ import { slide } from 'svelte/transition';
                     <div style="flex: 1; min-width: 0;">
                       <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                         <span style="font-family: monospace; color: #e4e4e7; font-weight: 500;">...{share.share_token.substring(0, 8)}</span>
+                        {#if share.label}
+                          <span style="background: rgba(147, 51, 234, 0.2); color: #d8b4fe; border: 1px solid rgba(147, 51, 234, 0.35); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;" title="Internal reference label">
+                            <Tag size={10} />
+                            {share.label}
+                          </span>
+                        {/if}
                         {#if share.is_active === false}
                           <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
                             Disabled
@@ -2200,6 +2375,12 @@ import { slide } from 'svelte/transition';
                         {:else}
                           <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
                             Active
+                          </span>
+                        {/if}
+                        {#if share.has_password}
+                          <span style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;">
+                            <Lock size={10} />
+                            Password
                           </span>
                         {/if}
                       </div>
@@ -2235,6 +2416,11 @@ import { slide } from 'svelte/transition';
                           {/if}
                           {#if share.allow_favorites}
                             <span style="color: #f43f5e; font-weight: 500;">· Favs</span>
+                          {/if}
+                          {#if share.has_password}
+                            <span style="color: #fbbf24; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;">
+                              · <Lock size={10} /> Password Protected
+                            </span>
                           {/if}
                         </span>
                       </div>
@@ -2283,6 +2469,21 @@ import { slide } from 'svelte/transition';
                       <div style="font-size: 0.82rem; color: #fff; margin-bottom: 8px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
                         <Pencil size={13} color="#60a5fa" />
                         <span>Edit Share Parameters</span>
+                      </div>
+
+                      <!-- Label Section -->
+                      <div style="margin-bottom: 12px;">
+                        <label for="editLabel-{share.share_token}" style="display: flex; align-items: center; gap: 5px; margin-bottom: 6px; font-size: 0.75rem; color: #aaa;">
+                          <Tag size={12} color="#c084fc" />
+                          <span>Label (Internal Reference)</span>
+                        </label>
+                        <input
+                          id="editLabel-{share.share_token}"
+                          type="text"
+                          bind:value={editShareLabel}
+                          placeholder="e.g. Wedding Client, Instagram Link, Vendor Preview"
+                          style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.78rem;"
+                        />
                       </div>
 
                       <!-- Expiration Section -->
@@ -2354,6 +2555,90 @@ import { slide } from 'svelte/transition';
                         </div>
                       </div>
 
+                      <!-- Password Section in Edit Share -->
+                      <div style="margin-bottom: 12px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                          <label for="editPwd-{share.share_token}" style="display: flex; align-items: center; gap: 5px; font-size: 0.75rem; color: #aaa;">
+                            <Lock size={12} color="#60a5fa" />
+                            <span>{share.has_password ? 'Change Password' : 'Set Password (Optional)'}</span>
+                          </label>
+                          <button
+                            type="button"
+                            class="btn"
+                            style="padding: 2px 6px; font-size: 0.7rem; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); display: flex; align-items: center; gap: 4px;"
+                            onclick={handleGenerateEditSharePassword}
+                            title="Generate natural language password"
+                          >
+                            <Sparkles size={11} />
+                            <span>Generate</span>
+                          </button>
+                        </div>
+                        <div style="position: relative; display: flex; align-items: center;">
+                          <input
+                            id="editPwd-{share.share_token}"
+                            type={showEditSharePassword ? 'text' : 'password'}
+                            bind:value={editSharePassword}
+                            placeholder={share.has_password ? 'Leave blank to keep existing password' : 'Leave blank for no password'}
+                            disabled={editRemovePassword}
+                            style="width: 100%; padding: 6px 64px 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.78rem; font-family: monospace;"
+                          />
+                          <div style="position: absolute; right: 4px; display: flex; gap: 4px; align-items: center;">
+                            {#if editSharePassword}
+                              <button
+                                type="button"
+                                class="icon-btn"
+                                style="padding: 3px; color: #a1a1aa;"
+                                onclick={() => { copyToClipboard(editSharePassword); toast.success('Password copied!'); }}
+                                title="Copy password"
+                              >
+                                <Copy size={13} />
+                              </button>
+                            {/if}
+                            <button
+                              type="button"
+                              class="icon-btn"
+                              style="padding: 3px; color: #a1a1aa;"
+                              onclick={() => showEditSharePassword = !showEditSharePassword}
+                              title={showEditSharePassword ? "Hide password" : "Show password"}
+                            >
+                              {#if showEditSharePassword}
+                                <EyeOff size={13} />
+                              {:else}
+                                <Eye size={13} />
+                              {/if}
+                            </button>
+                          </div>
+                        </div>
+                        {#if share.has_password}
+                          <div style="margin-top: 6px; display: flex; align-items: center; gap: 6px;">
+                            <input
+                              type="checkbox"
+                              id="removePwd-{share.share_token}"
+                              bind:checked={editRemovePassword}
+                              style="width: 14px; height: 14px;"
+                              onchange={() => { if (editRemovePassword) editSharePassword = ''; }}
+                            />
+                            <label for="removePwd-{share.share_token}" style="font-size: 0.75rem; color: #f87171; cursor: pointer;">
+                              Remove password protection
+                            </label>
+                          </div>
+                        {/if}
+                      </div>
+
+                      <!-- Creation Date Section -->
+                      <div style="margin-bottom: 12px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                        <label for="editCreatedAt-{share.share_token}" style="display: flex; align-items: center; gap: 5px; margin-bottom: 6px; font-size: 0.75rem; color: #aaa;">
+                          <Clock size={12} color="#60a5fa" />
+                          <span>Creation Date</span>
+                        </label>
+                        <input
+                          id="editCreatedAt-{share.share_token}"
+                          type="datetime-local"
+                          bind:value={editCreatedAtDateTime}
+                          style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.78rem;"
+                        />
+                      </div>
+
                       <div style="display: flex; justify-content: flex-end; gap: 6px;">
                         <button class="btn" style="padding: 4px 8px; font-size: 0.75rem; background: transparent; border: 1px solid var(--glass-border); color: #888;" onclick={() => editingShareToken = null}>
                           Cancel
@@ -2380,9 +2665,21 @@ import { slide } from 'svelte/transition';
                     <div>
                       <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                         <span style="font-family: monospace; color: #a1a1aa; font-weight: 500;">...{share.share_token.substring(0, 8)}</span>
+                        {#if share.label}
+                          <span style="background: rgba(147, 51, 234, 0.2); color: #d8b4fe; border: 1px solid rgba(147, 51, 234, 0.35); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;" title="Internal reference label">
+                            <Tag size={10} />
+                            {share.label}
+                          </span>
+                        {/if}
                         <span style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
                           Expired
                         </span>
+                        {#if share.has_password}
+                          <span style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;">
+                            <Lock size={10} />
+                            Password
+                          </span>
+                        {/if}
                       </div>
                       <div style="font-size: 0.75rem; color: #888; display: flex; gap: 10px; flex-wrap: wrap;">
                         <span style="display: flex; align-items: center; gap: 4px; color: #f87171;">
@@ -2393,6 +2690,11 @@ import { slide } from 'svelte/transition';
                           <User size={11} />
                           {share.created_by_name || 'Unknown'}
                         </span>
+                        {#if share.has_password}
+                          <span style="color: #fbbf24; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;">
+                            · <Lock size={10} /> Password Protected
+                          </span>
+                        {/if}
                       </div>
                     </div>
 
@@ -2432,6 +2734,21 @@ import { slide } from 'svelte/transition';
                       <div style="font-size: 0.82rem; color: #fff; margin-bottom: 8px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
                         <Pencil size={13} color="#60a5fa" />
                         <span>Edit Share Parameters</span>
+                      </div>
+
+                      <!-- Label Section -->
+                      <div style="margin-bottom: 12px;">
+                        <label for="editLabel-{share.share_token}" style="display: flex; align-items: center; gap: 5px; margin-bottom: 6px; font-size: 0.75rem; color: #aaa;">
+                          <Tag size={12} color="#c084fc" />
+                          <span>Label (Internal Reference)</span>
+                        </label>
+                        <input
+                          id="editLabel-{share.share_token}"
+                          type="text"
+                          bind:value={editShareLabel}
+                          placeholder="e.g. Wedding Client, Instagram Link, Vendor Preview"
+                          style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.78rem;"
+                        />
                       </div>
 
                       <!-- Expiration Section -->
@@ -2917,11 +3234,7 @@ import { slide } from 'svelte/transition';
               <div style="display: flex; align-items: center; gap: 8px;">
                 <Minimize2 size={16} color="#60a5fa" />
                 <span style="font-weight: 500; font-size: 0.9rem; color: #f4f4f5;">Caesium Compression</span>
-                {#if gdriveSyncInfo.sync.caesium_enabled}
-                  <span style="font-size: 0.68rem; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); padding: 1px 6px; border-radius: 4px;">
-                    Active
-                  </span>
-                {:else}
+                {#if !gdriveSyncInfo.sync.caesium_enabled}
                   <span style="font-size: 0.68rem; background: rgba(255,255,255,0.1); color: #a1a1aa; padding: 1px 6px; border-radius: 4px;">
                     Off (Full Size)
                   </span>
@@ -3112,6 +3425,88 @@ import { slide } from 'svelte/transition';
             </div>
           {/if}
         </div>
+
+        <!-- Watermark Protection Configuration for Active Sync -->
+        <div style="margin-top: 14px; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); padding: 14px; border-radius: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: {isEditingGDriveWatermark ? '12px' : '0'};">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <Shield size={16} color="#60a5fa" />
+                <span style="font-weight: 500; font-size: 0.9rem; color: #f4f4f5;">Watermark Protection</span>
+                {#if shareGlobalEnforced}
+                  <span style="font-size: 0.68rem; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 6px; border-radius: 4px;">
+                    Globally Enforced
+                  </span>
+                {:else if !gdriveSyncInfo.sync.watermark_enabled}
+                  <span style="font-size: 0.68rem; background: rgba(255,255,255,0.1); color: #a1a1aa; padding: 1px 6px; border-radius: 4px;">
+                    None (Originals)
+                  </span>
+                {/if}
+              </div>
+              <div style="font-size: 0.75rem; color: #a1a1aa; margin-top: 2px;">
+                {#if shareGlobalEnforced}
+                  Admin enforced global template: {shareGlobalTemplateName}
+                {:else if gdriveSyncInfo.sync.watermark_enabled}
+                  Template: {gdriveSyncInfo.sync.watermark_template_name || watermarkTemplates.find(t => t.id === gdriveSyncInfo?.sync?.watermark_template_id)?.name || 'Default Template'}
+                {:else}
+                  Photos are uploaded to Google Drive without watermark
+                {/if}
+              </div>
+            </div>
+
+            {#if !shareGlobalEnforced}
+              <button 
+                type="button" 
+                class="btn" 
+                style="padding: 4px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: #ccc;"
+                onclick={() => isEditingGDriveWatermark = !isEditingGDriveWatermark}
+              >
+                <SlidersHorizontal size={13} style="margin-right: 4px;" />
+                {isEditingGDriveWatermark ? 'Close' : 'Configure'}
+              </button>
+            {/if}
+          </div>
+
+          {#if isEditingGDriveWatermark && !shareGlobalEnforced}
+            <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; margin-top: 8px;">
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label style="display: block; font-size: 0.75rem; color: #aaa; margin-bottom: 6px;">Watermark Template</label>
+                <select
+                  bind:value={editGDriveWatermarkTemplateId}
+                  style="width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.85rem;"
+                >
+                  <option value="">None (No Watermark)</option>
+                  {#each watermarkTemplates as t}
+                    <option value={t.id}>
+                      {t.name} {t.is_default ? '(Default)' : ''} {!t.allow_hd_download ? `[${t.restricted_tier} restricted]` : ''}
+                    </option>
+                  {/each}
+                </select>
+              </div>
+
+              <div style="display: flex; gap: 8px;">
+                <button 
+                  type="button" 
+                  class="btn" 
+                  style="flex: 1; padding: 6px; font-size: 0.8rem; background: var(--text-color); color: var(--bg-color);"
+                  onclick={handleSaveGDriveWatermarkSettings}
+                  disabled={isSavingGDriveWatermark}
+                >
+                  {isSavingGDriveWatermark ? 'Saving...' : 'Save Watermark Settings'}
+                </button>
+                <button 
+                  type="button" 
+                  class="btn" 
+                  style="padding: 6px 12px; font-size: 0.8rem; background: rgba(255,255,255,0.08); border: 1px solid var(--glass-border); color: #ccc;"
+                  onclick={() => isEditingGDriveWatermark = false}
+                  disabled={isSavingGDriveWatermark}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          {/if}
+        </div>
       </div>
     {:else}
       <!-- Create New Google Drive Sync Section (Identical to Create New Share Link Section) -->
@@ -3219,6 +3614,36 @@ import { slide } from 'svelte/transition';
                   </div>
                 {/if}
               </div>
+            {/if}
+          </div>
+
+          <!-- Watermark Protection Configuration (Like Share Link Watermark Option) -->
+          <div class="form-group" style="margin-bottom: 18px;">
+            <label style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 0.875rem; color: #ccc;">
+              <span style="display: flex; align-items: center; gap: 6px;">
+                <Shield size={15} color="#60a5fa" /> Watermark Protection
+              </span>
+            </label>
+            <p style="font-size: 0.75rem; color: #a1a1aa; margin: 0 0 8px 0;">
+              Apply watermark to photos before compressing and uploading to Google Drive. Local files remain unmodified.
+            </p>
+            {#if shareGlobalEnforced}
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 8px 12px; border-radius: 6px;">
+                <Lock size={15} color="#38bdf8" />
+                <span>Enforced Globally by Admin ({shareGlobalTemplateName})</span>
+              </div>
+            {:else}
+              <select
+                bind:value={gdriveWatermarkTemplateId}
+                style="width: 100%; padding: 8px 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.875rem;"
+              >
+                <option value="">None (No Watermark)</option>
+                {#each watermarkTemplates as t}
+                  <option value={t.id}>
+                    {t.name} {t.is_default ? '(Default)' : ''} {!t.allow_hd_download ? `[${t.restricted_tier} restricted]` : ''}
+                  </option>
+                {/each}
+              </select>
             {/if}
           </div>
 
@@ -3431,6 +3856,30 @@ import { slide } from 'svelte/transition';
   <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
     <button class="btn" style="background: transparent; border: 1px solid var(--glass-border); color: #ccc;" onclick={() => { showRevokeConfirm = false; revokeTargetToken = ''; }}>Cancel</button>
     <button class="btn" style="background: #ef4444; color: white; border: none;" onclick={confirmRevokeShare}>Revoke</button>
+  </div>
+</Modal>
+
+<Modal bind:show={showUnlinkGDriveModal} id="folder-unlink-gdrive-confirm" title="Unlink Google Drive Sync">
+  <p style="color: #ccc; margin-bottom: 24px; line-height: 1.5;">Are you sure you want to unlink Google Drive sync? Existing files and the folder will remain safe in your Google Drive.</p>
+  <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
+    <button class="btn" style="background: transparent; border: 1px solid var(--glass-border); color: #ccc;" onclick={() => { showUnlinkGDriveModal = false; }}>Cancel</button>
+    <button class="btn" style="background: #eab308; color: black; border: none; font-weight: 600;" onclick={confirmUnlinkGDriveSync}>Unlink</button>
+  </div>
+</Modal>
+
+<Modal bind:show={showDeleteGDriveModal} id="folder-delete-gdrive-confirm" title="Permanently Delete Google Drive Folder">
+  <p style="color: #ccc; margin-bottom: 16px; line-height: 1.5; display: flex; align-items: center; gap: 8px;">
+    <AlertCircle size={18} color="#f87171" style="flex-shrink: 0;" />
+    <strong style="color: #f87171;">This action is permanent and cannot be undone.</strong>
+  </p>
+  <p style="color: #a1a1aa; margin-bottom: 24px; line-height: 1.5; font-size: 0.9rem;">
+    This will delete the folder and <strong style="color: #fff;">all photos</strong> inside it on your Google Drive. Your local photos on this server will <strong style="color: #10b981;">not</strong> be touched.
+  </p>
+  <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 1rem;">
+    <button class="btn" style="background: transparent; border: 1px solid var(--glass-border); color: #ccc;" onclick={() => { showDeleteGDriveModal = false; }} disabled={isDeletingGDrive}>Cancel</button>
+    <button class="btn" style="background: #ef4444; color: white; border: none; font-weight: 600;" onclick={confirmDeleteGDriveFolder} disabled={isDeletingGDrive}>
+      {isDeletingGDrive ? 'Deleting...' : 'Delete Permanently'}
+    </button>
   </div>
 </Modal>
 

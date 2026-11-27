@@ -5,8 +5,9 @@
   import { 
     ChevronLeft, Trash2, Link as LinkIcon, Folder, Image, User, Copy, Check, 
     Pencil, Power, PowerOff, Shield, ShieldAlert, Clock, Search, X, Plus, 
-    AlertTriangle, RefreshCw, Mail, ExternalLink, Send
+    AlertTriangle, RefreshCw, Mail, ExternalLink, Send, Lock, Eye, EyeOff, Sparkles, Tag
   } from '@lucide/svelte';
+  import { generateNaturalPassword } from '$lib/utils/passwordGenerator';
   import Modal from '$lib/components/Modal.svelte';
   import { 
     getAdminLockdown, setAdminLockdown, getAdminShares, updateAdminShare, 
@@ -41,6 +42,9 @@
   let createAllowDownloadFolder = $state(true);
   let createWatermarkEnabled = $state(false);
   let createWatermarkTemplateId = $state<string>('');
+  let createPassword = $state('');
+  let createLabel = $state('');
+  let showCreatePassword = $state(false);
   let newlyCreatedToken = $state<string | null>(null);
 
   // Edit share state
@@ -54,7 +58,23 @@
   let editAllowFavorites = $state(false);
   let editWatermarkEnabled = $state(false);
   let editWatermarkTemplateId = $state<string>('');
+  let editPassword = $state('');
+  let editRemovePassword = $state(false);
+  let showEditPassword = $state(false);
   let editIsActive = $state(true);
+  let editLabel = $state('');
+  let editCreatedAtDateTime = $state('');
+
+  function handleGenerateCreatePassword() {
+    createPassword = generateNaturalPassword(3);
+    showCreatePassword = true;
+  }
+
+  function handleGenerateEditPassword() {
+    editPassword = generateNaturalPassword(3);
+    editRemovePassword = false;
+    showEditPassword = true;
+  }
 
   let watermarkTemplates = $state<WatermarkTemplateOption[]>([]);
   let isSavingEdit = $state(false);
@@ -179,12 +199,17 @@
         createAllowDownloadFolder, 
         isWatermarked, 
         expiresAt,
-        createWatermarkTemplateId || null
+        createWatermarkTemplateId || null,
+        false,
+        createPassword.trim() || null,
+        createLabel.trim() || null
       );
 
       toast.success('Share link created successfully!');
       newlyCreatedToken = token;
       createTargetPath = '';
+      createPassword = '';
+      createLabel = '';
       await loadData();
     } catch (e: any) {
       console.error(e);
@@ -220,7 +245,12 @@
     editAllowFavorites = share.allow_favorites ?? false;
     editWatermarkEnabled = share.watermark_enabled ?? false;
     editWatermarkTemplateId = share.watermark_template_id || '';
+    editPassword = '';
+    editRemovePassword = false;
+    showEditPassword = false;
     editIsActive = share.is_active !== false;
+    editLabel = share.label || '';
+    editCreatedAtDateTime = share.created_at ? toDateTimeLocal(new Date(share.created_at)) : '';
 
     if (!share.expires_at) {
       editExpiryMode = 'never';
@@ -267,7 +297,11 @@
         allow_download_folder: editAllowDownloadFolder,
         allow_favorites: editAllowFavorites,
         watermark_enabled: isWatermarked,
-        watermark_template_id: editWatermarkTemplateId || null
+        watermark_template_id: editWatermarkTemplateId || null,
+        password: editPassword.trim() || undefined,
+        remove_password: editRemovePassword || undefined,
+        label: editLabel.trim() || null,
+        created_at: editCreatedAtDateTime ? new Date(editCreatedAtDateTime).toISOString() : undefined
       });
 
       toast.success('Share link parameters updated!');
@@ -360,6 +394,7 @@
       list = list.filter(s => 
         (s.share_token && s.share_token.toLowerCase().includes(q)) ||
         (s.folder_path && s.folder_path.toLowerCase().includes(q)) ||
+        (s.label && s.label.toLowerCase().includes(q)) ||
         (s.media_file_name && s.media_file_name.toLowerCase().includes(q)) ||
         (s.media_id && s.media_id.toLowerCase().includes(q)) ||
         (s.person_name && s.person_name.toLowerCase().includes(q)) ||
@@ -628,6 +663,79 @@
         </div>
       </div>
 
+      <!-- Label (Internal Reference) -->
+      <div style="margin-bottom: 16px;">
+        <label for="adminCreateLabelInput" style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 6px;">
+          <Tag size={14} color="#c084fc" />
+          <span>Label (Internal Reference, Optional)</span>
+        </label>
+        <input 
+          id="adminCreateLabelInput"
+          type="text" 
+          bind:value={createLabel} 
+          placeholder="e.g. Wedding Client, Instagram Link, Draft Preview" 
+          style="width: 100%; padding: 8px 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); border-radius: 6px; color: white; font-size: 0.85rem;" 
+        />
+      </div>
+
+      <!-- Password Protection (Optional) -->
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <label for="adminCreatePwdInput" style="font-size: 0.85rem; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+            <Lock size={14} color="#60a5fa" />
+            <span>Password Protection (Optional)</span>
+          </label>
+          <button
+            type="button"
+            class="btn"
+            style="padding: 3px 8px; font-size: 0.75rem; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); display: flex; align-items: center; gap: 4px;"
+            onclick={handleGenerateCreatePassword}
+            title="Generate a natural language password"
+          >
+            <Sparkles size={12} />
+            <span>Generate Password</span>
+          </button>
+        </div>
+        <div style="position: relative; display: flex; align-items: center;">
+          <input
+            id="adminCreatePwdInput"
+            type={showCreatePassword ? 'text' : 'password'}
+            bind:value={createPassword}
+            placeholder="Leave empty for no password"
+            style="width: 100%; padding: 8px 68px 8px 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 6px; font-size: 0.875rem; font-family: monospace;"
+          />
+          <div style="position: absolute; right: 6px; display: flex; gap: 4px; align-items: center;">
+            {#if createPassword}
+              <button
+                type="button"
+                class="icon-btn"
+                style="padding: 4px; color: #a1a1aa;"
+                onclick={() => { copyToClipboard(createPassword); toast.success('Password copied!'); }}
+                title="Copy password"
+              >
+                <Copy size={14} />
+              </button>
+            {/if}
+            <button
+              type="button"
+              class="icon-btn"
+              style="padding: 4px; color: #a1a1aa;"
+              onclick={() => showCreatePassword = !showCreatePassword}
+              title={showCreatePassword ? "Hide password" : "Show password"}
+            >
+              {#if showCreatePassword}
+                <EyeOff size={14} />
+              {:else}
+                <Eye size={14} />
+              {/if}
+            </button>
+          </div>
+        </div>
+        <p style="font-size: 0.72rem; color: #888; margin-top: 4px; margin-bottom: 0;">
+          If set, visitors must enter this password to view photos.
+        </p>
+      </div>
+
       <!-- Permission Checkboxes -->
       <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 16px;">
         <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #cbd5e1; cursor: pointer;">
@@ -730,6 +838,18 @@
                     Active
                   </span>
                 {/if}
+
+                {#if share.has_password}
+                  <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border-color: rgba(59, 130, 246, 0.3); display: flex; align-items: center; gap: 4px;">
+                    <Lock size={11} /> Password
+                  </span>
+                {/if}
+
+                {#if share.label}
+                  <span class="badge" style="background: rgba(147, 51, 234, 0.2); color: #d8b4fe; border-color: rgba(147, 51, 234, 0.35); display: flex; align-items: center; gap: 4px;" title="Internal reference label">
+                    <Tag size={11} /> {share.label}
+                  </span>
+                {/if}
               </div>
 
               <!-- Expiration Line (Highlight) -->
@@ -771,6 +891,11 @@
                   {/if}
                   {#if share.watermark_enabled}
                     · Watermarked
+                  {/if}
+                  {#if share.has_password}
+                    <span style="color: #fbbf24; font-weight: 500; display: inline-flex; align-items: center; gap: 3px;">
+                      · <Lock size={10} /> Password Protected
+                    </span>
                   {/if}
                 </span>
                 <span style="color: #cbd5e1;">
@@ -839,6 +964,21 @@
               <div style="font-size: 0.85rem; color: #fff; margin-bottom: 12px; font-weight: 500; display: flex; align-items: center; gap: 8px;">
                 <Pencil size={14} color="#60a5fa" />
                 <span>Edit Share Parameters</span>
+              </div>
+
+              <!-- Label Section -->
+              <div style="margin-bottom: 14px;">
+                <label for="adminEditLabel-{share.share_token}" style="display: flex; align-items: center; gap: 5px; font-size: 0.78rem; color: #aaa; margin-bottom: 6px;">
+                  <Tag size={13} color="#c084fc" />
+                  <span>Label (Internal Reference)</span>
+                </label>
+                <input 
+                  id="adminEditLabel-{share.share_token}"
+                  type="text" 
+                  bind:value={editLabel} 
+                  placeholder="e.g. Wedding Client, Instagram Link, Draft Preview" 
+                  style="width: 100%; padding: 6px 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.85rem;" 
+                />
               </div>
 
               <!-- Expiration Section -->
@@ -923,6 +1063,90 @@
                     <input type="checkbox" bind:checked={editIsActive} style="width: 16px; height: 16px;" />
                     Link is active (enabled)
                   </label>
+
+                  <!-- Password in Edit Share -->
+                  <div style="width: 100%; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                      <label for="adminEditPwd-{share.share_token}" style="display: flex; align-items: center; gap: 5px; font-size: 0.78rem; color: #aaa;">
+                        <Lock size={13} color="#60a5fa" />
+                        <span>{share.has_password ? 'Change Password' : 'Set Password (Optional)'}</span>
+                      </label>
+                      <button
+                        type="button"
+                        class="btn"
+                        style="padding: 2px 6px; font-size: 0.7rem; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); display: flex; align-items: center; gap: 4px;"
+                        onclick={handleGenerateEditPassword}
+                        title="Generate natural language password"
+                      >
+                        <Sparkles size={11} />
+                        <span>Generate</span>
+                      </button>
+                    </div>
+                    <div style="position: relative; display: flex; align-items: center;">
+                      <input
+                        id="adminEditPwd-{share.share_token}"
+                        type={showEditPassword ? 'text' : 'password'}
+                        bind:value={editPassword}
+                        placeholder={share.has_password ? 'Leave blank to keep existing password' : 'Leave blank for no password'}
+                        disabled={editRemovePassword}
+                        style="width: 100%; padding: 6px 64px 6px 8px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.8rem; font-family: monospace;"
+                      />
+                      <div style="position: absolute; right: 4px; display: flex; gap: 4px; align-items: center;">
+                        {#if editPassword}
+                          <button
+                            type="button"
+                            class="icon-btn"
+                            style="padding: 3px; color: #a1a1aa;"
+                            onclick={() => { copyToClipboard(editPassword); toast.success('Password copied!'); }}
+                            title="Copy password"
+                          >
+                            <Copy size={13} />
+                          </button>
+                        {/if}
+                        <button
+                          type="button"
+                          class="icon-btn"
+                          style="padding: 3px; color: #a1a1aa;"
+                          onclick={() => showEditPassword = !showEditPassword}
+                          title={showEditPassword ? "Hide password" : "Show password"}
+                        >
+                          {#if showEditPassword}
+                            <EyeOff size={13} />
+                          {:else}
+                            <Eye size={13} />
+                          {/if}
+                        </button>
+                      </div>
+                    </div>
+                    {#if share.has_password}
+                      <div style="margin-top: 6px; display: flex; align-items: center; gap: 6px;">
+                        <input
+                          type="checkbox"
+                          id="adminRemovePwd-{share.share_token}"
+                          bind:checked={editRemovePassword}
+                          style="width: 14px; height: 14px;"
+                          onchange={() => { if (editRemovePassword) editPassword = ''; }}
+                        />
+                        <label for="adminRemovePwd-{share.share_token}" style="font-size: 0.75rem; color: #f87171; cursor: pointer;">
+                          Remove password protection
+                        </label>
+                      </div>
+                    {/if}
+                  </div>
+
+                  <!-- Creation Date Section -->
+                  <div style="width: 100%; margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 10px;">
+                    <label for="adminEditCreatedAt-{share.share_token}" style="display: flex; align-items: center; gap: 5px; font-size: 0.78rem; color: #aaa; margin-bottom: 6px;">
+                      <Clock size={13} color="#60a5fa" />
+                      <span>Creation Date</span>
+                    </label>
+                    <input 
+                      id="adminEditCreatedAt-{share.share_token}"
+                      type="datetime-local" 
+                      bind:value={editCreatedAtDateTime} 
+                      style="width: 100%; padding: 6px 10px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); color: white; border-radius: 4px; font-size: 0.85rem;" 
+                    />
+                  </div>
                 </div>
               </div>
 

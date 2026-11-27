@@ -38,6 +38,9 @@ export interface FolderSyncInfo {
     totalLocalJpegs?: number;
     caesium_enabled?: boolean;
     caesium_config?: CaesiumConfig | null;
+    watermark_enabled?: boolean;
+    watermark_template_id?: string | null;
+    watermark_template_name?: string | null;
   };
 }
 
@@ -147,6 +150,8 @@ export async function enableFolderGDriveSync(params: {
   caesiumEnabled?: boolean;
   caesiumConfig?: CaesiumConfig;
   saveAsDefault?: boolean;
+  watermarkEnabled?: boolean;
+  watermarkTemplateId?: string | null;
 }): Promise<any> {
   const res = await fetch(`${API_BASE}/api/gdrive/sync`, {
     method: 'POST',
@@ -177,6 +182,25 @@ export async function updateFolderCaesiumSettings(params: {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || 'Failed to update Caesium settings');
+  }
+  return res.json();
+}
+
+export async function updateFolderWatermarkSettings(params: {
+  folderPath: string;
+  sourceType?: 'MEDIA' | 'FASTUP';
+  watermarkEnabled: boolean;
+  watermarkTemplateId?: string | null;
+}): Promise<any> {
+  const res = await fetch(`${API_BASE}/api/gdrive/sync/watermark`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(params)
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update Watermark settings');
   }
   return res.json();
 }

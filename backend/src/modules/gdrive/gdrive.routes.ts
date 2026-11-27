@@ -196,6 +196,8 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
         caesiumEnabled?: boolean;
         caesiumConfig?: CaesiumConfig;
         saveAsDefault?: boolean;
+        watermarkEnabled?: boolean;
+        watermarkTemplateId?: string | null;
       }
     }>('/api/gdrive/sync', async (request, reply) => {
       const { 
@@ -206,7 +208,9 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
         existingFolderId,
         caesiumEnabled,
         caesiumConfig,
-        saveAsDefault
+        saveAsDefault,
+        watermarkEnabled,
+        watermarkTemplateId
       } = request.body;
 
       if (!accountId || folderPath === undefined) {
@@ -222,7 +226,9 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
           existingFolderId,
           caesiumEnabled,
           caesiumConfig,
-          saveAsDefault
+          saveAsDefault,
+          watermarkEnabled,
+          watermarkTemplateId
         });
 
         // Trigger immediate background scan & sync of existing JPEGs
@@ -273,6 +279,39 @@ export async function gdriveRoutes(fastify: FastifyInstance) {
         });
       } catch (err: any) {
         logger.error('[GDrive] Failed to update Caesium sync config:', err);
+        return reply.status(500).send({ error: err.message });
+      }
+    });
+
+    // Update Watermark parameters for an active folder sync
+    folderScope.patch<{
+      Body: {
+        folderPath: string;
+        sourceType?: 'MEDIA' | 'FASTUP';
+        watermarkEnabled: boolean;
+        watermarkTemplateId?: string | null;
+      }
+    }>('/api/gdrive/sync/watermark', async (request, reply) => {
+      const { folderPath, sourceType = 'MEDIA', watermarkEnabled, watermarkTemplateId } = request.body;
+
+      if (folderPath === undefined || watermarkEnabled === undefined) {
+        return reply.status(400).send({ error: 'folderPath and watermarkEnabled are required' });
+      }
+
+      try {
+        const updatedSync = await GDriveService.updateWatermarkSyncConfig({
+          folderPath,
+          sourceType,
+          watermarkEnabled,
+          watermarkTemplateId
+        });
+
+        return reply.send({
+          success: true,
+          sync: updatedSync
+        });
+      } catch (err: any) {
+        logger.error('[GDrive] Failed to update Watermark sync config:', err);
         return reply.status(500).send({ error: err.message });
       }
     });

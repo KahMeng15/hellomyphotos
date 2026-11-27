@@ -3,6 +3,7 @@ import { query } from '../../config/db';
 import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
 import { AnalyticsService } from '../analytics/analytics.service';
 import sharp from 'sharp';
 import { metadataQueue } from '../../queue/metadataQueue';
@@ -15,7 +16,7 @@ import { resolveMediaFullPath } from '../../utils/mediaPath';
 const defaultCacheDir = fs.existsSync('/app/cache') ? '/app/cache' : path.resolve(process.cwd(), '../volumes/cache_rw');
 const CACHE_ROOT = path.resolve(process.env.CACHE_ROOT || defaultCacheDir);
 
-import { requireAuth, hasFolderAccess, invalidateShareCache } from '../../utils/auth';
+import { requireAuth, hasFolderAccess, invalidateShareCache, getSharePasswordSig } from '../../utils/auth';
 import { getClientIp } from '../../utils/getIp';
 import { sendPlainTextEmail } from '../../utils/mailer';
 import { isShareLockdownActive } from '../../utils/lockdown';
@@ -24,9 +25,82 @@ import { PERSON_COVER_ORDER_CLAUSE } from '../ml/personCover.utils';
 import { FastUpService } from '../staging/fastup.service';
 import { StagingService } from '../staging/staging.service';
 
+function isSharePasswordUnlocked(share: any, token: string, request: FastifyRequest): boolean {
+  if (!share.password_hash) return true;
+  const expectedSig = getSharePasswordSig(token, share.password_hash);
+  return request.cookies[`sp_${token}`] === expectedSig;
+}
+
+async function getShareLockoutStatus(token: string, ip: string) {
+  const redisKey = `login_attempts:share:${token}:${ip}`;
+
+  const { rows: settingsRows } = await query(`
+    SELECT key, value FROM admin_settings 
+    WHERE key IN ('auth_max_login_tries', 'auth_timeout_minutes', 'auth_double_timeout')
+  `);
+  let maxTries = 5;
+  let timeoutMinutes = 15;
+  let doubleTimeout = true;
+  for (const r of settingsRows) {
+    try {
+      if (r.key === 'auth_max_login_tries') {
+        const v = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        maxTries = Number(v) || 5;
+      }
+      if (r.key === 'auth_timeout_minutes') {
+        const v = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        timeoutMinutes = Number(v) || 15;
+      }
+      if (r.key === 'auth_double_timeout') {
+        const v = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        doubleTimeout = typeof v === 'string' ? v === 'true' : Boolean(v);
+      }
+    } catch (e) {}
+  }
+
+  const attemptsData = await redis.get(redisKey);
+  let attempts = 0;
+  let currentPenalty = timeoutMinutes * 60; // in seconds
+  let blockedUntil = 0;
+
+  if (attemptsData) {
+    try {
+      const parsed = JSON.parse(attemptsData);
+      attempts = parsed.attempts || 0;
+      currentPenalty = parsed.currentPenalty || (timeoutMinutes * 60);
+      blockedUntil = parsed.blockedUntil || 0;
+
+      if (Date.now() < blockedUntil) {
+        const remainingMinutes = Math.ceil((blockedUntil - Date.now()) / 60000);
+        return {
+          isLockedOut: true,
+          remainingMinutes,
+          blockedUntil,
+          attempts,
+          currentPenalty,
+          maxTries,
+          doubleTimeout,
+          redisKey
+        };
+      }
+    } catch (e) {}
+  }
+
+  return {
+    isLockedOut: false,
+    remainingMinutes: 0,
+    blockedUntil: 0,
+    attempts,
+    currentPenalty,
+    maxTries,
+    doubleTimeout,
+    redisKey
+  };
+}
+
 export async function sharesRoutes(fastify: FastifyInstance) {
   fastify.post('/api/shares', { preHandler: requireAuth }, async (request, reply) => {
-    const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites } = request.body as any;
+    const { folderPath, mediaId, personId, allowDownloadImages, allowDownloadFolder, watermarkEnabled, watermarkTemplateId, expiresAt, allowFavorites, password, label, createdAt } = request.body as any;
     
     // Check permissions
     if (request.user?.role === 'viewer') {
@@ -47,11 +121,15 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     
     const shareToken = crypto.randomBytes(16).toString('base64url');
     const isWatermarked = watermarkEnabled ?? Boolean(watermarkTemplateId);
+    let passwordHash: string | null = null;
+    if (password && typeof password === 'string' && password.trim()) {
+      passwordHash = await bcrypt.hash(password.trim(), 10);
+    }
     
     await query(`
-      INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, allow_favorites)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-    `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id, allowFavorites ?? false]);
+      INSERT INTO shared_folders (folder_path, media_id, person_id, share_token, allow_download_images, allow_download_folder, watermark_enabled, watermark_template_id, expires_at, created_by, allow_favorites, password_hash, label, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()))
+    `, [folderPath || null, mediaId || null, personId || null, shareToken, allowDownloadImages ?? false, allowDownloadFolder ?? false, isWatermarked, watermarkTemplateId || null, expiresAt || null, request.user!.id, allowFavorites ?? false, passwordHash, label ? String(label).trim() : null, createdAt || null]);
     
     // Automatically prioritize processing for all unprocessed items in the shared folder
     if (folderPath) {
@@ -156,6 +234,234 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     }
   });
 
+  fastify.post('/api/shares/:token/unlock', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { token } = request.params as any;
+    const body = (request.body || {}) as any;
+    const password = body.password;
+    const turnstileToken = body['cf-turnstile-response'] || body.turnstileToken;
+
+    if (await isShareLockdownActive()) {
+      return reply.status(403).send({ error: 'All share links are temporarily disabled due to system lockdown', isLockdown: true });
+    }
+
+    const shareRes = await query(`SELECT * FROM shared_folders WHERE share_token = $1`, [token]);
+    if (shareRes.rows.length === 0) {
+      return reply.status(404).send({ error: 'Share not found' });
+    }
+    const share = shareRes.rows[0];
+    if (share.is_active === false) {
+      return reply.status(403).send({ error: 'Share link disabled' });
+    }
+    if (share.expires_at && new Date(share.expires_at) <= new Date()) {
+      return reply.status(401).send({ error: 'Share link expired' });
+    }
+
+    const ip = getClientIp(request);
+
+    // Check rate limit & lockout
+    const lockout = await getShareLockoutStatus(token, ip);
+    if (lockout.isLockedOut) {
+      AnalyticsService.logVisit({
+        actionType: 'blocked_login_lockout',
+        shareToken: token,
+        ip,
+        userAgent: request.headers['user-agent'] as string | undefined,
+        path: request.url,
+        metadata: { reason: 'locked_out', remainingMinutes: lockout.remainingMinutes }
+      });
+      return reply.status(429).send({
+        error: `Too many failed attempts. Please try again in ${lockout.remainingMinutes} minute(s).`,
+        isLockedOut: true,
+        remainingMinutes: lockout.remainingMinutes
+      });
+    }
+
+    // If Turnstile secret is set, verify turnstileToken unless a valid ts cookie already exists
+    if (process.env.TURNSTILE_SECRET) {
+      const tsCookie = (request.cookies as any)?.[`ts_${token}`];
+      if (!tsCookie) {
+        if (!turnstileToken) {
+          AnalyticsService.logVisit({
+            actionType: 'blocked_turnstile',
+            shareToken: token,
+            ip,
+            userAgent: request.headers['user-agent'] as string | undefined,
+            path: request.url,
+            metadata: { reason: 'missing_turnstile_token_on_unlock' }
+          });
+          return reply.status(400).send({ error: 'Security verification missing' });
+        }
+
+        try {
+          const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              secret: process.env.TURNSTILE_SECRET,
+              response: turnstileToken,
+              remoteip: ip,
+            }),
+          });
+          if (!r.ok) throw new Error(`siteverify ${r.status}`);
+          const result = await r.json() as { success: boolean; 'error-codes'?: string[] };
+          if (!result.success) {
+            AnalyticsService.logVisit({
+              actionType: 'blocked_turnstile',
+              shareToken: token,
+              ip,
+              userAgent: request.headers['user-agent'] as string | undefined,
+              path: request.url,
+              metadata: { reason: 'turnstile_failed_on_unlock', errorCodes: result['error-codes'] }
+            });
+            return reply.status(403).send({ error: 'Security verification failed' });
+          }
+        } catch (err) {
+          return reply.status(403).send({ error: 'Security verification error' });
+        }
+      }
+    }
+
+    // Verify password if required
+    if (share.password_hash) {
+      let isValid = false;
+      if (password && typeof password === 'string') {
+        isValid = await bcrypt.compare(password, share.password_hash);
+      }
+
+      if (!isValid) {
+        let newAttempts = (lockout.attempts || 0) + 1;
+        let newBlockedUntil = 0;
+        let newPenalty = lockout.currentPenalty;
+
+        if (newAttempts >= lockout.maxTries) {
+          newBlockedUntil = Date.now() + (newPenalty * 1000);
+          if (lockout.doubleTimeout) {
+            newPenalty = newPenalty * 2;
+          }
+          newAttempts = 0;
+          AnalyticsService.logVisit({
+            actionType: 'blocked_login_lockout',
+            shareToken: token,
+            ip,
+            userAgent: request.headers['user-agent'] as string | undefined,
+            path: request.url,
+            metadata: { reason: 'max_tries_exceeded', maxTries: lockout.maxTries, penaltySeconds: newPenalty }
+          });
+        } else {
+          AnalyticsService.logVisit({
+            actionType: 'blocked_access',
+            shareToken: token,
+            ip,
+            userAgent: request.headers['user-agent'] as string | undefined,
+            path: request.url,
+            metadata: { context: 'share_password_failed', attempt: newAttempts, maxTries: lockout.maxTries }
+          });
+        }
+
+        await redis.set(lockout.redisKey, JSON.stringify({
+          attempts: newAttempts,
+          currentPenalty: newPenalty,
+          blockedUntil: newBlockedUntil
+        }), 'EX', 86400 * 7);
+
+        if (newBlockedUntil > 0) {
+          const remainingMinutes = Math.ceil((newBlockedUntil - Date.now()) / 60000);
+          return reply.status(429).send({
+            error: `Too many failed attempts. Please try again in ${remainingMinutes} minute(s).`,
+            isLockedOut: true,
+            remainingMinutes
+          });
+        }
+
+        const remainingTries = lockout.maxTries - newAttempts;
+        return reply.status(401).send({
+          error: `Incorrect password. ${remainingTries} attempt${remainingTries === 1 ? '' : 's'} remaining.`
+        });
+      }
+
+      // Password matches: clear failed attempts
+      await redis.del(lockout.redisKey);
+    }
+
+    const APP_DOMAIN = process.env.APP_DOMAIN || '';
+    let cookieDomain = undefined;
+    if (APP_DOMAIN) {
+      try {
+        const hn = new URL(APP_DOMAIN).hostname;
+        if (hn !== 'localhost' && hn !== '127.0.0.1') {
+          cookieDomain = hn;
+        }
+      } catch(e){}
+    }
+
+    if (share.password_hash) {
+      const sig = getSharePasswordSig(token, share.password_hash);
+      reply.setCookie(`sp_${token}`, sig, {
+        path: '/',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        domain: cookieDomain,
+        maxAge: 7 * 86400 // 7 days
+      });
+    }
+
+    reply.setCookie(`ts_${token}`, '1', {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      domain: cookieDomain,
+      maxAge: 7 * 86400
+    });
+
+    AnalyticsService.logVisit({
+      actionType: 'unlocked_share',
+      shareToken: token,
+      ip,
+      userAgent: request.headers['user-agent'] as string | undefined,
+      path: request.url
+    });
+
+    return reply.send({ success: true });
+  });
+
+  const handleShareExit = async (request: FastifyRequest, reply: FastifyReply) => {
+    const { token } = request.params as any;
+    const APP_DOMAIN = process.env.APP_DOMAIN || '';
+    let cookieDomain: string | undefined = undefined;
+    if (APP_DOMAIN) {
+      try {
+        const hn = new URL(APP_DOMAIN).hostname;
+        if (hn !== 'localhost' && hn !== '127.0.0.1') {
+          cookieDomain = hn;
+        }
+      } catch(e){}
+    }
+    const clearOpts = {
+      path: '/',
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      maxAge: 0,
+      expires: new Date(0)
+    };
+    if (cookieDomain) {
+      reply.setCookie(`sp_${token}`, '', { ...clearOpts, domain: cookieDomain });
+      reply.clearCookie(`sp_${token}`, { path: '/', domain: cookieDomain });
+    }
+    reply.setCookie(`sp_${token}`, '', clearOpts);
+    reply.clearCookie(`sp_${token}`, { path: '/' });
+
+    if (request.method === 'GET') {
+      return reply.redirect(`/share/${token}`);
+    }
+    return reply.send({ success: true });
+  };
+
+  fastify.post('/api/shares/:token/exit', handleShareExit);
+  fastify.get('/api/shares/:token/exit', handleShareExit);
+
   async function handleShareGet(request: any, reply: any) {
     const { token } = request.params;
     let subPath = request.params['*'] ? decodeURIComponent(request.params['*']) : '';
@@ -196,6 +502,43 @@ export async function sharesRoutes(fastify: FastifyInstance) {
 
     const userAgent = (request.headers['user-agent'] || '').toLowerCase();
     const isSocialCrawler = /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|linkedinbot|slackbot|discordbot|applebot|bingbot|googlebot|pinterest/i.test(userAgent);
+
+    // Password protection check
+    if (share.password_hash && !isSharePasswordUnlocked(share, token, request)) {
+      const folderPath = share.folder_path || '';
+      const folderName = folderPath ? (folderPath.split('/').pop() || folderPath) : (share.person_id ? 'Person Gallery' : 'Shared Album');
+      if (isSocialCrawler) {
+        return reply.send({
+          share: { id: share.id, folder_path: share.folder_path, expires_at: share.expires_at },
+          files: [],
+          directories: [],
+          folderCoverId: null,
+          folderName,
+          crawlerPreview: true
+        });
+      }
+
+      const ip = getClientIp(request);
+      const lockout = await getShareLockoutStatus(token, ip);
+
+      if (lockout.isLockedOut) {
+        return reply.status(429).send({
+          passwordRequired: true,
+          folderName,
+          shareToken: token,
+          turnstileRequired: Boolean(process.env.TURNSTILE_SECRET),
+          isLockedOut: true,
+          lockoutMessage: `Too many failed attempts. Please try again in ${lockout.remainingMinutes} minute(s).`
+        });
+      }
+
+      return reply.status(401).send({
+        passwordRequired: true,
+        folderName,
+        shareToken: token,
+        turnstileRequired: Boolean(process.env.TURNSTILE_SECRET)
+      });
+    }
 
     const tsCookie = request.cookies[`ts_${token}`];
     if (process.env.TURNSTILE_SECRET && !tsCookie) {
@@ -827,8 +1170,14 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       }
     }
 
+    const shareObj = {
+      ...share,
+      has_password: Boolean(share.password_hash)
+    };
+    delete shareObj.password_hash;
+
     return reply.send({
-      share,
+      share: shareObj,
       files: filesResult.rows,
       directories,
       folderCoverId,
@@ -862,6 +1211,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     if (share.expires_at && new Date(share.expires_at) <= new Date()) {
       return reply.status(401).send({ error: 'Share has expired' });
     }
+    if (!isSharePasswordUnlocked(share, token, request)) {
+      return reply.status(401).send({ error: 'Password required' });
+    }
     if (share.show_hidden_alternates === false) {
       return reply.status(403).send({ error: 'Alternate photos are restricted on this share link' });
     }
@@ -887,6 +1239,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const share = shareRes.rows[0];
     if (share.expires_at && new Date(share.expires_at) <= new Date()) {
       return reply.status(401).send({ error: 'Share has expired' });
+    }
+    if (!isSharePasswordUnlocked(share, token, request)) {
+      return reply.status(401).send({ error: 'Password required' });
     }
 
     const photogHeader = request.headers['x-photographer-token'] as string | undefined;
@@ -918,6 +1273,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     if (share.expires_at && new Date(share.expires_at) <= new Date()) {
       return reply.status(401).send({ error: 'Share has expired' });
     }
+    if (!isSharePasswordUnlocked(share, token, request)) {
+      return reply.status(401).send({ error: 'Password required' });
+    }
 
     const photogHeader = request.headers['x-photographer-token'] as string | undefined;
     const isPhotographer = Boolean(photogHeader && photogHeader.trim().startsWith('ph_tok_'));
@@ -947,6 +1305,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const share = shareRes.rows[0];
     if (share.expires_at && new Date(share.expires_at) <= new Date()) {
       return reply.status(401).send({ error: 'Share has expired' });
+    }
+    if (!isSharePasswordUnlocked(share, token, request)) {
+      return reply.status(401).send({ error: 'Password required' });
     }
 
     if (!share.allow_favorites) {
@@ -1006,7 +1367,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const result = await query(`
       SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.allow_favorites, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
              s.is_active,
-             u.name as created_by_name, s.created_by, s.folder_path
+             u.name as created_by_name, s.created_by, s.folder_path,
+             (s.password_hash IS NOT NULL) as has_password,
+             s.label
       FROM shared_folders s
       LEFT JOIN users u ON s.created_by = u.id
       LEFT JOIN watermark_templates wt ON s.watermark_template_id = wt.id
@@ -1018,12 +1381,14 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       if (!isAdmin && row.created_by !== request.user!.id) {
         return {
           ...row,
+          has_password: Boolean(row.has_password),
           share_token: row.share_token.substring(0, 8) + '***',
           can_manage: false
         };
       }
       return {
         ...row,
+        has_password: Boolean(row.has_password),
         can_manage: true
       };
     });
@@ -1039,7 +1404,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
     const result = await query(`
       SELECT s.id, s.share_token, s.allow_download_images, s.allow_download_folder, s.allow_favorites, s.watermark_enabled, s.watermark_template_id, wt.name as watermark_template_name, s.expires_at, s.created_at,
              s.is_active,
-             u.name as created_by_name, s.created_by, s.person_id
+             u.name as created_by_name, s.created_by, s.person_id,
+             (s.password_hash IS NOT NULL) as has_password,
+             s.label
       FROM shared_folders s
       LEFT JOIN users u ON s.created_by = u.id
       LEFT JOIN watermark_templates wt ON s.watermark_template_id = wt.id
@@ -1049,9 +1416,9 @@ export async function sharesRoutes(fastify: FastifyInstance) {
 
     const shares = result.rows.map(row => {
       if (!isAdmin && row.created_by !== request.user!.id) {
-        return { ...row, share_token: row.share_token.substring(0, 8) + '***', can_manage: false };
+        return { ...row, has_password: Boolean(row.has_password), share_token: row.share_token.substring(0, 8) + '***', can_manage: false };
       }
-      return { ...row, can_manage: true };
+      return { ...row, has_password: Boolean(row.has_password), can_manage: true };
     });
 
     return reply.send({ shares });
@@ -1170,6 +1537,25 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       }
     }
 
+    const bodyObj = request.body as any;
+    if (bodyObj.label !== undefined) {
+      updates.push(`label = $${idx++}`);
+      values.push(bodyObj.label ? String(bodyObj.label).trim() : null);
+    }
+    const newCreatedAt = bodyObj.createdAt || bodyObj.created_at;
+    if (newCreatedAt !== undefined) {
+      updates.push(`created_at = $${idx++}`);
+      values.push(newCreatedAt ? new Date(newCreatedAt).toISOString() : new Date().toISOString());
+    }
+
+    if (bodyObj.removePassword === true || bodyObj.password === null) {
+      updates.push(`password_hash = NULL`);
+    } else if (typeof bodyObj.password === 'string' && bodyObj.password.trim()) {
+      const hashed = await bcrypt.hash(bodyObj.password.trim(), 10);
+      updates.push(`password_hash = $${idx++}`);
+      values.push(hashed);
+    }
+
     if (updates.length === 0) {
       return reply.send({ success: true, share });
     }
@@ -1187,7 +1573,14 @@ export async function sharesRoutes(fastify: FastifyInstance) {
       await deleteKeysByPattern(`share:dirs:${token}:*`);
     } catch (e) {}
 
-    return reply.send({ success: true, share: updateRes.rows[0] });
+    const updatedRow = updateRes.rows[0];
+    const returnShare = {
+      ...updatedRow,
+      has_password: Boolean(updatedRow.password_hash)
+    };
+    delete returnShare.password_hash;
+
+    return reply.send({ success: true, share: returnShare });
   });
 
   // Public endpoint for share modal to query available watermark templates

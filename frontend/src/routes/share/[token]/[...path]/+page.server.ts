@@ -6,7 +6,7 @@ const MEDIA_EXTENSIONS = new Set([
   'mp4', 'mov', 'avi', 'mkv', 'webm', '3gp', 'm4v'
 ]);
 
-export const load: PageServerLoad = async ({ params, fetch, url, request }) => {
+export const load: PageServerLoad = async ({ params, fetch, url, request, getClientAddress }) => {
   const { token, path } = params;
   let folderPath = path || '';
   let selectedFile: string | undefined;
@@ -36,6 +36,19 @@ export const load: PageServerLoad = async ({ params, fetch, url, request }) => {
   const cookie = request.headers.get('cookie');
   if (cookie) forwardHeaders['cookie'] = cookie;
 
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    forwardHeaders['x-forwarded-for'] = forwardedFor;
+  } else {
+    try {
+      forwardHeaders['x-forwarded-for'] = getClientAddress();
+    } catch (e) {}
+  }
+  const cfConnectingIp = request.headers.get('cf-connecting-ip');
+  if (cfConnectingIp) forwardHeaders['cf-connecting-ip'] = cfConnectingIp;
+  const xRealIp = request.headers.get('x-real-ip');
+  if (xRealIp) forwardHeaders['x-real-ip'] = xRealIp;
+
   try {
     const res = await fetch(
       `${API_BASE}/api/shares/${token}${folderPath ? '/' + encodeURIComponent(folderPath) : ''}${search}`,
@@ -46,7 +59,35 @@ export const load: PageServerLoad = async ({ params, fetch, url, request }) => {
       if (res.status === 403 && data.error === 'turnstile_required') {
         return { turnstileRequired: true, token, files: [], directories: [] };
       }
+      if ((res.status === 401 || res.status === 429) && data.passwordRequired) {
+        return {
+          passwordRequired: true,
+          folderName: data.folderName,
+          token,
+          files: [],
+          directories: [],
+          pageUrl: url.href,
+          origin: url.origin,
+          turnstileRequired: false,
+          isLockedOut: Boolean(data.isLockedOut),
+          lockoutMessage: data.lockoutMessage || (res.status === 429 ? data.error : '')
+        };
+      }
       throw new Error('Share not found');
+    }
+    if (data.passwordRequired) {
+      return {
+        passwordRequired: true,
+        folderName: data.folderName,
+        token,
+        files: [],
+        directories: [],
+        pageUrl: url.href,
+        origin: url.origin,
+        turnstileRequired: false,
+        isLockedOut: Boolean(data.isLockedOut),
+        lockoutMessage: data.lockoutMessage || ''
+      };
     }
     if (data.expired) {
       return {

@@ -1,5 +1,6 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { AnalyticsService } from '../modules/analytics/analytics.service';
 
 export const JWT_SECRET = process.env.JWT_SECRET || (
@@ -171,6 +172,10 @@ async function getMediaFolder(mediaId: string): Promise<string | null> {
   return folder_path;
 }
 
+export function getSharePasswordSig(token: string, passwordHash: string): string {
+  return crypto.createHmac('sha256', JWT_SECRET).update(`${token}:${passwordHash}`).digest('hex');
+}
+
 export async function getCachedShare(shareToken: string) {
   const now = Date.now();
   const cached = shareTokenCache.get(shareToken);
@@ -178,7 +183,7 @@ export async function getCachedShare(shareToken: string) {
     return cached.data;
   }
   const shareResult = await pool.query(
-    'SELECT folder_path, media_id, person_id, allow_download_folder FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())',
+    'SELECT folder_path, media_id, person_id, allow_download_folder, password_hash FROM shared_folders WHERE share_token = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())',
     [shareToken]
   );
   const data = shareResult.rows.length > 0 ? shareResult.rows[0] : null;
@@ -219,6 +224,14 @@ export async function verifyMediaAccess(request: FastifyRequest, reply: FastifyR
     } else {
       const shareRecord = await getCachedShare(shareToken);
       if (shareRecord) {
+        if (shareRecord.password_hash) {
+          const expectedSig = getSharePasswordSig(shareToken, shareRecord.password_hash);
+          if (request.cookies[`sp_${shareToken}`] !== expectedSig) {
+            logBlocked('blocked_access');
+            reply.status(401).send({ error: 'Password required' });
+            return false;
+          }
+        }
         const { folder_path: shareRoot, media_id: shareMediaId, person_id: sharePersonId } = shareRecord;
         if (shareMediaId && shareMediaId === mediaId) {
           return true;
@@ -274,6 +287,14 @@ export async function verifyFolderAccess(request: FastifyRequest, reply: Fastify
     } else {
       const shareRecord = await getCachedShare(shareToken);
       if (shareRecord) {
+        if (shareRecord.password_hash) {
+          const expectedSig = getSharePasswordSig(shareToken, shareRecord.password_hash);
+          if (request.cookies[`sp_${shareToken}`] !== expectedSig) {
+            logBlocked('blocked_access');
+            reply.status(401).send({ error: 'Password required' });
+            return false;
+          }
+        }
         const shareRoot = shareRecord.folder_path || '';
         
         // If we are checking for zip download, enforce allow_download_folder

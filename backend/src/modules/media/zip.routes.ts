@@ -117,6 +117,14 @@ export async function zipRoutes(fastify: FastifyInstance) {
           reply.status(403).send({ error: 'Forbidden: Invalid share token for this person' });
           return false;
         }
+        if (shareRecord.password_hash) {
+          const { getSharePasswordSig } = await import('../../utils/auth');
+          const expectedSig = getSharePasswordSig(shareToken, shareRecord.password_hash);
+          if (request.cookies[`sp_${shareToken}`] !== expectedSig) {
+            reply.status(401).send({ error: 'Password required' });
+            return false;
+          }
+        }
         if (shareRecord.allow_download_folder === false) {
           reply.status(403).send({ error: 'Forbidden: ZIP download not allowed for this share link' });
           return false;
@@ -151,6 +159,13 @@ export async function zipRoutes(fastify: FastifyInstance) {
         const shareRecord = await getCachedShare(shareToken);
         if (!shareRecord || shareRecord.person_id !== personId) {
           return reply.status(403).send({ error: 'Forbidden: Invalid share token for this person' });
+        }
+        if (shareRecord.password_hash) {
+          const { getSharePasswordSig } = await import('../../utils/auth');
+          const expectedSig = getSharePasswordSig(shareToken, shareRecord.password_hash);
+          if (request.cookies[`sp_${shareToken}`] !== expectedSig) {
+            return reply.status(401).send({ error: 'Password required' });
+          }
         }
         if (shareRecord.allow_download_folder === false) {
           return reply.status(403).send({ error: 'Forbidden: ZIP download not allowed for this share link' });

@@ -125,6 +125,7 @@ const SCHEMA_STATEMENTS = [
     is_active BOOLEAN DEFAULT true,
     expires_at TIMESTAMP WITH TIME ZONE,
     password_hash TEXT,
+    label TEXT,
     created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
   )`,
@@ -156,6 +157,7 @@ const SCHEMA_STATEMENTS = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='person_id') THEN ALTER TABLE shared_folders ADD COLUMN person_id UUID REFERENCES people(id) ON DELETE SET NULL; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='is_active') THEN ALTER TABLE shared_folders ADD COLUMN is_active BOOLEAN DEFAULT true; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_favorites') THEN ALTER TABLE shared_folders ADD COLUMN allow_favorites BOOLEAN DEFAULT false; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='label') THEN ALTER TABLE shared_folders ADD COLUMN label TEXT; END IF; END $$;`,
   `DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'shared_folders_created_by_fkey' AND confdeltype = 'c') THEN
       ALTER TABLE shared_folders DROP CONSTRAINT shared_folders_created_by_fkey;
@@ -458,6 +460,8 @@ const SCHEMA_STATEMENTS = [
     last_synced_at TIMESTAMP WITH TIME ZONE,
     error_message TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    watermark_enabled BOOLEAN DEFAULT false,
+    watermark_template_id UUID REFERENCES watermark_templates(id) ON DELETE SET NULL,
     UNIQUE (folder_path, source_type)
   )`,
   `CREATE TABLE IF NOT EXISTS gdrive_synced_files (
@@ -470,6 +474,8 @@ const SCHEMA_STATEMENTS = [
   )`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_gdrive_syncs' AND column_name='caesium_enabled') THEN ALTER TABLE folder_gdrive_syncs ADD COLUMN caesium_enabled BOOLEAN DEFAULT false; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_gdrive_syncs' AND column_name='caesium_config') THEN ALTER TABLE folder_gdrive_syncs ADD COLUMN caesium_config JSONB DEFAULT '{}'::jsonb; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_gdrive_syncs' AND column_name='watermark_enabled') THEN ALTER TABLE folder_gdrive_syncs ADD COLUMN watermark_enabled BOOLEAN DEFAULT false; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='folder_gdrive_syncs' AND column_name='watermark_template_id') THEN ALTER TABLE folder_gdrive_syncs ADD COLUMN watermark_template_id UUID REFERENCES watermark_templates(id) ON DELETE SET NULL; END IF; END $$;`,
   `CREATE INDEX IF NOT EXISTS idx_folder_gdrive_syncs_path ON folder_gdrive_syncs(folder_path, source_type)`,
 
 ];

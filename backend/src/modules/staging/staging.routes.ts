@@ -114,12 +114,16 @@ export async function stagingRoutes(fastify: FastifyInstance) {
 
     const querySessionId = (request.query as any)?.sessionId || (request.query as any)?.session_id || (request.query as any)?.folderPath;
     const headerSessionId = (request.headers['x-session-id'] || request.headers['x-sessionid']) as string | undefined;
+    const queryFavorite = (request.query as any)?.is_favorite || (request.query as any)?.isFavorite;
     const photog = (request as any).photographer;
     let sessionId = querySessionId || headerSessionId || photog?.folder_path || '';
+    let isFavorite: boolean | undefined = typeof queryFavorite === 'string'
+      ? (queryFavorite.toLowerCase() === 'true' || queryFavorite === '1')
+      : (typeof queryFavorite === 'boolean' ? queryFavorite : undefined);
 
     const parts = request.parts();
     const uploadedResults: any[] = [];
-    const pendingFiles: Array<{ filename: string; tempPath: string; mimetype: string }> = [];
+    const pendingFiles: Array<{ filename: string; tempPath: string; mimetype: string; isFavorite?: boolean }> = [];
 
     try {
       for await (const part of parts) {
@@ -139,13 +143,14 @@ export async function stagingRoutes(fastify: FastifyInstance) {
             const tmpFile = path.join(tmpDir, `${crypto.randomUUID()}_${path.basename(part.filename)}`);
             const ws = fs.createWriteStream(tmpFile);
             await pipeline(part.file, ws);
-            pendingFiles.push({ filename: part.filename, tempPath: tmpFile, mimetype: part.mimetype });
+            pendingFiles.push({ filename: part.filename, tempPath: tmpFile, mimetype: part.mimetype, isFavorite });
           } else {
             const res = await StagingService.saveUploadedFile(
               currentCleanSession,
               part.filename,
               part.file,
-              part.mimetype
+              part.mimetype,
+              isFavorite
             );
             uploadedResults.push(res);
           }
@@ -153,6 +158,8 @@ export async function stagingRoutes(fastify: FastifyInstance) {
           // Multipart text field
           if ((part.fieldname === 'sessionId' || part.fieldname === 'session_id' || part.fieldname === 'folderPath' || part.fieldname === 'folder_path') && typeof part.value === 'string' && part.value.trim().length > 0) {
             sessionId = part.value.trim();
+          } else if ((part.fieldname === 'isFavorite' || part.fieldname === 'is_favorite') && typeof part.value === 'string') {
+            isFavorite = part.value.trim().toLowerCase() === 'true' || part.value.trim() === '1';
           }
         }
       }
@@ -187,7 +194,8 @@ export async function stagingRoutes(fastify: FastifyInstance) {
               finalSessionId,
               p.filename,
               fileStream,
-              p.mimetype
+              p.mimetype,
+              p.isFavorite ?? isFavorite
             );
             uploadedResults.push(res);
           } finally {
@@ -257,7 +265,8 @@ export async function stagingRoutes(fastify: FastifyInstance) {
       allowViewModeToggle,
       showHiddenAlternates,
       allowHeroSelection,
-      defaultStagingView
+      defaultStagingView,
+      allowFavorites
     } = rawBody;
 
     if (!sessionId) {
@@ -283,7 +292,8 @@ export async function stagingRoutes(fastify: FastifyInstance) {
         allowViewModeToggle,
         showHiddenAlternates,
         allowHeroSelection,
-        defaultStagingView
+        defaultStagingView,
+        allowFavorites: allowFavorites ?? true
       });
 
       return reply.send({
@@ -452,6 +462,22 @@ export async function stagingRoutes(fastify: FastifyInstance) {
   });
 
   /**
+   * POST /api/staging/media/:id/favorite
+   * Toggles or sets favorite status for a media item in staging.
+   */
+  fastify.post<{ Params: { id: string }; Body: { is_favorite?: boolean } }>('/api/staging/media/:id/favorite', { preHandler: requireStagingAuth }, async (request, reply) => {
+    const { id } = request.params;
+    const { is_favorite } = (request.body || {}) as { is_favorite?: boolean };
+    if (!id) return reply.status(400).send({ error: 'Media ID required' });
+    try {
+      const result = await StagingService.toggleFavorite(id, is_favorite, (request as any).photographer);
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  /**
    * GET /api/staging/*
    * Returns detailed metadata and photos for a specific staging session (supports nested paths).
    */
@@ -474,7 +500,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
 
     const filesRes = await query(
       `SELECT id, folder_path, file_name, mime_type, size_bytes, blurhash, exif_json, has_1080p, has_480p, created_at, updated_at, img_width, img_height, is_staged,
-              burst_group_id, is_hero, quality_score, face_count,
+              burst_group_id, is_hero, quality_score, face_count, is_favorite,
               CASE 
                 WHEN media_files.burst_group_id IS NOT NULL THEN (
                   SELECT COUNT(*)::int 
@@ -491,7 +517,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
 
     const sharesRes = await query(
       `SELECT id, share_token, is_active, expires_at, allow_download_images, allow_download_folder, watermark_enabled,
-              allow_view_mode_toggle, show_hidden_alternates, allow_hero_selection, default_staging_view, created_at
+              allow_view_mode_toggle, show_hidden_alternates, allow_hero_selection, default_staging_view, allow_favorites, created_at
        FROM shared_folders
        WHERE (folder_path = $1 OR folder_path LIKE $2 OR folder_path = $3 OR folder_path LIKE $4) AND is_active = true
        ORDER BY created_at DESC`,
@@ -515,6 +541,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
       showHiddenAlternates: s.show_hidden_alternates,
       allowHeroSelection: s.allow_hero_selection,
       defaultStagingView: s.default_staging_view || 'curated',
+      allowFavorites: s.allow_favorites ?? true,
       createdAt: new Date(s.created_at).toISOString()
     }));
 

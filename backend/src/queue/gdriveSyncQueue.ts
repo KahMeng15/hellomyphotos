@@ -3,10 +3,12 @@ import { redis } from '../config/redis';
 import { query } from '../config/db';
 import { GDriveService, FolderGDriveSyncRecord } from '../modules/gdrive/gdrive.service';
 import { CaesiumService } from '../modules/gdrive/caesium.service';
+import { WatermarkService, WatermarkTemplate } from '../modules/media/watermark.service';
 import { STAGING_ROOT, MEDIA_ROOT } from '../utils/mediaPath';
 import { logger } from '../utils/logger';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 export interface GDriveJobData {
   type: 'upload-file' | 'sync-folder' | 'reconcile-cleanup';
@@ -49,7 +51,11 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
         }
 
         // Check if sync is paused or inactive
-        const syncCheck = await query(`SELECT is_active, sync_status, caesium_enabled, caesium_config FROM folder_gdrive_syncs WHERE id = $1`, [syncId]);
+        const syncCheck = await query(
+          `SELECT is_active, sync_status, caesium_enabled, caesium_config, watermark_enabled, watermark_template_id, folder_path, source_type 
+           FROM folder_gdrive_syncs WHERE id = $1`,
+          [syncId]
+        );
         if (syncCheck.rows.length === 0 || !syncCheck.rows[0].is_active || syncCheck.rows[0].sync_status === 'PAUSED') {
           logger.info(`[GDrive Worker] Skipping upload for ${fileName}: sync is paused or inactive.`);
           return;
@@ -65,31 +71,96 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
           return;
         }
 
-        const originalStats = fs.statSync(localFilePath);
+        const syncRow = syncCheck.rows[0];
         let fileToUpload = localFilePath;
-        let tempDirToClean: string | null = null;
-
-        // Perform Caesium compression if enabled
-        if (syncCheck.rows[0].caesium_enabled && CaesiumService.isSupported(fileName)) {
-          try {
-            const caesiumConfig = syncCheck.rows[0].caesium_config || {};
-            const compressRes = await CaesiumService.compressImage(localFilePath, caesiumConfig);
-            if (compressRes && fs.existsSync(compressRes.outputPath)) {
-              tempDirToClean = compressRes.tempDir;
-              if (compressRes.outputSize < originalStats.size) {
-                fileToUpload = compressRes.outputPath;
-                logger.info(`[GDrive Worker] Caesium compressed ${fileName}: ${(originalStats.size / 1024).toFixed(1)}KB -> ${(compressRes.outputSize / 1024).toFixed(1)}KB (${compressRes.savingsPercent} saved)`);
-              } else {
-                logger.info(`[GDrive Worker] Caesium output for ${fileName} (${compressRes.outputSize}B) was not smaller than original (${originalStats.size}B). Using original.`);
-              }
-            }
-          } catch (compressErr: any) {
-            logger.warn(`[GDrive Worker] Caesium compression failed for ${fileName}, falling back to original: ${compressErr.message}`);
-          }
-        }
+        let tempWatermarkDir: string | null = null;
+        let tempCaesiumDir: string | null = null;
 
         try {
-          // Upload to Google Drive
+          // 1. Watermark pipeline (watermark first)
+          const { enforceGlobal, globalTemplateId } = await WatermarkService.getGlobalEnforcement();
+          let effectiveTemplate: WatermarkTemplate | null = null;
+
+          if (enforceGlobal) {
+            if (globalTemplateId) {
+              effectiveTemplate = await WatermarkService.getTemplate(globalTemplateId);
+            }
+            if (!effectiveTemplate) {
+              effectiveTemplate = await WatermarkService.getDefaultTemplate();
+            }
+          } else if (syncRow.watermark_enabled || syncRow.watermark_template_id) {
+            if (syncRow.watermark_template_id) {
+              effectiveTemplate = await WatermarkService.getTemplate(syncRow.watermark_template_id);
+            }
+            if (!effectiveTemplate && syncRow.watermark_enabled) {
+              effectiveTemplate = await WatermarkService.getDefaultTemplate();
+            }
+          }
+
+          if (effectiveTemplate) {
+            let metadata: any = { file_name: fileName, folder_path: syncRow.folder_path };
+            try {
+              const metaRes = await query(
+                `SELECT id, file_name, folder_path, created_at,
+                        exif_json->>'DateTimeOriginal' as captured_at,
+                        exif_json->>'Make' as camera_make,
+                        exif_json->>'Model' as camera_model,
+                        exif_json->>'LensModel' as lens_model,
+                        exif_json->>'ISO' as iso,
+                        exif_json->>'ExposureTime' as shutter_speed,
+                        exif_json->>'FNumber' as f_number,
+                        exif_json->>'Copyright' as copyright
+                 FROM media_files 
+                 WHERE file_name = $1 AND (folder_path = $2 OR folder_path LIKE $3)
+                 LIMIT 1`,
+                [fileName, syncRow.folder_path, `${syncRow.folder_path}/%`]
+              );
+              if (metaRes.rows.length > 0) {
+                metadata = metaRes.rows[0];
+              }
+            } catch (err: any) {
+              logger.warn(`[GDrive Worker] Metadata query error for ${fileName}:`, err.message);
+            }
+
+            try {
+              const watermarkedBuffer = await WatermarkService.addWatermarkToStream(
+                localFilePath,
+                effectiveTemplate,
+                metadata,
+                'jpeg'
+              );
+
+              tempWatermarkDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gdrive-wm-'));
+              const tempWatermarkedFile = path.join(tempWatermarkDir, fileName);
+              await fs.promises.writeFile(tempWatermarkedFile, watermarkedBuffer);
+              fileToUpload = tempWatermarkedFile;
+              logger.info(`[GDrive Worker] Watermarked ${fileName} with template "${effectiveTemplate.name}"`);
+            } catch (wmErr: any) {
+              logger.error(`[GDrive Worker] Watermarking failed for ${fileName}, falling back to original:`, wmErr.message);
+            }
+          }
+
+          // 2. Compression pipeline (watermark then only compress for upload to gdrive)
+          if (syncRow.caesium_enabled && CaesiumService.isSupported(fileName)) {
+            try {
+              const preCompressStats = fs.statSync(fileToUpload);
+              const caesiumConfig = syncRow.caesium_config || {};
+              const compressRes = await CaesiumService.compressImage(fileToUpload, caesiumConfig);
+              if (compressRes && fs.existsSync(compressRes.outputPath)) {
+                tempCaesiumDir = compressRes.tempDir;
+                if (compressRes.outputSize < preCompressStats.size) {
+                  fileToUpload = compressRes.outputPath;
+                  logger.info(`[GDrive Worker] Caesium compressed ${fileName}: ${(preCompressStats.size / 1024).toFixed(1)}KB -> ${(compressRes.outputSize / 1024).toFixed(1)}KB (${compressRes.savingsPercent} saved)`);
+                } else {
+                  logger.info(`[GDrive Worker] Caesium output for ${fileName} (${compressRes.outputSize}B) was not smaller than input (${preCompressStats.size}B). Using uncompressed.`);
+                }
+              }
+            } catch (compressErr: any) {
+              logger.warn(`[GDrive Worker] Caesium compression failed for ${fileName}: ${compressErr.message}`);
+            }
+          }
+
+          // 3. Upload to Google Drive
           const { fileId } = await GDriveService.uploadJPEG({
             accountId,
             gdriveFolderId,
@@ -120,8 +191,12 @@ if (process.env.IS_WORKER === 'true' || process.env.DISABLE_WORKER !== 'true') {
 
           logger.info(`[GDrive Worker] Successfully uploaded ${fileName} to Google Drive (${fileId})`);
         } finally {
-          if (tempDirToClean) {
-            await CaesiumService.cleanupTempDir(tempDirToClean);
+          // Discard temporary watermarked and compressed files if generated
+          if (tempWatermarkDir) {
+            await fs.promises.rm(tempWatermarkDir, { recursive: true, force: true }).catch(() => {});
+          }
+          if (tempCaesiumDir) {
+            await CaesiumService.cleanupTempDir(tempCaesiumDir).catch(() => {});
           }
         }
       }

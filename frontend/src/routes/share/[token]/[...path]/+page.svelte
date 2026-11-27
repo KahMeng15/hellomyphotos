@@ -9,13 +9,13 @@ import { slide } from 'svelte/transition';
   import { toast } from '$lib/stores/toast';
   import { computeCoverObjectPosition } from '$lib/utils/cover';
   import { getSortDate, getRawDate } from '$lib/utils/date';
-  import { createShare, getActiveShares, revokeShare, submitAccessRequest, searchShareContent, type ShareData } from '$lib/api/shares';
+  import { createShare, getActiveShares, revokeShare, submitAccessRequest, searchShareContent, unlockShare, type ShareData } from '$lib/api/shares';
   import { getNearestExpiryDuration } from '$lib/utils/shareUtils';
   import { invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
   import { onMount, onDestroy } from 'svelte';
   import type { PageData } from './$types';
-  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder, AlertCircle, List, Image as ImageIcon, Film, Search, Loader2, Radio, RefreshCw, Sparkles, Layers, Heart } from '@lucide/svelte';
+  import { ChevronLeft, ArrowDownUp, LayoutGrid, Download, Share2, Settings, X, ChevronDown, Check, Copy, Trash2, Clock, Folder, AlertCircle, List, Image as ImageIcon, Film, Search, Loader2, Radio, RefreshCw, Sparkles, Layers, Heart, Lock, Eye, EyeOff, LogOut } from '@lucide/svelte';
   import { clickOutside } from '$lib/actions/clickOutside';
   import { getTurnstileSitekey } from '$lib/api/turnstile';
   import { API_BASE } from '$lib/api/media';
@@ -172,6 +172,92 @@ import { slide } from 'svelte/transition';
       }
     } finally {
       reqSubmitting = false;
+    }
+  }
+
+  // Password Unlock Gate State
+  let passwordInput = $state('');
+  let showPassword = $state(false);
+  let passwordError = $state((data as any).lockoutMessage || '');
+  let isLockedOut = $state(Boolean((data as any).isLockedOut));
+  let unlocking = $state(false);
+  let passwordTurnstileToken = $state('');
+  let passwordWidgetContainer = $state<HTMLElement | undefined>();
+  let passwordTurnstileWidgetId: string | null = null;
+
+  function renderPasswordTurnstile() {
+    if (typeof window === 'undefined') return;
+    if ((window as any).turnstile && passwordWidgetContainer && !passwordTurnstileWidgetId && sitekey) {
+      passwordTurnstileWidgetId = (window as any).turnstile.render(passwordWidgetContainer, {
+        sitekey,
+        theme: 'dark',
+        action: 'share-password',
+        callback: (token: string) => {
+          passwordTurnstileToken = token;
+          passwordError = '';
+        },
+        'expired-callback': () => {
+          passwordTurnstileToken = '';
+        },
+        'error-callback': () => {
+          passwordTurnstileToken = '';
+        }
+      });
+    }
+  }
+
+  $effect(() => {
+    if (data.passwordRequired && passwordWidgetContainer && !passwordTurnstileWidgetId && sitekey) {
+      setTimeout(renderPasswordTurnstile, 50);
+    }
+  });
+
+  async function handleUnlockShare(e?: Event) {
+    if (e) e.preventDefault();
+    if (!passwordInput.trim()) {
+      passwordError = 'Please enter the password.';
+      return;
+    }
+    if (sitekey && !passwordTurnstileToken) {
+      passwordError = 'Please complete the security check.';
+      return;
+    }
+
+    try {
+      unlocking = true;
+      passwordError = '';
+      const res = await unlockShare(data.token || '', passwordInput, passwordTurnstileToken);
+      if (res.success) {
+        await invalidateAll();
+      }
+    } catch (err: any) {
+      passwordError = err.message || 'Incorrect password. Please try again.';
+      if (err.message && err.message.toLowerCase().includes('too many failed attempts')) {
+        isLockedOut = true;
+      }
+      if (passwordTurnstileWidgetId && (window as any).turnstile) {
+        (window as any).turnstile.reset(passwordTurnstileWidgetId);
+        passwordTurnstileToken = '';
+      }
+    } finally {
+      unlocking = false;
+    }
+  }
+
+  async function handleExitShare(e?: MouseEvent) {
+    if (e) e.preventDefault();
+    const shareToken = data.token || (data.share as any)?.share_token;
+    if (shareToken) {
+      try {
+        await fetch(`${API_BASE}/api/shares/${shareToken}/exit`, {
+          method: 'POST',
+          credentials: 'include'
+        });
+      } catch (err) {
+        console.error('Failed to exit share:', err);
+      }
+      window.location.href = `/share/${shareToken}`;
+      window.location.reload();
     }
   }
 
@@ -346,8 +432,20 @@ import { slide } from 'svelte/transition';
   let displayedFiles = $derived(isSearching ? searchFiles : (data.files || []));
 
   let stagingViewMode = $state<'curated' | 'all'>((data.share as any)?.default_staging_view || 'all');
+  let hasQueryFavorites = $derived(
+    page.url.searchParams.get('favorites') === 'true' ||
+    page.url.searchParams.get('favorites') === '1' ||
+    page.url.searchParams.get('view') === 'favorites'
+  );
   let showOnlyFavorites = $state(false);
   let canFavorite = $derived(Boolean((data.share as any)?.allow_favorites));
+  let hasFavoritesInFolder = $derived((displayedFiles || []).some((f: any) => f.is_favorite));
+
+  $effect(() => {
+    if (hasQueryFavorites) {
+      showOnlyFavorites = true;
+    }
+  });
 
   let curatedFiles = $derived(
     stagingViewMode === 'curated'
@@ -356,7 +454,7 @@ import { slide } from 'svelte/transition';
   );
 
   let favoriteFilteredFiles = $derived(
-    showOnlyFavorites && canFavorite
+    showOnlyFavorites
       ? curatedFiles.filter((f: any) => f.is_favorite)
       : curatedFiles
   );
@@ -606,6 +704,7 @@ import { slide } from 'svelte/transition';
         (window as any).turnstile.execute(turnstileWidgetId);
       }
       renderRequestTurnstile();
+      renderPasswordTurnstile();
     };
   }
 
@@ -769,6 +868,9 @@ import { slide } from 'svelte/transition';
     if (requestTurnstileWidgetId && (window as any).turnstile) {
       (window as any).turnstile.remove(requestTurnstileWidgetId);
     }
+    if (passwordTurnstileWidgetId && (window as any).turnstile) {
+      (window as any).turnstile.remove(passwordTurnstileWidgetId);
+    }
     if (pollInterval) clearInterval(pollInterval);
     if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
     if (typeof document !== 'undefined') {
@@ -929,12 +1031,88 @@ import { slide } from 'svelte/transition';
     <meta name="twitter:image" content={metaImageUrl} />
   {/if}
 
-  {#if data.turnstileRequired || data.expired}
+  {#if data.turnstileRequired || data.expired || data.passwordRequired}
     <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstileLoad" async defer></script>
   {/if}
 </svelte:head>
 
-{#if data.turnstileRequired}
+{#if data.passwordRequired}
+  <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; min-height: 100vh; padding: 2rem;">
+    <div style="max-width: 520px; width: 100%; background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 32px 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); text-align: left;">
+      <h2 style="font-size: 2rem; font-weight: 600; margin-bottom: 12px; color: #fff; text-align: left;">
+        Password Protected
+      </h2>
+      <p style="color: #a1a1aa; font-size: 1rem; margin-bottom: 24px; line-height: 1.5; text-align: left;">
+        This shared album is protected by a password. Please enter the password below to access and view the photos.
+      </p>
+
+      <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 8px; padding: 16px; margin-bottom: 24px; text-align: left;">
+        <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #71717a; margin-bottom: 4px;">Folder Name</div>
+        <div style="color: #f4f4f5; font-weight: 500; font-size: 1.1rem;">{data.folderName || 'Shared Album'}</div>
+      </div>
+
+      <form onsubmit={handleUnlockShare} style="display: flex; flex-direction: column; gap: 14px; text-align: left;">
+        {#if passwordError}
+          <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 10px; color: #f87171; font-size: 0.875rem; display: flex; align-items: center; gap: 8px;">
+            <AlertCircle size={16} style="flex-shrink: 0;" />
+            <span>{passwordError}</span>
+          </div>
+        {/if}
+
+        <div>
+          <label for="sharePasswordInput" style="display: block; font-size: 0.8rem; color: #a1a1aa; margin-bottom: 6px;">
+            Password
+          </label>
+          <div style="position: relative; display: flex; align-items: center;">
+            <input
+              id="sharePasswordInput"
+              type={showPassword ? 'text' : 'password'}
+              bind:value={passwordInput}
+              placeholder="Enter album password..."
+              autofocus
+              disabled={unlocking || isLockedOut}
+              style="width: 100%; padding: 10px 42px 10px 12px; background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); border-radius: 6px; color: white; font-size: 0.95rem; font-family: inherit; outline: none;"
+            />
+            <button
+              type="button"
+              class="icon-btn"
+              style="position: absolute; right: 10px; background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 4px;"
+              onclick={() => showPassword = !showPassword}
+              title={showPassword ? "Hide password" : "Show password"}
+            >
+              {#if showPassword}
+                <EyeOff size={18} />
+              {:else}
+                <Eye size={18} />
+              {/if}
+            </button>
+          </div>
+        </div>
+
+        {#if sitekey}
+          <div style="display: flex; justify-content: center; min-height: 65px; margin: 4px 0;">
+            <div bind:this={passwordWidgetContainer}></div>
+          </div>
+        {/if}
+
+        <button
+          type="submit"
+          class="btn"
+          disabled={unlocking || isLockedOut || (sitekey ? !passwordTurnstileToken : false) || !passwordInput.trim()}
+          style="width: 100%; padding: 12px 20px; font-size: 1rem; background: var(--text-color); color: var(--bg-color); font-weight: 500; border-radius: 6px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px;"
+        >
+          {#if unlocking}
+            <Loader2 size={18} class="spin" />
+            <span>Unlocking...</span>
+          {:else}
+            <Lock size={18} />
+            <span>Unlock Gallery</span>
+          {/if}
+        </button>
+      </form>
+    </div>
+  </div>
+{:else if data.turnstileRequired}
   <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: #fff;">
     <div bind:this={widgetContainer}></div>
     {#if turnstileError}
@@ -1125,7 +1303,7 @@ import { slide } from 'svelte/transition';
           </button>
         {/if}
 
-        {#if canFavorite && displayedFiles.length > 0}
+        {#if (canFavorite || hasFavoritesInFolder || showOnlyFavorites) && displayedFiles.length > 0}
           <button 
             type="button" 
             class="icon-btn favorites-icon-btn" 
@@ -1134,7 +1312,7 @@ import { slide } from 'svelte/transition';
             title={showOnlyFavorites ? 'Favorites view: showing favorited photos only (click for all)' : 'Favorites: show favorites only'}
             aria-label="Toggle favorites only"
           >
-            <Heart size={18} fill={showOnlyFavorites ? 'currentColor' : 'none'} />
+            <Heart size={18} fill={showOnlyFavorites ? '#ef4444' : 'none'} color={showOnlyFavorites ? '#ef4444' : 'currentColor'} />
           </button>
         {/if}
 
@@ -1191,13 +1369,25 @@ import { slide } from 'svelte/transition';
           </div>
         {/if}
         
-        <div class="actions">
-          {#if !personName && data.share.allow_download_folder}
-            <button class="icon-btn" title="Download ZIP (Shift+D)" onclick={() => { tracker.recordFeature('download_folder'); startFolderZipDownload(data.share.folder_path, data.share.folder_name); }}>
-              <Download size={18} />
-            </button>
-          {/if}
-        </div>
+        {#if !personName && data.share.allow_download_folder}
+          <button class="icon-btn" title="Download ZIP (Shift+D)" onclick={() => { tracker.recordFeature('download_folder'); startFolderZipDownload(data.share.folder_path, data.share.folder_name); }}>
+            <Download size={18} />
+          </button>
+        {/if}
+
+        {#if (data.share as any)?.has_password || (data.share as any)?.password_hash}
+          <a
+            href="/api/shares/{data.token || (data.share as any)?.share_token}/exit"
+            data-sveltekit-reload
+            class="icon-btn"
+            title="Lock & Exit Album"
+            aria-label="Lock and exit album"
+            onclick={handleExitShare}
+          >
+            <LogOut size={18} />
+          </a>
+        {/if}
+
         
       </div>
       
