@@ -1512,7 +1512,7 @@
         <div style="display: flex; flex-direction: column; gap: 12px; max-height: 250px; overflow-y: auto;">
           {#each activeSharesList as share}
             <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px;">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div class="share-link-item-row">
                 <div style="flex: 1; min-width: 0;">
                   <!-- Main Title: Label (or Share Link if no label) + Status Badge -->
                   <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
@@ -1581,7 +1581,7 @@
                   </div>
                 </div>
 
-                <div style="display: flex; gap: 6px; align-items: center;">
+                <div class="share-link-actions" style="display: flex; gap: 6px; align-items: center;">
                   {#if share.can_manage !== false}
                     <button 
                       class="icon-btn" 
@@ -1812,7 +1812,7 @@
         <div style="display: flex; flex-direction: column; gap: 12px; max-height: 250px; overflow-y: auto;">
           {#each expiredSharesList as share}
             <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(239, 68, 68, 0.2); padding: 12px; border-radius: 6px;">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div class="share-link-item-row">
                 <div style="flex: 1; min-width: 0;">
                   <!-- Main Title: Label (or Share Link if no label) + Status Badge -->
                   <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
@@ -1871,7 +1871,7 @@
                   </div>
                 </div>
 
-                <div style="display: flex; gap: 6px; align-items: center;">
+                <div class="share-link-actions" style="display: flex; gap: 6px; align-items: center;">
                   {#if share.can_manage !== false}
                     <button 
                       class="icon-btn" 
@@ -3041,6 +3041,28 @@
   @media (min-width: 769px) {
     .mobile-only-back {
       display: none !important;
+    }
+  }
+
+  .share-link-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  @media (max-width: 640px) {
+    .share-link-item-row {
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .share-link-item-row .share-link-actions {
+      width: 100%;
+      justify-content: flex-start;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      gap: 10px;
     }
   }
 </style>

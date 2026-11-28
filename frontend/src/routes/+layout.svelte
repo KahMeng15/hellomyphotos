@@ -284,10 +284,7 @@
 <svelte:head>
   <title>hellomyphotos</title>
   <meta name="theme-color" content="#ffffff" />
-  {#if pwaInfo}
-    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-    {@html pwaInfo.webManifest.linkTag}
-  {/if}
+  <link rel="manifest" href="/manifest.webmanifest" />
 </svelte:head>
 
 <div class="app-layout">

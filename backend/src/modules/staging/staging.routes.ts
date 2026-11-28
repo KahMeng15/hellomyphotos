@@ -284,6 +284,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
 
     try {
       const share = await StagingService.createShare(cleanSessionId, {
+        mediaId: mediaId || null,
         allowDownloadImages,
         allowDownloadFolder,
         watermarkEnabled,
@@ -541,7 +542,7 @@ export async function stagingRoutes(fastify: FastifyInstance) {
       allowViewModeToggle: s.allow_view_mode_toggle,
       showHiddenAlternates: s.show_hidden_alternates,
       allowHeroSelection: s.allow_hero_selection,
-      defaultStagingView: s.default_staging_view || 'curated',
+      defaultStagingView: s.default_staging_view || 'all',
       allowFavorites: s.allow_favorites ?? true,
       createdAt: new Date(s.created_at).toISOString()
     }));

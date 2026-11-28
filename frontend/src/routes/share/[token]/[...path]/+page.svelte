@@ -94,10 +94,11 @@ import { slide } from 'svelte/transition';
     }
   }
 
-  let sortMode: SortMode = $state((data as any).defaultShareSortMode || 'oldest');
-  let viewMode: ViewMode = $state((data as any).defaultShareViewMode || 'small-fit');
-  let folderViewMode: FolderViewMode = $state((data as any).defaultShareFolderViewMode || 'small-grid');
-  let showFileNames = $state(false);
+  let hasSyncedPreferences = $state(false);
+  let sortMode: SortMode = $state(loadPref<SortMode>('shareSortMode', (data as any).defaultShareSortMode || 'oldest'));
+  let viewMode: ViewMode = $state(loadPref<ViewMode>('shareViewMode', (data as any).defaultShareViewMode || 'small-fit'));
+  let folderViewMode: FolderViewMode = $state(loadPref<FolderViewMode>('shareFolderViewMode', (data as any).defaultShareFolderViewMode || 'small-grid'));
+  let showFileNames = $state(loadPref<boolean>('showFileNames', false));
 
   let showZipProgressModal = $state(false);
   let zipTargetFolderPath = $state('');
@@ -271,19 +272,29 @@ import { slide } from 'svelte/transition';
   let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1024);
 
   $effect(() => {
-    savePref('shareSortMode', sortMode);
+    if (hasSyncedPreferences) {
+      savePref('shareSortMode', sortMode);
+    }
   });
   $effect(() => {
-    savePref('shareViewMode', viewMode);
+    if (hasSyncedPreferences) {
+      savePref('shareViewMode', viewMode);
+    }
   });
   $effect(() => {
-    savePref('shareFolderViewMode', folderViewMode);
+    if (hasSyncedPreferences) {
+      savePref('shareFolderViewMode', folderViewMode);
+    }
   });
   $effect(() => {
-    savePref('shareStagingViewMode', stagingViewMode);
+    if (hasSyncedPreferences) {
+      savePref('shareStagingViewMode', stagingViewMode);
+    }
   });
   $effect(() => {
-    savePref('showFileNames', showFileNames);
+    if (hasSyncedPreferences) {
+      savePref('showFileNames', showFileNames);
+    }
   });
   $effect(() => {
     const current = data.folderPath || data.share?.folder_path || '';
@@ -434,7 +445,7 @@ import { slide } from 'svelte/transition';
   let displayedDirectories = $derived(!personName ? (isSearching ? searchDirectories : (data.directories || [])) : []);
   let displayedFiles = $derived(isSearching ? searchFiles : (data.files || []));
 
-  let stagingViewMode = $state<'curated' | 'all'>((data.share as any)?.default_staging_view || 'all');
+  let stagingViewMode = $state<'curated' | 'all'>(loadPref<'curated' | 'all'>('shareStagingViewMode', (data.share as any)?.default_staging_view || 'all'));
   let hasQueryFavorites = $derived(
     page.url.searchParams.get('favorites') === 'true' ||
     page.url.searchParams.get('favorites') === '1' ||
@@ -816,11 +827,12 @@ import { slide } from 'svelte/transition';
       }
     });
 
-    sortMode = loadPref<SortMode>('shareSortMode', (data as any).defaultShareSortMode || 'newest');
+    sortMode = loadPref<SortMode>('shareSortMode', (data as any).defaultShareSortMode || 'oldest');
     viewMode = loadPref<ViewMode>('shareViewMode', (data as any).defaultShareViewMode || 'small-fit');
     folderViewMode = loadPref<FolderViewMode>('shareFolderViewMode', (data as any).defaultShareFolderViewMode || 'small-grid');
     stagingViewMode = loadPref<'curated' | 'all'>('shareStagingViewMode', (data.share as any)?.default_staging_view || 'all');
     showFileNames = loadPref<boolean>('showFileNames', false);
+    hasSyncedPreferences = true;
 
     tracker.init({
       shareToken: data.token,
@@ -2250,13 +2262,20 @@ import { slide } from 'svelte/transition';
       display: none !important;
     }
     .header-right {
+      display: flex;
       flex-direction: row;
       justify-content: space-between;
       align-items: center;
       width: 100%;
+      flex-wrap: nowrap;
     }
     .count {
       text-align: right;
+      white-space: nowrap;
+      margin-left: auto;
+      font-size: 0.8rem;
+      padding-left: 6px;
+      flex-shrink: 0;
     }
     .grid.small-square {
       grid-template-columns: repeat(3, 1fr);
@@ -2267,21 +2286,30 @@ import { slide } from 'svelte/transition';
       overflow: hidden;
     }
     .toolbar {
-      gap: 3px;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 1;
+      min-width: 0;
+      flex-wrap: nowrap;
     }
     .toolbar .icon-btn {
-      width: 30px;
-      height: 30px;
+      width: 28px;
+      height: 28px;
       border-radius: 6px;
+      flex-shrink: 0;
     }
     .toolbar .icon-btn :global(svg) {
-      width: 16px;
-      height: 16px;
+      width: 15px;
+      height: 15px;
     }
     .toolbar .dropdown-menu {
-      top: 36px;
+      top: 34px;
       right: auto;
       left: 0;
+    }
+    .staging-disclaimer-banner {
+      margin: 0 0 24px 0;
     }
   }
   .empty-state {

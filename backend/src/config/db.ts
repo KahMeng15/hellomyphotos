@@ -437,7 +437,7 @@ const SCHEMA_STATEMENTS = [
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_view_mode_toggle') THEN ALTER TABLE shared_folders ADD COLUMN allow_view_mode_toggle BOOLEAN DEFAULT true; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='show_hidden_alternates') THEN ALTER TABLE shared_folders ADD COLUMN show_hidden_alternates BOOLEAN DEFAULT true; END IF; END $$;`,
   `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='allow_hero_selection') THEN ALTER TABLE shared_folders ADD COLUMN allow_hero_selection BOOLEAN DEFAULT false; END IF; END $$;`,
-  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='default_staging_view') THEN ALTER TABLE shared_folders ADD COLUMN default_staging_view VARCHAR(20) DEFAULT 'curated'; END IF; END $$;`,
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='shared_folders' AND column_name='default_staging_view') THEN ALTER TABLE shared_folders ADD COLUMN default_staging_view VARCHAR(20) DEFAULT 'all'; END IF; END $$;`,
 
   // ---- Google Drive Integration ----
   `CREATE TABLE IF NOT EXISTS google_accounts (

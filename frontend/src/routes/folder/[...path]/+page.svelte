@@ -1662,21 +1662,7 @@ import { slide } from 'svelte/transition';
               {/each}
             </div>
           {/if}
-          <div class="folder-title-row">
-            <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
-            <span class="count mobile-count">
-              {#if isSearching && isSearchLoading}
-                <span>Searching...</span>
-              {:else if displayedDirectories.length > 0}
-                <span>{displayedDirectories.length} {displayedDirectories.length === 1 ? 'folder' : 'folders'}</span>
-                {#if displayedFiles.length > 0}
-                  <span>& {displayedFiles.length} {displayedFiles.length === 1 ? 'item' : 'items'}</span>
-                {/if}
-              {:else}
-                <span>{displayedFiles.length} {displayedFiles.length === 1 ? 'item' : 'items'}</span>
-              {/if}
-            </span>
-          </div>
+          <h2>{data.folderPath ? data.folderPath.split('/').pop() : 'Home'}</h2>
           {#if data.folderDescription}
             <p class="folder-description" style="margin-top: 12px; color: #a1a1aa; font-size: 1rem; max-width: 600px; line-height: 1.5;">{data.folderDescription}</p>
           {/if}
@@ -1815,7 +1801,7 @@ import { slide } from 'svelte/transition';
         </button>
       </div>
       
-      <span class="count desktop-count" style="display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 4px;">
+      <span class="count" style="display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 4px;">
         {#if isSearching && isSearchLoading}
           <span style="white-space: nowrap; color: #a1a1aa;">Searching...</span>
         {:else if displayedDirectories.length > 0}
@@ -2386,7 +2372,7 @@ import { slide } from 'svelte/transition';
             <div style="display: flex; flex-direction: column; gap: 12px; max-height: 280px; overflow-y: auto;">
               {#each activeSharesList as share}
                 <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px;">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div class="share-link-item-row">
                     <div style="flex: 1; min-width: 0;">
                       <!-- Main Title: Label (or Share Link if no label) + Status Badge -->
                       <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
@@ -2464,7 +2450,7 @@ import { slide } from 'svelte/transition';
                       {/if}
                     </div>
 
-                    <div style="display: flex; gap: 6px; align-items: center;">
+                    <div class="share-link-actions" style="display: flex; gap: 6px; align-items: center;">
                       {#if share.can_manage !== false}
                         <button 
                           class="icon-btn" 
@@ -2695,7 +2681,7 @@ import { slide } from 'svelte/transition';
             <div style="display: flex; flex-direction: column; gap: 12px; max-height: 280px; overflow-y: auto;">
               {#each expiredSharesList as share}
                 <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(239, 68, 68, 0.2); padding: 12px; border-radius: 6px;">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div class="share-link-item-row">
                     <div style="flex: 1; min-width: 0;">
                       <!-- Main Title: Label (or Share Link if no label) + Status Badge -->
                       <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
@@ -2754,7 +2740,7 @@ import { slide } from 'svelte/transition';
                       </div>
                     </div>
 
-                    <div style="display: flex; gap: 6px; align-items: center;">
+                    <div class="share-link-actions" style="display: flex; gap: 6px; align-items: center;">
                       {#if share.can_manage !== false}
                         <button 
                           class="icon-btn" 
@@ -3205,9 +3191,9 @@ import { slide } from 'svelte/transition';
       <!-- Sync Status & Details (Identical to Share Modal's Active Links List item style) -->
       <div style="margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--glass-border);">
         <h4 style="margin-bottom: 12px; font-weight: 500;">Sync Information</h4>
-        <div style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px;">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-            <div style="flex: 1; min-width: 0;">
+        <div class="gdrive-sync-card" style="background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); padding: 12px; border-radius: 6px;">
+          <div class="gdrive-sync-row">
+            <div class="gdrive-sync-details" style="flex: 1; min-width: 0;">
               <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                 <span style="color: #e4e4e7; font-weight: 500; font-size: 0.95rem;">{gdriveSyncInfo.sync.gdrive_folder_name}</span>
                 <span style="background: {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? '#fbbf24' : '#34d399'}; border: 1px solid {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500;">
@@ -3220,7 +3206,7 @@ import { slide } from 'svelte/transition';
               </div>
 
               <!-- Progress bar -->
-              <div style="height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin-bottom: 6px; max-width: 300px;">
+              <div style="height: 5px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; margin-bottom: 6px; max-width: 300px; width: 100%;">
                 <div style="height: 100%; width: {Math.max(gdriveSyncInfo.sync.totalLocalJpegs || 0, gdriveSyncInfo.sync.syncedFileCount || 0) > 0 ? Math.min(100, Math.round(((gdriveSyncInfo.sync.syncedFileCount || 0) / Math.max(gdriveSyncInfo.sync.totalLocalJpegs || 0, gdriveSyncInfo.sync.syncedFileCount || 0)) * 100)) : 100}%; background: {gdriveSyncInfo.sync.sync_status === 'PAUSED' ? '#eab308' : '#34d399'}; transition: width 0.3s;"></div>
               </div>
 
@@ -3232,7 +3218,7 @@ import { slide } from 'svelte/transition';
             </div>
 
             <!-- Management Icon Buttons (Same as Share list icon buttons) -->
-            <div style="display: flex; gap: 6px; align-items: center;">
+            <div class="gdrive-actions-group" style="display: flex; gap: 6px; align-items: center;">
               <button 
                 class="icon-btn" 
                 title={gdriveSyncInfo.sync.sync_status === 'PAUSED' ? "Resume Sync" : "Pause Sync"} 
@@ -4104,21 +4090,6 @@ import { slide } from 'svelte/transition';
     overflow: hidden;
   }
   
-  .folder-title-row {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .mobile-count {
-    display: none;
-  }
-
-  .desktop-count {
-    display: flex;
-  }
-
   .header-content h2 {
     display: flex;
     flex-direction: column;
@@ -4720,21 +4691,20 @@ import { slide } from 'svelte/transition';
       display: none !important;
     }
     .header-right {
+      display: flex;
       flex-direction: row;
-      justify-content: flex-end;
+      justify-content: space-between;
       align-items: center;
       width: 100%;
+      flex-wrap: nowrap;
     }
-    .desktop-count {
-      display: none !important;
-    }
-    .mobile-count {
-      display: inline-flex;
-      align-items: baseline;
-      gap: 4px;
-      font-size: 0.85rem;
-      color: #a1a1aa;
+    .count {
+      text-align: right;
       white-space: nowrap;
+      margin-left: auto;
+      font-size: 0.8rem;
+      padding-left: 6px;
+      flex-shrink: 0;
     }
     .grid.small-square {
       grid-template-columns: repeat(3, 1fr);
@@ -4745,21 +4715,30 @@ import { slide } from 'svelte/transition';
       overflow: hidden;
     }
     .toolbar {
-      gap: 3px;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex-shrink: 1;
+      min-width: 0;
+      flex-wrap: nowrap;
     }
     .toolbar .icon-btn {
-      width: 30px;
-      height: 30px;
+      width: 28px;
+      height: 28px;
       border-radius: 6px;
+      flex-shrink: 0;
     }
     .toolbar .icon-btn :global(svg) {
-      width: 16px;
-      height: 16px;
+      width: 15px;
+      height: 15px;
     }
     .toolbar .dropdown-menu {
-      top: 36px;
+      top: 34px;
       right: auto;
       left: 0;
+    }
+    .staging-disclaimer-banner {
+      margin: 0 0 24px 0;
     }
   }
   .empty-state {
@@ -4869,6 +4848,31 @@ import { slide } from 'svelte/transition';
   @media (min-width: 769px) {
     .mobile-only-back {
       display: none !important;
+    }
+  }
+
+  .share-link-item-row,
+  .gdrive-sync-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  @media (max-width: 640px) {
+    .share-link-item-row,
+    .gdrive-sync-row {
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .share-link-item-row .share-link-actions,
+    .gdrive-sync-row .gdrive-actions-group {
+      width: 100%;
+      justify-content: flex-start;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      gap: 10px;
     }
   }
 

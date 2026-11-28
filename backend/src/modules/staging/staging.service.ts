@@ -405,7 +405,7 @@ export class StagingService {
     const allowViewModeToggle = options.allowViewModeToggle ?? true;
     const showHiddenAlternates = options.showHiddenAlternates ?? true;
     const allowHeroSelection = options.allowHeroSelection ?? false;
-    const defaultStagingView = options.defaultStagingView || 'curated';
+    const defaultStagingView = options.defaultStagingView || 'all';
 
     if (existingShare.rows.length > 0 && !options.expiresAt && !options.watermarkTemplateId) {
       shareToken = existingShare.rows[0].share_token;
